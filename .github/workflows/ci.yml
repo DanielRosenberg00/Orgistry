@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    # Live infrastructure for DB + readiness validation.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orgistry
+          POSTGRES_PASSWORD: orgistry
+          POSTGRES_DB: orgistry
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orgistry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Mailpit is intentionally omitted — no CI command exercises email.
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://orgistry:orgistry@localhost:5432/orgistry
+      TEST_DATABASE_URL: postgres://orgistry:orgistry@localhost:5432/orgistry_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-jwt-secret-value-1234
+      COOKIE_SECRET: ci-cookie-secret-value-1234
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create test database
+        run: psql "$DATABASE_URL" -c 'CREATE DATABASE orgistry_test;'
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint (placeholder)
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Migration baseline (from scratch)
+        run: pnpm db:migrate
+
+      # Runs the DB migration-from-scratch test (TEST_DATABASE_URL) and the live
+      # API readiness test against PostgreSQL + Redis (DATABASE_URL/REDIS_URL).
+      - name: Integration tests (migration + live readiness)
+        run: pnpm test:integration

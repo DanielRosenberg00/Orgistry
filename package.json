@@ -1,0 +1,36 @@
+{
+  "name": "orgistry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.29.3",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./apps/*\" run dev",
+    "dev:api": "pnpm --filter @orgistry/api run dev",
+    "dev:web": "pnpm --filter @orgistry/web-demo run dev",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "vitest run",
+    "test:integration": "pnpm -r run test:integration",
+    "lint": "node tooling/lint-placeholder.mjs",
+    "validate": "pnpm run typecheck && pnpm run lint && pnpm run test",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
+    "db:generate": "pnpm --filter @orgistry/db run generate",
+    "db:migrate": "pnpm --filter @orgistry/db run migrate",
+    "db:reset:test": "pnpm --filter @orgistry/db run reset:test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

@@ -1,0 +1,58 @@
+# Local development infrastructure for Orgistry.
+#
+# Services:
+#   postgres  - durable local store          (host port 5432)
+#   redis     - future rate limiting + readiness probe (host port 6379)
+#   mailpit   - future local email flows; SMTP 1025, web UI http://localhost:8025
+#
+# No worker/queue runtime, object storage, or production deployment concerns
+# are defined here — those are out of Sprint 1 scope. Credentials below are
+# local-only development defaults and are NOT secrets.
+name: orgistry
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-orgistry}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orgistry}
+      POSTGRES_DB: ${POSTGRES_DB:-orgistry}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Creates the `orgistry_test` database on first volume init.
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-orgistry}']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - '1025:1025' # SMTP
+      - '8025:8025' # Web UI
+    volumes:
+      - mailpit_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+  mailpit_data:

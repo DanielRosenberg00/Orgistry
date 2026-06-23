@@ -56,4 +56,54 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       runMigrations(connectionString as string),
     ).resolves.not.toThrow();
   });
+
+  it('creates every auth table from scratch', async () => {
+    const tables = [
+      'users',
+      'sessions',
+      'refresh_tokens',
+      'email_verification_tokens',
+      'security_events',
+    ];
+    for (const table of tables) {
+      const rows = await sql<{ exists: boolean }[]>`
+        SELECT to_regclass(${`public.${table}`}) IS NOT NULL AS exists
+      `;
+      expect(rows[0]?.exists, `${table} should exist`).toBe(true);
+    }
+  });
+
+  it('creates the lookup/cleanup indexes the auth model relies on', async () => {
+    const indexes = [
+      'uq_users_normalized_email',
+      'uq_refresh_tokens_token_hash',
+      'uq_email_verification_tokens_token_hash',
+      'ix_sessions_user_id',
+      'ix_sessions_expires_at',
+      'ix_security_events_event_type',
+      'ix_security_events_created_at',
+    ];
+    const rows = await sql<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes WHERE schemaname = 'public'
+    `;
+    const present = new Set(rows.map((row) => row.indexname));
+    for (const index of indexes) {
+      expect(present.has(index), `${index} should exist`).toBe(true);
+    }
+  });
+
+  it('enforces normalized-email uniqueness', async () => {
+    await sql`DELETE FROM users`;
+    await sql`
+      INSERT INTO users (id, email, normalized_email, password_hash, display_name)
+      VALUES ('user_dup1', 'A@x.com', 'a@x.com', 'hash', 'A')
+    `;
+    await expect(
+      sql`
+        INSERT INTO users (id, email, normalized_email, password_hash, display_name)
+        VALUES ('user_dup2', 'A2@x.com', 'a@x.com', 'hash', 'A2')
+      `,
+    ).rejects.toThrow();
+    await sql`DELETE FROM users`;
+  });
 });

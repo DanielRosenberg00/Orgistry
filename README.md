@@ -1,32 +1,51 @@
 # Orgistry
 
-A TypeScript, local-first monorepo foundation. **Sprint 1 establishes the
-technical foundation only** — there is no product or domain capability yet.
+A TypeScript, local-first monorepo foundation. Sprint 1 established the technical
+foundation; **Sprint 2 adds the authentication foundation** (register/login/
+current-user, Argon2id password handling, JWT access tokens, durable security
+events). No other product domain exists yet.
 
-## What this is at Sprint 1
+## What this is
 
 A runnable, fully typed pnpm monorepo with:
 
 - **`packages/config`** — single typed, validated source of runtime config (Zod).
 - **`packages/contracts`** — frozen API conventions: success/error envelopes,
-  error-code catalog, cursor-pagination baseline.
+  error-code catalog, cursor-pagination baseline, and auth request/response DTOs.
 - **`packages/shared`** — low-level primitives: prefixed ID generator, request
   ID helpers, clock, opaque cursor encoding.
+- **`packages/auth-core`** — reusable security primitives: Argon2id password
+  hashing, JWT access-token sign/verify, opaque-token generate/hash, email
+  normalization, redaction. No HTTP or database concerns.
 - **`packages/db`** — Drizzle ORM setup, connection factory, schema registry,
-  migration baseline, and a guarded test-database reset.
-- **`apps/api`** — Fastify shell: health + readiness endpoints, request-id
-  propagation, structured logging, central error handling, consistent envelopes.
+  migration baseline, a guarded test-database reset, and the auth tables.
+- **`apps/api`** — Fastify app: health + readiness, request-id propagation,
+  structured logging, central error handling, consistent envelopes, and the
+  `/v1/auth/*` module (register, login, current-user).
 - **`apps/web-demo`** — React/Vite shell with a static foundation status page.
 - **`infra/`** — Docker Compose for PostgreSQL, Redis, and Mailpit.
 
+## Auth at Sprint 2
+
+`POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/auth/me`. Passwords are
+hashed with Argon2id and stored hash-only; access tokens are short-lived JWTs;
+failed logins are generic (no account-existence disclosure); auth activity is
+written to durable, sanitized security events. See
+[`docs/auth-foundation.md`](docs/auth-foundation.md).
+
 ## What is explicitly NOT implemented
 
-No authentication, sessions, tokens, organizations, memberships, roles,
-permissions, entitlements, quotas, projects, API keys, invitations, audit/
-security events, workers/queues, object storage, or any product UI. The web
-demo holds **no** fake auth/org/permission/project/plan state. See
-[`docs/sprint-1-foundation.md`](docs/sprint-1-foundation.md) for the full scope
-boundary and rationale.
+Beyond the auth foundation above, there is no refresh-token rotation, refresh
+cookie, logout, session listing/revocation, or email verification; and no
+organizations, memberships, roles, permissions, entitlements, quotas, projects,
+API keys, invitations, organization audit logs, workers/queues, object storage,
+or product/auth UI. Registration does **not** create an organization, personal
+workspace, membership, role, or permission. Auth rate limiting is **deferred** to
+the session-lifecycle sprint. The web demo holds **no** fake auth/org/permission
+state. The auth foundation is implemented and validated, but the system is **not
+production-certified**. See [`docs/auth-foundation.md`](docs/auth-foundation.md)
+(§E) and [`docs/sprint-1-foundation.md`](docs/sprint-1-foundation.md) for the
+full scope boundary.
 
 ## Prerequisites
 
@@ -121,6 +140,13 @@ creates the `orgistry_test` database (`infra/postgres-init/`), so
 
 ## Documentation
 
+- [`docs/sprint-2-artifact-package.md`](docs/sprint-2-artifact-package.md) —
+  **official Sprint 2 completion artifact**: summary, validation evidence,
+  security review, invariants, scope control, confidence, and next-sprint
+  handoff.
+- [`docs/auth-foundation.md`](docs/auth-foundation.md) — **Sprint 2 auth
+  reference**: design, contracts/invariants, integration notes, limitations,
+  changelog.
 - [`docs/sprint-1-artifact-package.md`](docs/sprint-1-artifact-package.md) —
   **official Sprint 1 completion artifact**: capabilities, contracts, validation
   evidence, scope control, and Sprint 2 readiness.

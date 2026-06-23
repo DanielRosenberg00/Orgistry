@@ -67,6 +67,22 @@ export const envSchema = z.object({
   // Default is the raw env string 'false'; the transform yields the boolean.
   COOKIE_SECURE: booleanFromEnv.default('false'),
 
+  // Access token lifetime. Short-lived by design (Sprint 2 issues access
+  // tokens; refresh-token rotation that makes short TTLs ergonomic arrives in
+  // a later sprint). Default: 15 minutes.
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(900),
+  // Session lifetime. A session outlives any single access token and is the
+  // anchor the future refresh-token family hangs off. Default: 30 days.
+  AUTH_SESSION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(2_592_000),
+
   // Rate-limit namespace (enforcement is implemented in a later sprint).
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),

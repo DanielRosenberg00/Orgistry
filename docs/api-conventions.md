@@ -40,6 +40,7 @@ There is exactly one error path — the central handler in
 | Thrown value | Result |
 | --- | --- |
 | `AppError(code, status, message, details?)` | That code/status/message |
+| `ZodError` (domain route body validation) | `400 VALIDATION_ERROR` + issue details |
 | Fastify validation error | `400 VALIDATION_ERROR` + field details |
 | Anything else | `500 INTERNAL_ERROR`, generic message, real error logged only |
 | Unknown route | `404 NOT_FOUND` |
@@ -53,6 +54,24 @@ Baseline catalog (`ERROR_CODES`): `VALIDATION_ERROR`, `BAD_REQUEST`,
 `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`,
 `SERVICE_UNAVAILABLE`, `INTERNAL_ERROR`. These are generic; domain codes are
 added deliberately in later sprints.
+
+Auth codes (Sprint 2): `INVALID_CREDENTIALS` (generic failed login — same for
+unknown email and wrong password) and `EMAIL_ALREADY_REGISTERED` (duplicate
+normalized email on register).
+
+## Auth endpoints
+
+See [`auth-foundation.md`](auth-foundation.md) for the full design.
+
+- `POST /v1/auth/register` — `201 { user, tokens }`. Validates body, enforces a
+  12-char minimum password, hashes with Argon2id, creates a user + session.
+- `POST /v1/auth/login` — `200 { user, tokens }`, or a generic
+  `401 INVALID_CREDENTIALS` that never reveals whether the email exists.
+- `GET /v1/auth/me` — `200 { user }`; requires `Authorization: Bearer <token>`.
+
+`tokens` is `{ accessToken, tokenType: 'Bearer', expiresIn }`. `user` is the
+public `AuthUser` (`id`, `email`, `displayName`, `emailVerified`, `createdAt`) —
+never a database row, password hash, or persistence-only field.
 
 ## Request IDs
 

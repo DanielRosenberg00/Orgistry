@@ -1,10 +1,10 @@
 /**
  * Baseline error-code catalog.
  *
- * These are transport/application-level codes shared by every endpoint. They
- * are intentionally generic — no domain-specific codes (auth, billing, orgs,
- * etc.) belong here. Domain sprints extend this catalog deliberately and that
- * extension is a reviewed contract change.
+ * These are transport/application-level codes shared by every endpoint. The
+ * baseline block is intentionally generic; domain sprints extend this catalog
+ * deliberately and that extension is a reviewed contract change. Sprint 2 adds
+ * the `auth` block below.
  *
  * Codes are stable strings: clients may branch on them, so values must not
  * change without a deliberate review.
@@ -28,6 +28,16 @@ export const ERROR_CODES = {
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
   /** Catch-all for unexpected, unclassified failures. */
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+
+  // ----- Auth (Sprint 2) -----
+  /**
+   * Login failed. Deliberately generic: returned identically whether the email
+   * is unknown or the password is wrong, so account existence is never
+   * disclosed.
+   */
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  /** Registration rejected because the normalized email already exists. */
+  EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

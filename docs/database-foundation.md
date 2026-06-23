@@ -18,6 +18,8 @@ packages/db/
     schema/
       index.ts                   schema registry (barrel)
       meta.ts                    app_meta — infrastructure metadata (placeholder)
+      auth.ts                    users, sessions, refresh_tokens,
+                                 email_verification_tokens, security_events
     migrate.integration.test.ts  migration-from-scratch test (needs PostgreSQL)
   scripts/
     migrate.ts                   pnpm db:migrate
@@ -43,9 +45,26 @@ Drizzle reads every table re-exported from `src/schema/index.ts`. Add a new
 schema file and re-export it here so `db:generate` and the runtime client always
 agree.
 
-`app_meta` is the only table and is a **placeholder**: a generic key/value table
-that gives the migration pipeline something concrete to create and validate. It
-carries no domain meaning. Domain tables arrive in later sprints.
+`app_meta` is a **placeholder**: a generic key/value table that gives the
+migration pipeline something concrete to create and validate. It carries no
+domain meaning.
+
+`auth.ts` (Sprint 2) adds the first domain tables. All follow the platform
+model: prefixed opaque public IDs (`$defaultFn` via `@orgistry/shared`),
+`snake_case` columns, `timestamptz` audit columns, hash-only secret storage, and
+explicit lifecycle state.
+
+| Table | Purpose | Notable invariants |
+| --- | --- | --- |
+| `users` | Accounts | unique index on `normalized_email`; `password_hash` only |
+| `sessions` | Login sessions (access-token anchor) | indexed by `user_id`, `expires_at` |
+| `refresh_tokens` | Rotation scaffolding (no behavior yet) | unique `token_hash`; `family_id` lineage |
+| `email_verification_tokens` | Verification scaffolding (no behavior yet) | unique `token_hash` |
+| `security_events` | Durable auth/security records | sanitized `metadata`; indexed by `event_type`, `created_at` |
+
+`refresh_tokens` and `email_verification_tokens` are schema-complete scaffolding
+— the columns/indexes a later sprint needs exist now, but no endpoint exercises
+them. See [`auth-foundation.md`](auth-foundation.md).
 
 ## Migrations
 
@@ -81,11 +100,17 @@ Two integration suites (suffix `*.integration.test.ts`, excluded from
 `pnpm test`, run by `pnpm test:integration` / CI):
 
 - `packages/db/src/migrate.integration.test.ts` — drops the schema, runs the
-  baseline, asserts `app_meta` exists, and re-runs to confirm idempotency. Needs
-  PostgreSQL via `TEST_DATABASE_URL` or `DATABASE_URL`.
+  baseline, asserts `app_meta` and every auth table exist, checks the auth
+  lookup/uniqueness/cleanup indexes, verifies the normalized-email uniqueness
+  constraint, and re-runs to confirm idempotency. Needs PostgreSQL via
+  `TEST_DATABASE_URL` or `DATABASE_URL`.
 - `apps/api/src/routes/readiness.integration.test.ts` — boots the app against
   live PostgreSQL + Redis probes and asserts `/ready` returns `200`. Needs
   `DATABASE_URL` and `REDIS_URL`.
+- `apps/api/src/modules/auth/auth.integration.test.ts` — registers/logs in/
+  resolves the current user against live PostgreSQL and asserts hash-only
+  persistence, durable sanitized security events, and DB-level email uniqueness.
+  Needs `TEST_DATABASE_URL` or `DATABASE_URL`.
 
 Both load the root `.env` and **skip with a printed warning** (never a silent
 pass) when their required services are not configured.

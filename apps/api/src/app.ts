@@ -8,12 +8,19 @@ import Fastify, {
 import { registerErrorHandler } from './plugins/error-handler';
 import { registerHealthRoute } from './routes/health';
 import { registerReadinessRoute } from './routes/readiness';
+import { registerAuthRoutes } from './modules/auth/auth.routes';
+import type { AuthService } from './modules/auth/auth.service';
 import type { ReadinessProbe } from './lib/readiness';
 
 export interface BuildAppOptions {
   config: Config;
   /** Dependency probes backing the readiness endpoint (e.g. PostgreSQL, Redis). */
   readinessProbes: ReadinessProbe[];
+  /**
+   * Auth service backing the `/v1/auth/*` routes. Optional so infrastructure-
+   * only contexts (and some unit tests) can build the app without a database.
+   */
+  authService?: AuthService;
   /** Logger override. Defaults to a JSON logger at the configured level. */
   logger?: FastifyServerOptions['logger'];
 }
@@ -52,6 +59,9 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerErrorHandler(app);
   registerHealthRoute(app);
   registerReadinessRoute(app, readinessProbes);
+  if (options.authService) {
+    registerAuthRoutes(app, options.authService);
+  }
 
   return app;
 }

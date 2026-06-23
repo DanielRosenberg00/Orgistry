@@ -1,5 +1,6 @@
 import { ERROR_CODES, makeError } from '@orgistry/contracts';
 import type { FastifyError, FastifyInstance } from 'fastify';
+import { ZodError } from 'zod';
 import { AppError } from '../lib/errors';
 
 /**
@@ -7,6 +8,8 @@ import { AppError } from '../lib/errors';
  *
  * Single path for every error leaving the API:
  *  - `AppError`            -> its declared code/status/message.
+ *  - `ZodError`            -> 400 VALIDATION_ERROR with field issues (domain
+ *                             routes validate request bodies with Zod).
  *  - Fastify validation    -> 400 VALIDATION_ERROR with field details.
  *  - anything else         -> 500 INTERNAL_ERROR, generic message, full error
  *                             logged server-side only.
@@ -29,6 +32,19 @@ export function registerErrorHandler(app: FastifyInstance): void {
             details: error.details,
           }),
         );
+      return;
+    }
+
+    // Zod validation from domain route handlers (e.g. auth request bodies).
+    if (error instanceof ZodError) {
+      reply.code(400).send(
+        makeError({
+          code: ERROR_CODES.VALIDATION_ERROR,
+          message: 'Request validation failed.',
+          requestId,
+          details: error.issues,
+        }),
+      );
       return;
     }
 

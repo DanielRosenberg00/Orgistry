@@ -24,6 +24,7 @@ export const ID_PREFIXES = {
   key: 'key',
   sess: 'sess',
   rtok: 'rtok',
+  evtok: 'evtok',
   evt: 'evt',
   sevt: 'sevt',
 } as const;

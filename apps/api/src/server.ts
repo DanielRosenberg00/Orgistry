@@ -3,6 +3,8 @@ import { createDbClient, pingDatabase } from '@orgistry/db';
 import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import Redis from 'ioredis';
 import { buildApp } from './app';
+import { createDbAuthRepository } from './modules/auth/auth.repo';
+import { createAuthService } from './modules/auth/auth.service';
 import type { ReadinessProbe } from './lib/readiness';
 
 /**
@@ -37,7 +39,14 @@ async function main(): Promise<void> {
     },
   ];
 
-  const app = buildApp({ config, readinessProbes });
+  const authService = createAuthService({
+    repo: createDbAuthRepository(dbClient.db),
+    jwtSecret: config.auth.jwtSecret,
+    accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+    sessionTtlSeconds: config.auth.sessionTtlSeconds,
+  });
+
+  const app = buildApp({ config, readinessProbes, authService });
 
   // Prevent unhandled 'error' events when Redis is unreachable; readiness is
   // the source of truth for connectivity, so log at debug and move on.

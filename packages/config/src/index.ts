@@ -38,6 +38,8 @@ export interface Config {
     readonly jwtSecret: string;
     readonly cookieSecret: string;
     readonly cookieSecure: boolean;
+    readonly accessTokenTtlSeconds: number;
+    readonly sessionTtlSeconds: number;
   };
   readonly rateLimit: {
     readonly windowSeconds: number;
@@ -83,6 +85,8 @@ function toConfig(env: Env): Config {
       jwtSecret: env.JWT_SECRET,
       cookieSecret: env.COOKIE_SECRET,
       cookieSecure: env.COOKIE_SECURE,
+      accessTokenTtlSeconds: env.AUTH_ACCESS_TOKEN_TTL_SECONDS,
+      sessionTtlSeconds: env.AUTH_SESSION_TTL_SECONDS,
     },
     rateLimit: {
       windowSeconds: env.RATE_LIMIT_WINDOW_SECONDS,

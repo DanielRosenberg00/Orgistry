@@ -21,6 +21,9 @@ export const ID_PREFIXES = {
   perm: 'perm',
   inv: 'inv',
   prj: 'prj',
+  // Organization plan state (Sprint 7). The plan catalog rows use stable
+  // human-readable ids (`plan_free`, …) and are never generated via createId.
+  oplan: 'oplan',
   key: 'key',
   sess: 'sess',
   rtok: 'rtok',

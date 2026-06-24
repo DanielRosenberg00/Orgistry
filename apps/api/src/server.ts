@@ -13,6 +13,9 @@ import { createDbRbacRepository } from './modules/rbac/rbac.repo';
 import { createRbacService } from './modules/rbac/rbac.service';
 import { createDbProjectRepository } from './modules/projects/project.repo';
 import { createProjectService } from './modules/projects/project.service';
+import { createDbEntitlementRepository } from './modules/entitlements/plan.repo';
+import { createEntitlementService } from './modules/entitlements/entitlement.service';
+import { createPlanService } from './modules/entitlements/plan.service';
 import { createRedisRateLimiter } from './lib/rate-limit';
 import type { ReadinessProbe } from './lib/readiness';
 
@@ -72,12 +75,24 @@ async function main(): Promise<void> {
     repo: organizationRepo,
     rbacService,
   });
+  // Organization-level entitlement/quota/plan capability service. One
+  // entitlement repository backs both the plan routes and project-create quota
+  // enforcement (it reads plan state and counts active resources).
+  const entitlementRepo = createDbEntitlementRepository(dbClient.db);
+  const entitlementService = createEntitlementService({ repo: entitlementRepo });
+  const planService = createPlanService({
+    accessControl: organizationRepo,
+    entitlements: entitlementService,
+  });
+
   // The organization repository satisfies the access-control surface
   // (requireMembership/requirePermission); a dedicated project repository owns
-  // tenant-scoped project persistence.
+  // tenant-scoped project persistence; the entitlement service enforces the
+  // max_projects quota after the permission check.
   const projectService = createProjectService({
     accessControl: organizationRepo,
     projects: createDbProjectRepository(dbClient.db),
+    entitlements: entitlementService,
   });
 
   const app = buildApp({
@@ -89,6 +104,7 @@ async function main(): Promise<void> {
     organizationRbacService,
     rbacService,
     projectService,
+    planService,
   });
 
   // Prevent unhandled 'error' events when Redis is unreachable; readiness is

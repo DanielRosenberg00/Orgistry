@@ -1,15 +1,20 @@
 import {
   type MembershipRow,
+  type OrganizationPlanRow,
   type OrganizationRow,
   type PermissionRow,
+  type PlanRow,
   type ProjectRow,
   type RolePermissionRow,
   type RoleRow,
   type UserRow,
+  DEFAULT_PLAN_KEY,
   PERMISSION_SEED,
+  PLAN_SEED,
   ROLE_PERMISSION_SEED,
   ROLE_SEED,
 } from '@orgistry/db';
+import { createId } from '@orgistry/shared';
 
 /**
  * Shared in-memory organization persistence for unit/route tests.
@@ -46,6 +51,13 @@ export interface InMemoryOrgStore {
   users: UserRow[];
   /** Organization-scoped projects (Sprint 6), written by the in-memory project repo. */
   projects: ProjectRow[];
+  /** Fixed internal demo plan catalog (Sprint 7), pre-seeded from PLAN_SEED. */
+  plans: PlanRow[];
+  /**
+   * Per-organization current-plan state (Sprint 7). Written at org provisioning
+   * (registration / team creation) and updated by a demo plan change.
+   */
+  organizationPlans: OrganizationPlanRow[];
   /** Member-management & project action events recorded by the in-memory repos. */
   securityEvents: RecordedSecurityEvent[];
 }
@@ -76,6 +88,20 @@ export function createInMemoryOrgStore(): InMemoryOrgStore {
       createdAt: now,
     }),
   );
+  const plans: PlanRow[] = PLAN_SEED.map((seed) => ({
+    id: seed.id,
+    key: seed.key,
+    name: seed.name,
+    description: seed.description,
+    maxMembers: seed.maxMembers,
+    maxProjects: seed.maxProjects,
+    apiKeysAccess: seed.apiKeysAccess,
+    maxApiKeys: seed.maxApiKeys,
+    auditLogAccess: seed.auditLogAccess,
+    auditRetentionDays: seed.auditRetentionDays,
+    createdAt: now,
+    updatedAt: now,
+  }));
   return {
     organizations: [],
     memberships: [],
@@ -84,6 +110,34 @@ export function createInMemoryOrgStore(): InMemoryOrgStore {
     rolePermissions,
     users: [],
     projects: [],
+    plans,
+    organizationPlans: [],
     securityEvents: [],
   };
+}
+
+/**
+ * Provision default plan state for a newly created organization — the in-memory
+ * mirror of the database provisioning seam
+ * (`insertOrganizationWithOwnerMembership`). Both registration and team-org
+ * creation call this so every organization receives the default Free plan,
+ * exactly as production does.
+ */
+export function provisionDefaultOrganizationPlan(
+  store: InMemoryOrgStore,
+  organizationId: string,
+  createdByUserId: string,
+): OrganizationPlanRow {
+  const now = new Date();
+  const planState: OrganizationPlanRow = {
+    id: createId('oplan'),
+    organizationId,
+    planKey: DEFAULT_PLAN_KEY,
+    assignedAt: now,
+    changedByUserId: createdByUserId,
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.organizationPlans.push(planState);
+  return planState;
 }

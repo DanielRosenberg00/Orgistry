@@ -20,6 +20,8 @@ import { registerRbacRoutes } from './modules/rbac/rbac.routes';
 import type { RbacService } from './modules/rbac/rbac.service';
 import { registerProjectRoutes } from './modules/projects/project.routes';
 import type { ProjectService } from './modules/projects/project.service';
+import { registerPlanRoutes } from './modules/entitlements/plan.routes';
+import type { PlanService } from './modules/entitlements/plan.service';
 import type { ReadinessProbe } from './lib/readiness';
 
 export interface BuildAppOptions {
@@ -61,6 +63,13 @@ export interface BuildAppOptions {
    * Bearer-authenticated through it); registered only when both are provided.
    */
   projectService?: ProjectService;
+  /**
+   * Plan & entitlements service backing the organization-scoped plan routes
+   * (`/v1/organizations/:id/plan`, `…/entitlements`, `…/plan/demo`). Requires
+   * `authService` (the routes are Bearer-authenticated through it); registered
+   * only when both are provided.
+   */
+  planService?: PlanService;
   /** Logger override. Defaults to a JSON logger at the configured level. */
   logger?: FastifyServerOptions['logger'];
 }
@@ -143,6 +152,14 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     if (options.projectService) {
       registerProjectRoutes(app, {
         service: options.projectService,
+        authenticator: options.authService,
+      });
+    }
+
+    // Organization-scoped, permission-enforced plan & entitlements routes.
+    if (options.planService) {
+      registerPlanRoutes(app, {
+        service: options.planService,
         authenticator: options.authService,
       });
     }

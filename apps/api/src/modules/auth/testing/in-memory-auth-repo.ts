@@ -9,6 +9,7 @@ import {
 import { createId } from '@orgistry/shared';
 import {
   createInMemoryOrgStore,
+  provisionDefaultOrganizationPlan,
   type InMemoryOrgStore,
 } from '../../organization/testing/in-memory-org-store';
 import { emailAlreadyRegisteredError } from '../auth.errors';
@@ -211,6 +212,8 @@ export function createInMemoryAuthRepository(options?: {
       users.push(user);
       orgStore.organizations.push(organization);
       orgStore.memberships.push(membership);
+      // Default plan state, exactly as the database provisioning seam writes it.
+      provisionDefaultOrganizationPlan(orgStore, organization.id, user.id);
       sessions.push(session);
       refreshTokens.push(refreshToken);
 

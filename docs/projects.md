@@ -208,12 +208,18 @@ migration integration test asserts both index *definitions* (columns + the parti
 predicate), so a future refactor cannot silently drop tenant-lookup support by
 renaming or recolumning an index.
 
-**Why quotas are excluded from this sprint.** Quotas/entitlements/plan enforcement
-are a separate concern that attaches *on top of* the permission check (a future
-`requireEntitlement`/quota guard would run after `requirePermission` in
-`createProject`). Adding them now would conflate "may this actor act?" (Sprint 6)
-with "is this tenant allowed more of this resource?" (a later sprint). The seam is
-intentionally left untouched — see [§D](#d-integration-notes).
+**Why quotas were excluded from Sprint 6 (and added in Sprint 7).** Quotas /
+entitlements / plan enforcement are a separate concern that attaches *on top of*
+the permission check. Sprint 6 left the seam untouched to avoid conflating "may
+this actor act?" with "is this tenant allowed more of this resource?". **Sprint 7
+fills exactly that seam**: `createProject` now runs
+`EntitlementService.requireProjectCreationQuota(organizationId)` **after**
+`requirePermission(projects.create)` and **before** the write, enforcing the plan's
+`max_projects` ceiling (`QUOTA_EXCEEDED` on overflow — no project, no
+`project.created` event). The permission check is unchanged; the quota check is a
+distinct, plan-derived guard. See
+[`entitlements-plans-quotas.md`](entitlements-plans-quotas.md) and
+[§D](#d-integration-notes).
 
 ---
 

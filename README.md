@@ -9,12 +9,16 @@ listing/revocation, CSRF enforcement, Redis-backed auth rate limiting);
 Sprint 4 added the organization foundation — the `User → Organization →
 Membership` tenant layer, an auto-provisioned personal workspace at registration,
 and authenticated team-organization create/list/read; Sprint 5 added
-permission-first RBAC and member management. **Sprint 6 adds the Projects vertical
-slice** — the first organization-scoped business resource, completing the chain
+permission-first RBAC and member management; Sprint 6 added the Projects vertical
+slice — the first organization-scoped business resource, completing the chain
 `User → Organization → Membership → Role → Permission → Organization-Scoped
-Resource`. Projects are intentionally small: a backend-only proof of tenant-scoped
-resource access, permission-first authorization, cursor pagination, soft delete,
-and safe cross-tenant failure.
+Resource`. **Sprint 7 adds entitlements, plans & quotas** — fixed internal demo
+plans (Free/Pro/Business), per-organization plan state, an entitlement resolver,
+reusable quota primitives, plan/entitlements read APIs, a demo plan-change API,
+and `max_projects` quota enforcement on project create. It extends the chain to
+`… → Permission → Entitlement → Quota → Organization-Scoped Resource`, keeping
+**permission** (what the user may do), **entitlement** (what the plan allows), and
+**quota** (how much may be used) strictly separate. There is no billing.
 
 ## What this is
 
@@ -108,6 +112,27 @@ event seam (no read API). Projects are intentionally small — the canonical
 template for future organization-scoped resources. See
 [`docs/projects.md`](docs/projects.md).
 
+Entitlements, plans & quotas (Sprint 7):
+
+`GET /v1/organizations/:organizationId/plan` (`plan.read`),
+`GET /v1/organizations/:organizationId/entitlements` (`plan.read`),
+`PATCH /v1/organizations/:organizationId/plan/demo` (`plan.change_demo`).
+
+Three fixed internal **demo** plans (Free/Pro/Business) carry the entitlement and
+quota values — `max_members`, `max_projects`, `max_api_keys`, `api_keys_access`,
+`audit_log_access`, `audit_retention_days`. Every organization gets one
+`organization_plans` row (default **Free**) at provisioning; the catalog is
+code-defined and the only way to change a plan is the demo endpoint (no billing).
+An organization-level **entitlement resolver** maps plan → values (fail-safe if
+plan state is missing, independent of user role), and reusable **quota** helpers
+(`requireQuota` / `requireEntitlement`) stay separate from `requireMembership` /
+`requirePermission`. Project create enforces `max_projects` **after** the
+permission check: a Viewer is still blocked by permission, an authorized user is
+blocked by `QUOTA_EXCEEDED` at the ceiling (no project, no `project.created`), and
+upgrading the plan re-allows creation. `plan.changed_demo` is recorded on the
+internal event seam. See
+[`docs/entitlements-plans-quotas.md`](docs/entitlements-plans-quotas.md).
+
 The four fixed roles (Owner/Admin/Member/Viewer) map to a fixed, code-defined
 permission catalog seeded idempotently into the database. **Permissions are the
 authorization primitive**: organization-scoped routes compose
@@ -124,18 +149,25 @@ memberships never grant access. See
 
 ## What is explicitly NOT implemented
 
-Beyond the auth lifecycle, organization foundation, and the RBAC/member-management
-layer above, there is no email verification, password reset, MFA, OAuth, or
-passkeys; and no **custom or organization-defined roles** (the four system roles
-are fixed), permission/role mutation APIs, resource-level permissions, ABAC or
-policy engine, RLS, invitations, entitlements, quotas, API keys, an external
+Beyond the auth lifecycle, organization foundation, the RBAC/member-management
+layer, and the entitlements/plans/quotas layer above, there is no email
+verification, password reset, MFA, OAuth, or passkeys; and no **billing of any
+kind** (no Stripe, checkout, billing portal, subscription, invoice, payment, or
+real subscription status — plans are internal demo plans only, switched solely via
+the demo endpoint), no **custom plans or per-organization custom entitlements**
+and no feature-flag system, no **custom or organization-defined roles** (the four
+system roles are fixed), permission/role mutation APIs, resource-level
+permissions, ABAC or policy engine, RLS, invitations, API key lifecycle
+(create/list/revoke) or external API, audit retention deletion job, an external
 projects API, project restore or hard delete, **user-facing** organization audit
-log (member and project actions are recorded internally on the audit seam only),
-organization lifecycle (archive/suspend) endpoints, workers/queues, object
-storage, or product/workspace/members/permission/**projects** UI. Projects exist
-as a backend slice only (Sprint 6) — there is no web Projects page or workspace
-switcher. The web demo holds **no** auth/organization/projects UI or authenticated
-shell and **no** fake auth/org/permission state. The implemented surface is validated, but
+log (member, project, and plan actions are recorded internally on the audit seam
+only — no read API), organization lifecycle (archive/suspend) endpoints,
+workers/queues, object storage, or product/workspace/members/permission/**projects**/**plan**
+UI. The `max_members`, `max_api_keys`, `api_keys_access`, `audit_log_access`, and
+`audit_retention_days` entitlements are modeled and resolvable but their consuming
+features (invitations, API keys, audit read, retention) are future scope. The web
+demo holds **no** auth/organization/projects/plan UI or authenticated shell and
+**no** fake auth/org/permission state. The implemented surface is validated, but
 the system is **not production-certified**. See
 [`docs/rbac-permissions.md`](docs/rbac-permissions.md) (§E),
 [`docs/organization-foundation.md`](docs/organization-foundation.md) (§E),
@@ -237,6 +269,17 @@ creates the `orgistry_test` database (`infra/postgres-init/`), so
 
 ## Documentation
 
+- [`docs/sprint-7-artifact-package.md`](docs/sprint-7-artifact-package.md) —
+  **official Sprint 7 completion artifact**: entitlements/plans/quotas summary,
+  documentation index, validation evidence, the permission-vs-entitlement-vs-quota
+  separation proof, confidence assessment, remaining risks, and next-sprint
+  readiness.
+- [`docs/entitlements-plans-quotas.md`](docs/entitlements-plans-quotas.md) —
+  **Sprint 7 entitlements/plans/quotas reference** (A–F): the plan catalog,
+  entitlement resolver, quota primitives, plan API, enforcement order, the recipe
+  for adding an entitlement/quota or enforcing one on a new write,
+  architecture/tradeoffs, contracts/invariants, integration (incl. future Stripe
+  mapping), limitations.
 - [`docs/sprint-6-artifact-package.md`](docs/sprint-6-artifact-package.md) —
   **official Sprint 6 completion artifact**: Projects vertical slice summary,
   validation evidence, authorization/tenant-isolation proof, invariants, scope

@@ -2,6 +2,7 @@ import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import postgres from 'postgres';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runMigrations } from './migrator';
+import { PERMISSION_SEED, ROLE_PERMISSION_SEED } from './schema/permissions';
 
 // Integration entry point: load the root `.env` so this runs locally with only
 // `cp .env.example .env`. CI sets these variables directly (no `.env` present).
@@ -57,13 +58,18 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
     ).resolves.not.toThrow();
   });
 
-  it('creates every auth table from scratch', async () => {
+  it('creates every auth + organization table from scratch', async () => {
     const tables = [
       'users',
       'sessions',
       'refresh_tokens',
       'email_verification_tokens',
       'security_events',
+      'roles',
+      'organizations',
+      'memberships',
+      'permissions',
+      'role_permissions',
     ];
     for (const table of tables) {
       const rows = await sql<{ exists: boolean }[]>`
@@ -71,6 +77,84 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       `;
       expect(rows[0]?.exists, `${table} should exist`).toBe(true);
     }
+  });
+
+  it('seeds the baseline roles idempotently', async () => {
+    const rows = await sql<{ id: string; key: string }[]>`
+      SELECT id, key FROM roles ORDER BY key
+    `;
+    expect(rows.map((r) => r.key)).toEqual([
+      'admin',
+      'member',
+      'owner',
+      'viewer',
+    ]);
+    expect(rows.find((r) => r.key === 'owner')?.id).toBe('role_owner');
+  });
+
+  it('seeds the fixed permission catalog idempotently and matches the contracts catalog', async () => {
+    const rows = await sql<{ id: string; key: string }[]>`
+      SELECT id, key FROM permissions ORDER BY key
+    `;
+    expect(rows).toHaveLength(PERMISSION_SEED.length);
+    expect(rows.map((r) => r.key).sort()).toEqual(
+      PERMISSION_SEED.map((p) => p.key).sort(),
+    );
+    // Stable derived ids are part of the migration contract.
+    expect(rows.find((r) => r.key === 'members.read')?.id).toBe('perm_members_read');
+  });
+
+  it('seeds the role→permission mapping to match the canonical seed', async () => {
+    const rows = await sql<{ role_id: string; permission_id: string }[]>`
+      SELECT role_id, permission_id FROM role_permissions
+    `;
+    expect(rows).toHaveLength(ROLE_PERMISSION_SEED.length);
+    const seeded = new Set(rows.map((r) => `${r.role_id}:${r.permission_id}`));
+    for (const grant of ROLE_PERMISSION_SEED) {
+      expect(seeded.has(`${grant.roleId}:${grant.permissionId}`)).toBe(true);
+    }
+    // Owner has every permission; Owner is strictly more capable than Admin.
+    const ownerCount = rows.filter((r) => r.role_id === 'role_owner').length;
+    const adminCount = rows.filter((r) => r.role_id === 'role_admin').length;
+    expect(ownerCount).toBe(PERMISSION_SEED.length);
+    expect(adminCount).toBeLessThan(ownerCount);
+  });
+
+  it('enforces one active membership per (user, organization)', async () => {
+    // Set up a user + organization to attach memberships to.
+    await sql`DELETE FROM memberships`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id = 'user_mem_test'`;
+    await sql`
+      INSERT INTO users (id, email, normalized_email, password_hash, display_name)
+      VALUES ('user_mem_test', 'm@x.com', 'm@x.com', 'hash', 'M')
+    `;
+    await sql`
+      INSERT INTO organizations (id, name, slug, type, status, created_by_user_id)
+      VALUES ('org_mem_test', 'Org', 'org-mem-test', 'team', 'active', 'user_mem_test')
+    `;
+    await sql`
+      INSERT INTO memberships (id, user_id, organization_id, role_id, status)
+      VALUES ('mem_active_1', 'user_mem_test', 'org_mem_test', 'role_owner', 'active')
+    `;
+    // A second ACTIVE membership for the same pair is rejected by the partial
+    // unique index; a removed one is allowed.
+    await expect(
+      sql`
+        INSERT INTO memberships (id, user_id, organization_id, role_id, status)
+        VALUES ('mem_active_2', 'user_mem_test', 'org_mem_test', 'role_member', 'active')
+      `,
+    ).rejects.toThrow();
+    await expect(
+      sql`
+        INSERT INTO memberships (id, user_id, organization_id, role_id, status)
+        VALUES ('mem_removed_1', 'user_mem_test', 'org_mem_test', 'role_member', 'removed')
+      `,
+    ).resolves.toBeDefined();
+
+    await sql`DELETE FROM memberships`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id = 'user_mem_test'`;
   });
 
   it('creates the lookup/cleanup indexes the auth model relies on', async () => {
@@ -82,6 +166,15 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       'ix_sessions_expires_at',
       'ix_security_events_event_type',
       'ix_security_events_created_at',
+      'uq_roles_key',
+      'uq_organizations_slug',
+      'ix_organizations_created_by',
+      'ix_organizations_status',
+      'uq_memberships_active_user_org',
+      'ix_memberships_user_id',
+      'ix_memberships_organization_id',
+      'uq_permissions_key',
+      'uq_role_permissions_role_permission',
     ];
     const rows = await sql<{ indexname: string }[]>`
       SELECT indexname FROM pg_indexes WHERE schemaname = 'public'

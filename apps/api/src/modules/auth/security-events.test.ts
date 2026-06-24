@@ -59,6 +59,19 @@ describe('sanitizeSecurityMetadata', () => {
     };
     expect(result.note.length).toBeLessThan(long.length);
   });
+
+  it('drops a raw refresh token even if one is wrongly placed in metadata', () => {
+    // Defense-in-depth: callers must never put a raw token in metadata, but if
+    // they do, any `token`-named key is dropped entirely (not masked in place).
+    const result = sanitizeSecurityMetadata({
+      bucket: 'refresh_per_ip',
+      refreshToken: 'raw-secret-token',
+      refresh_token_hash: 'deadbeef',
+    });
+    expect(result).toEqual({ bucket: 'refresh_per_ip' });
+    expect(JSON.stringify(result)).not.toContain('raw-secret-token');
+    expect(JSON.stringify(result)).not.toContain('deadbeef');
+  });
 });
 
 describe('SECURITY_EVENT_TYPES', () => {
@@ -70,6 +83,21 @@ describe('SECURITY_EVENT_TYPES', () => {
     expect(SECURITY_EVENT_TYPES.loginFailed).toBe('auth.login_failed');
     expect(SECURITY_EVENT_TYPES.accessTokenRejected).toBe(
       'auth.access_token_rejected',
+    );
+  });
+
+  it('defines stable Sprint 3 session-lifecycle event names', () => {
+    expect(SECURITY_EVENT_TYPES.refreshTokenRotated).toBe(
+      'auth.refresh_token_rotated',
+    );
+    expect(SECURITY_EVENT_TYPES.refreshTokenReuseDetected).toBe(
+      'auth.refresh_token_reuse_detected',
+    );
+    expect(SECURITY_EVENT_TYPES.refreshFailed).toBe('auth.refresh_failed');
+    expect(SECURITY_EVENT_TYPES.logoutSucceeded).toBe('auth.logout_succeeded');
+    expect(SECURITY_EVENT_TYPES.sessionRevoked).toBe('auth.session_revoked');
+    expect(SECURITY_EVENT_TYPES.rateLimitExceeded).toBe(
+      'auth.rate_limit_exceeded',
     );
   });
 });

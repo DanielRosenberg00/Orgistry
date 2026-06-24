@@ -11,6 +11,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.integration.test.ts'],
+    // Integration suites share one PostgreSQL and each apply migrations, so
+    // they must run sequentially — concurrent `CREATE SCHEMA` races on
+    // PostgreSQL's namespace catalog.
+    fileParallelism: false,
     server: {
       deps: {
         inline: [/^@orgistry\//],

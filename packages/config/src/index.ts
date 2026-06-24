@@ -40,10 +40,34 @@ export interface Config {
     readonly cookieSecure: boolean;
     readonly accessTokenTtlSeconds: number;
     readonly sessionTtlSeconds: number;
+    readonly refreshTokenTtlSeconds: number;
+    /** Custom header required on cookie-backed session mutations. */
+    readonly csrfHeaderName: string;
+    /**
+     * Centralized refresh-cookie attributes. Set and clear logic both read
+     * from here so cookie attributes can never drift between the two paths.
+     */
+    readonly refreshCookie: {
+      readonly name: string;
+      readonly path: string;
+      readonly sameSite: 'lax';
+      readonly httpOnly: true;
+      readonly secure: boolean;
+      readonly maxAgeSeconds: number;
+    };
   };
   readonly rateLimit: {
     readonly windowSeconds: number;
     readonly max: number;
+    /** Per-bucket auth rate limits sharing one fixed window. */
+    readonly auth: {
+      readonly windowSeconds: number;
+      readonly loginPerIpMax: number;
+      readonly loginPerEmailMax: number;
+      readonly registerPerIpMax: number;
+      readonly refreshPerSessionMax: number;
+      readonly refreshPerIpMax: number;
+    };
   };
 }
 
@@ -87,10 +111,28 @@ function toConfig(env: Env): Config {
       cookieSecure: env.COOKIE_SECURE,
       accessTokenTtlSeconds: env.AUTH_ACCESS_TOKEN_TTL_SECONDS,
       sessionTtlSeconds: env.AUTH_SESSION_TTL_SECONDS,
+      refreshTokenTtlSeconds: env.AUTH_REFRESH_TOKEN_TTL_SECONDS,
+      csrfHeaderName: env.AUTH_CSRF_HEADER_NAME.toLowerCase(),
+      refreshCookie: {
+        name: env.AUTH_REFRESH_COOKIE_NAME,
+        path: env.AUTH_REFRESH_COOKIE_PATH,
+        sameSite: 'lax',
+        httpOnly: true,
+        secure: env.COOKIE_SECURE,
+        maxAgeSeconds: env.AUTH_REFRESH_TOKEN_TTL_SECONDS,
+      },
     },
     rateLimit: {
       windowSeconds: env.RATE_LIMIT_WINDOW_SECONDS,
       max: env.RATE_LIMIT_MAX,
+      auth: {
+        windowSeconds: env.RATE_LIMIT_AUTH_WINDOW_SECONDS,
+        loginPerIpMax: env.RATE_LIMIT_LOGIN_PER_IP_MAX,
+        loginPerEmailMax: env.RATE_LIMIT_LOGIN_PER_EMAIL_MAX,
+        registerPerIpMax: env.RATE_LIMIT_REGISTER_PER_IP_MAX,
+        refreshPerSessionMax: env.RATE_LIMIT_REFRESH_PER_SESSION_MAX,
+        refreshPerIpMax: env.RATE_LIMIT_REFRESH_PER_IP_MAX,
+      },
     },
   };
 }

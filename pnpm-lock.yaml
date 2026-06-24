@@ -139,6 +139,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@orgistry/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@orgistry/shared':
         specifier: workspace:*
         version: link:../shared

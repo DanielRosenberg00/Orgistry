@@ -20,6 +20,7 @@ packages/db/
       meta.ts                    app_meta — infrastructure metadata (placeholder)
       auth.ts                    users, sessions, refresh_tokens,
                                  email_verification_tokens, security_events
+      organizations.ts           roles, organizations, memberships (Sprint 4)
     migrate.integration.test.ts  migration-from-scratch test (needs PostgreSQL)
   scripts/
     migrate.ts                   pnpm db:migrate
@@ -58,13 +59,34 @@ explicit lifecycle state.
 | --- | --- | --- |
 | `users` | Accounts | unique index on `normalized_email`; `password_hash` only |
 | `sessions` | Login sessions (access-token anchor) | indexed by `user_id`, `expires_at` |
-| `refresh_tokens` | Rotation scaffolding (no behavior yet) | unique `token_hash`; `family_id` lineage |
+| `refresh_tokens` | Refresh rotation + reuse detection (Sprint 3) | unique `token_hash`; `family_id` lineage; `used_at`/`replacement_token_id`/`revoked_*` |
 | `email_verification_tokens` | Verification scaffolding (no behavior yet) | unique `token_hash` |
 | `security_events` | Durable auth/security records | sanitized `metadata`; indexed by `event_type`, `created_at` |
 
-`refresh_tokens` and `email_verification_tokens` are schema-complete scaffolding
-— the columns/indexes a later sprint needs exist now, but no endpoint exercises
-them. See [`auth-foundation.md`](auth-foundation.md).
+`refresh_tokens` is now exercised by the Sprint 3 session lifecycle (rotation,
+reuse detection, family/session revocation) — **no migration was needed**, the
+Sprint 2 columns/indexes already modeled it. `email_verification_tokens` remains
+schema-complete scaffolding with no endpoint. See
+[`auth-foundation.md`](auth-foundation.md) and
+[`session-lifecycle.md`](session-lifecycle.md).
+
+`organizations.ts` (Sprint 4) adds the tenant layer (`User → Organization →
+Membership`) plus the minimum role baseline. Same platform model: prefixed opaque
+IDs (`role_`/`org_`/`mem_`), `snake_case` columns, `timestamptz` audit columns,
+explicit lifecycle state.
+
+| Table | Purpose | Notable invariants |
+| --- | --- | --- |
+| `roles` | Role baseline (identity only — **not** permissions) | unique `key`; seeded Owner/Admin/Member/Viewer with stable IDs |
+| `organizations` | Personal + team tenants | unique `slug`; `type` ∈ {personal, team}; indexed by `created_by_user_id`, `status` |
+| `memberships` | User ↔ organization with role | **partial** unique index on `(user_id, organization_id) WHERE status='active'`; soft-removal columns |
+
+The baseline roles are seeded **idempotently** in the same migration
+(`INSERT … ON CONFLICT (key) DO NOTHING`) with stable IDs (`role_owner`, …)
+referenced from code via `ROLE_IDS`. The partial unique index enforces *one
+active membership per (user, organization)* while retaining `removed` history.
+Authorization is keyed on organization **ID**, never slug. See
+[`organization-foundation.md`](organization-foundation.md).
 
 ## Migrations
 
@@ -100,10 +122,15 @@ Two integration suites (suffix `*.integration.test.ts`, excluded from
 `pnpm test`, run by `pnpm test:integration` / CI):
 
 - `packages/db/src/migrate.integration.test.ts` — drops the schema, runs the
-  baseline, asserts `app_meta` and every auth table exist, checks the auth
-  lookup/uniqueness/cleanup indexes, verifies the normalized-email uniqueness
-  constraint, and re-runs to confirm idempotency. Needs PostgreSQL via
-  `TEST_DATABASE_URL` or `DATABASE_URL`.
+  baseline, asserts `app_meta` and every auth + organization table exist, checks
+  the lookup/uniqueness/cleanup indexes (incl. the membership partial unique
+  index), verifies the normalized-email uniqueness constraint and the one-active-
+  membership invariant, confirms the role seed, and re-runs to confirm
+  idempotency. Needs PostgreSQL via `TEST_DATABASE_URL` or `DATABASE_URL`.
+- `apps/api/src/modules/organization/organization.integration.test.ts` —
+  registration-provisioned personal workspaces, atomic registration rollback,
+  team create, membership uniqueness, list/read scoping, and removed-membership
+  access against live PostgreSQL. Needs `TEST_DATABASE_URL` or `DATABASE_URL`.
 - `apps/api/src/routes/readiness.integration.test.ts` — boots the app against
   live PostgreSQL + Redis probes and asserts `/ready` returns `200`. Needs
   `DATABASE_URL` and `REDIS_URL`.

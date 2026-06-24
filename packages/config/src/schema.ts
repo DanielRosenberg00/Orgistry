@@ -8,9 +8,10 @@ import { z } from 'zod';
  * runs once at process startup (see `loadConfig`) and fails loudly so a
  * misconfigured process never boots into a partially-working state.
  *
- * Scope note (Sprint 1): JWT/cookie secrets and the rate-limit namespace are
- * declared here so configuration is stable for later sprints, but no auth or
- * rate-limiting behavior is implemented yet.
+ * Scope note: JWT/cookie secrets, refresh-cookie attributes, the CSRF header
+ * name, and per-bucket auth rate limits are all declared here. Sprint 3 wires
+ * them into the secure session lifecycle (refresh rotation, logout, session
+ * management, CSRF enforcement, Redis-backed rate limiting).
  */
 
 const booleanFromEnv = z
@@ -57,35 +58,83 @@ export const envSchema = z.object({
   MAILPIT_SMTP_PORT: portSchema.default(1025),
   MAILPIT_UI_PORT: portSchema.default(8025),
 
-  // Auth secrets (future sprints). Required so environments are provisioned
-  // correctly now; no token issuance happens in Sprint 1.
+  // Auth secrets. Required so environments are provisioned correctly.
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   COOKIE_SECRET: z
     .string()
     .min(16, 'COOKIE_SECRET must be at least 16 characters'),
   // `true` in production-like environments, `false` on localhost over HTTP.
   // Default is the raw env string 'false'; the transform yields the boolean.
+  // Drives the refresh cookie's `Secure` attribute.
   COOKIE_SECURE: booleanFromEnv.default('false'),
 
-  // Access token lifetime. Short-lived by design (Sprint 2 issues access
-  // tokens; refresh-token rotation that makes short TTLs ergonomic arrives in
-  // a later sprint). Default: 15 minutes.
+  // Access token lifetime. Short-lived by design; refresh-token rotation
+  // (Sprint 3) makes the short TTL ergonomic. Default: 15 minutes.
   AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(900),
   // Session lifetime. A session outlives any single access token and is the
-  // anchor the future refresh-token family hangs off. Default: 30 days.
+  // anchor the refresh-token family hangs off. Default: 30 days.
   AUTH_SESSION_TTL_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(2_592_000),
+  // Refresh-token lifetime. Bounds how long a single refresh credential (and
+  // therefore the HttpOnly cookie's Max-Age) is valid; capped by the session.
+  // Default: 30 days, matching the session.
+  AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(2_592_000),
 
-  // Rate-limit namespace (enforcement is implemented in a later sprint).
+  // Refresh cookie attributes. The cookie is HttpOnly + SameSite=Lax always;
+  // only the name, path scope, and Secure flag are configurable. The path
+  // scopes the cookie to the auth surface that consumes it.
+  AUTH_REFRESH_COOKIE_NAME: z.string().min(1).default('orgistry_rt'),
+  AUTH_REFRESH_COOKIE_PATH: z.string().min(1).default('/v1/auth'),
+
+  // Custom header required on cookie-backed session mutations (refresh/logout).
+  // A request-forging site cannot set a custom header cross-origin without a
+  // CORS preflight that the strict allow-list denies.
+  AUTH_CSRF_HEADER_NAME: z.string().min(1).default('x-orgistry-csrf'),
+
+  // Generic rate-limit namespace (declared in Sprint 1; not used for auth
+  // buckets, which have their own typed values below).
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
+
+  // Auth rate-limit buckets (Sprint 3, Redis-backed, fixed-window). One shared
+  // window length; per-bucket maximums tuned to each surface's abuse profile.
+  RATE_LIMIT_AUTH_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+  RATE_LIMIT_LOGIN_PER_IP_MAX: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_LOGIN_PER_EMAIL_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5),
+  RATE_LIMIT_REGISTER_PER_IP_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5),
+  RATE_LIMIT_REFRESH_PER_SESSION_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+  RATE_LIMIT_REFRESH_PER_IP_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(120),
 });
 
 export type Env = z.infer<typeof envSchema>;

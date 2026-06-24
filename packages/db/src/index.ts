@@ -1,4 +1,10 @@
-export { createDbClient, type DbClient, type Database } from './client';
+export {
+  createDbClient,
+  type DbClient,
+  type Database,
+  type Transaction,
+  type DbExecutor,
+} from './client';
 export { pingDatabase } from './health';
 export { runMigrations, MIGRATIONS_FOLDER } from './migrator';
 export * as schema from './schema/index';
@@ -12,5 +18,37 @@ export type {
   UserInsert,
   SessionRow,
   SessionInsert,
+  RefreshTokenRow,
+  RefreshTokenInsert,
   SecurityEventInsert,
 } from './schema/auth';
+
+// Organization foundation (Sprint 4).
+export {
+  ROLE_KEYS,
+  ROLE_IDS,
+  ROLE_SEED,
+} from './schema/organizations';
+export type {
+  RoleKey,
+  OrganizationType,
+  OrganizationStatus,
+  MembershipStatus,
+  RoleRow,
+  OrganizationRow,
+  OrganizationInsert,
+  MembershipRow,
+  MembershipInsert,
+} from './schema/organizations';
+
+// Permissions & role-permission mapping (Sprint 5).
+export {
+  permissionRowId,
+  PERMISSION_SEED,
+  ROLE_PERMISSION_SEED,
+} from './schema/permissions';
+export type {
+  PermissionRow,
+  PermissionInsert,
+  RolePermissionRow,
+} from './schema/permissions';

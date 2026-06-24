@@ -34,6 +34,7 @@ beforeEach(async () => {
     jwtSecret: config.auth.jwtSecret,
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
+    refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
   });
   app = buildApp({
     config,

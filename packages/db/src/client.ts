@@ -4,6 +4,17 @@ import * as schema from './schema/index';
 
 export type Database = PostgresJsDatabase<typeof schema>;
 
+/** The handle passed to a `db.transaction(...)` callback. */
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+/**
+ * Either the base client or an open transaction. Persistence helpers that must
+ * run both standalone and inside a larger transaction (e.g. organization
+ * provisioning, which runs alone for team creation and inside the registration
+ * transaction) accept a `DbExecutor`.
+ */
+export type DbExecutor = Database | Transaction;
+
 export interface DbClient {
   /** Drizzle query interface bound to the full schema. */
   db: Database;

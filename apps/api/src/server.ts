@@ -5,6 +5,13 @@ import Redis from 'ioredis';
 import { buildApp } from './app';
 import { createDbAuthRepository } from './modules/auth/auth.repo';
 import { createAuthService } from './modules/auth/auth.service';
+import { createDbOrganizationRepository } from './modules/organization/organization.repo';
+import { createOrganizationService } from './modules/organization/organization.service';
+import { createMemberService } from './modules/organization/member.service';
+import { createOrganizationRbacService } from './modules/organization/org-rbac.service';
+import { createDbRbacRepository } from './modules/rbac/rbac.repo';
+import { createRbacService } from './modules/rbac/rbac.service';
+import { createRedisRateLimiter } from './lib/rate-limit';
 import type { ReadinessProbe } from './lib/readiness';
 
 /**
@@ -44,9 +51,35 @@ async function main(): Promise<void> {
     jwtSecret: config.auth.jwtSecret,
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
+    refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+    // Redis is the official v1 rate-limit store. It fails open, so a Redis
+    // outage disables rate limiting but never affects auth correctness.
+    rateLimiter: createRedisRateLimiter(redis),
+    rateLimits: config.rateLimit.auth,
   });
 
-  const app = buildApp({ config, readinessProbes, authService });
+  // One organization repository backs both the organization workflows and the
+  // member-management/access-control workflows (they share the same persistence).
+  const organizationRepo = createDbOrganizationRepository(dbClient.db);
+  const organizationService = createOrganizationService({ repo: organizationRepo });
+  const memberService = createMemberService({ repo: organizationRepo });
+  const rbacService = createRbacService({
+    repo: createDbRbacRepository(dbClient.db),
+  });
+  const organizationRbacService = createOrganizationRbacService({
+    repo: organizationRepo,
+    rbacService,
+  });
+
+  const app = buildApp({
+    config,
+    readinessProbes,
+    authService,
+    organizationService,
+    memberService,
+    organizationRbacService,
+    rbacService,
+  });
 
   // Prevent unhandled 'error' events when Redis is unreachable; readiness is
   // the source of truth for connectivity, so log at debug and move on.

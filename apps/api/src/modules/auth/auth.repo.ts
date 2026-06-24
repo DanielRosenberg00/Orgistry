@@ -1,12 +1,21 @@
 import type { Database } from '@orgistry/db';
 import { schema } from '@orgistry/db';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
+import {
+  insertOrganizationWithOwnerMembership,
+  resolveUniqueSlug,
+} from '../organization/organization.provisioning';
 import { emailAlreadyRegisteredError } from './auth.errors';
 import type {
   AuthRepository,
+  ListSessionsParams,
+  NewRefreshToken,
   NewSecurityEvent,
   NewSession,
   NewUser,
+  RegisterAccountParams,
+  RotateRefreshTokenParams,
+  RotateRefreshTokenResult,
 } from './auth.types';
 
 /** PostgreSQL unique-violation SQLSTATE. */
@@ -67,6 +76,70 @@ export function createDbAuthRepository(db: Database): AuthRepository {
       }
     },
 
+    registerAccount(params: RegisterAccountParams) {
+      return db.transaction(async (tx) => {
+        // 1. User. The unique index on normalized_email is the authoritative
+        //    guard; a violation rolls back the whole transaction.
+        let user;
+        try {
+          [user] = await tx
+            .insert(schema.users)
+            .values({
+              email: params.user.email,
+              normalizedEmail: params.user.normalizedEmail,
+              passwordHash: params.user.passwordHash,
+              displayName: params.user.displayName,
+            })
+            .returning();
+        } catch (error) {
+          if (isUniqueViolation(error)) {
+            throw emailAlreadyRegisteredError();
+          }
+          throw error;
+        }
+
+        // 2. Personal workspace: organization + active Owner membership. Slug is
+        //    resolved to a unique value inside the same transaction.
+        const slug = await resolveUniqueSlug(
+          tx,
+          params.personalWorkspace.slugBase,
+        );
+        const { organization, membership } =
+          await insertOrganizationWithOwnerMembership(tx, {
+            type: 'personal',
+            name: params.personalWorkspace.name,
+            slug,
+            createdByUserId: user.id,
+            ownerUserId: user.id,
+          });
+
+        // 3. Session.
+        const [session] = await tx
+          .insert(schema.sessions)
+          .values({
+            userId: user.id,
+            ipAddress: params.session.ipAddress,
+            userAgent: params.session.userAgent,
+            expiresAt: params.session.expiresAt,
+          })
+          .returning();
+
+        // 4. First refresh token of a new family (hash-only).
+        const [refreshToken] = await tx
+          .insert(schema.refreshTokens)
+          .values({
+            sessionId: session.id,
+            familyId: params.refreshToken.familyId,
+            tokenHash: params.refreshToken.tokenHash,
+            parentTokenId: null,
+            expiresAt: params.refreshToken.expiresAt,
+          })
+          .returning();
+
+        return { user, organization, membership, session, refreshToken };
+      });
+    },
+
     async insertSession(values: NewSession) {
       const [session] = await db
         .insert(schema.sessions)
@@ -87,6 +160,186 @@ export function createDbAuthRepository(db: Database): AuthRepository {
         .where(eq(schema.sessions.id, id))
         .limit(1);
       return session ?? null;
+    },
+
+    async insertRefreshToken(values: NewRefreshToken) {
+      const [token] = await db
+        .insert(schema.refreshTokens)
+        .values({
+          sessionId: values.sessionId,
+          familyId: values.familyId,
+          tokenHash: values.tokenHash,
+          parentTokenId: values.parentTokenId,
+          expiresAt: values.expiresAt,
+        })
+        .returning();
+      return token;
+    },
+
+    async findRefreshTokenByHash(tokenHash) {
+      const [token] = await db
+        .select()
+        .from(schema.refreshTokens)
+        .where(eq(schema.refreshTokens.tokenHash, tokenHash))
+        .limit(1);
+      return token ?? null;
+    },
+
+    /**
+     * Atomic rotation. The presented token row is locked `FOR UPDATE` for the
+     * duration of the transaction, so two concurrent refreshes serialize: the
+     * first marks the row used and inserts a successor; the second then sees a
+     * used row and is classified as `reuse`. Exactly one successor can ever be
+     * minted per presented token.
+     */
+    rotateRefreshToken(
+      params: RotateRefreshTokenParams,
+    ): Promise<RotateRefreshTokenResult> {
+      return db.transaction(async (tx) => {
+        const [token] = await tx
+          .select()
+          .from(schema.refreshTokens)
+          .where(eq(schema.refreshTokens.tokenHash, params.presentedTokenHash))
+          .for('update')
+          .limit(1);
+
+        if (!token) {
+          return { status: 'not_found' };
+        }
+
+        const [session] = await tx
+          .select()
+          .from(schema.sessions)
+          .where(eq(schema.sessions.id, token.sessionId))
+          .limit(1);
+
+        // Already consumed in any way -> the whole family is compromised.
+        const alreadyConsumed =
+          token.usedAt !== null ||
+          token.revokedAt !== null ||
+          token.replacementTokenId !== null;
+        if (alreadyConsumed) {
+          return {
+            status: 'reuse',
+            familyId: token.familyId,
+            sessionId: token.sessionId,
+            userId: session?.userId ?? null,
+          };
+        }
+
+        // A token whose session is gone/revoked/expired is treated as reuse.
+        const sessionInvalid =
+          !session ||
+          session.revokedAt !== null ||
+          session.expiresAt.getTime() <= params.now.getTime();
+        if (sessionInvalid) {
+          return {
+            status: 'reuse',
+            familyId: token.familyId,
+            sessionId: token.sessionId,
+            userId: session?.userId ?? null,
+          };
+        }
+
+        if (token.expiresAt.getTime() <= params.now.getTime()) {
+          return { status: 'expired' };
+        }
+
+        const [successor] = await tx
+          .insert(schema.refreshTokens)
+          .values({
+            sessionId: token.sessionId,
+            familyId: token.familyId,
+            tokenHash: params.successorTokenHash,
+            parentTokenId: token.id,
+            expiresAt: params.successorExpiresAt,
+          })
+          .returning();
+
+        await tx
+          .update(schema.refreshTokens)
+          .set({ usedAt: params.now, replacementTokenId: successor.id })
+          .where(eq(schema.refreshTokens.id, token.id));
+
+        await tx
+          .update(schema.sessions)
+          .set({ updatedAt: params.now })
+          .where(eq(schema.sessions.id, session.id));
+
+        return { status: 'rotated', successor, session };
+      });
+    },
+
+    async revokeRefreshTokenFamily(familyId, reason) {
+      await db
+        .update(schema.refreshTokens)
+        .set({ revokedAt: new Date(), revokedReason: reason })
+        .where(
+          and(
+            eq(schema.refreshTokens.familyId, familyId),
+            isNull(schema.refreshTokens.revokedAt),
+          ),
+        );
+    },
+
+    async revokeRefreshTokensForSession(sessionId, reason) {
+      await db
+        .update(schema.refreshTokens)
+        .set({ revokedAt: new Date(), revokedReason: reason })
+        .where(
+          and(
+            eq(schema.refreshTokens.sessionId, sessionId),
+            isNull(schema.refreshTokens.revokedAt),
+          ),
+        );
+    },
+
+    async revokeSession(sessionId, reason) {
+      const now = new Date();
+      await db
+        .update(schema.sessions)
+        .set({ revokedAt: now, revokedReason: reason, updatedAt: now })
+        .where(
+          and(
+            eq(schema.sessions.id, sessionId),
+            isNull(schema.sessions.revokedAt),
+          ),
+        );
+    },
+
+    async listActiveSessionsForUser(params: ListSessionsParams) {
+      const now = new Date();
+      // Keyset pagination on (created_at desc, id desc). The cursor is the last
+      // row of the previous page; rows strictly "after" it (older) come next.
+      const cursorClause = params.cursor
+        ? or(
+            lt(
+              schema.sessions.createdAt,
+              new Date(params.cursor.createdAtMs),
+            ),
+            and(
+              eq(
+                schema.sessions.createdAt,
+                new Date(params.cursor.createdAtMs),
+              ),
+              lt(schema.sessions.id, params.cursor.id),
+            ),
+          )
+        : undefined;
+
+      return db
+        .select()
+        .from(schema.sessions)
+        .where(
+          and(
+            eq(schema.sessions.userId, params.userId),
+            isNull(schema.sessions.revokedAt),
+            gt(schema.sessions.expiresAt, now),
+            ...(cursorClause ? [cursorClause] : []),
+          ),
+        )
+        .orderBy(desc(schema.sessions.createdAt), desc(schema.sessions.id))
+        .limit(params.limit + 1);
     },
 
     async insertSecurityEvent(values: NewSecurityEvent) {

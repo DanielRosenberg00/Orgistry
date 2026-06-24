@@ -179,6 +179,7 @@ export type UserInsert = typeof users.$inferInsert;
 export type SessionRow = typeof sessions.$inferSelect;
 export type SessionInsert = typeof sessions.$inferInsert;
 export type RefreshTokenRow = typeof refreshTokens.$inferSelect;
+export type RefreshTokenInsert = typeof refreshTokens.$inferInsert;
 export type EmailVerificationTokenRow =
   typeof emailVerificationTokens.$inferSelect;
 export type SecurityEventRow = typeof securityEvents.$inferSelect;

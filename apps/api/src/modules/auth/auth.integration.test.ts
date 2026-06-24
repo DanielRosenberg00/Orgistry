@@ -45,9 +45,10 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
   beforeAll(async () => {
     await runMigrations(connectionString as string);
     db = createDbClient(connectionString as string);
-    // Clean auth state so the suite is deterministic and re-runnable.
+    // Clean auth + organization state so the suite is deterministic and
+    // re-runnable. The seeded `roles` baseline is preserved (not truncated).
     await db.sql.unsafe(
-      'TRUNCATE security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
+      'TRUNCATE memberships, organizations, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
     );
 
     const authService = createAuthService({
@@ -55,6 +56,7 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
       jwtSecret: config.auth.jwtSecret,
       accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
       sessionTtlSeconds: config.auth.sessionTtlSeconds,
+      refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
     });
     app = buildApp({
       config,

@@ -64,8 +64,11 @@ export type AuthUser = z.infer<typeof authUserSchema>;
 
 /**
  * Issued access-token payload returned by register and login. `tokenType` is
- * always `Bearer`; `expiresIn` is the token lifetime in seconds. No refresh
- * token is issued in Sprint 2.
+ * always `Bearer`; `expiresIn` is the token lifetime in seconds.
+ *
+ * The refresh credential is NEVER part of this (or any) JSON body — it travels
+ * only through the HttpOnly refresh cookie (Sprint 3). This shape is therefore
+ * unchanged from Sprint 2: the cookie is an out-of-band channel.
  */
 export const authTokensSchema = z.object({
   accessToken: z.string(),
@@ -86,3 +89,67 @@ export const currentUserResponseSchema = z.object({
   user: authUserSchema,
 });
 export type CurrentUserResponse = z.infer<typeof currentUserResponseSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Session lifecycle (Sprint 3)                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * POST /v1/auth/refresh response body. Returns a fresh access token only; the
+ * rotated refresh credential is delivered through the HttpOnly cookie, never
+ * here.
+ */
+export const refreshResponseSchema = z.object({
+  tokens: authTokensSchema,
+});
+export type RefreshResponse = z.infer<typeof refreshResponseSchema>;
+
+/** POST /v1/auth/logout response body. */
+export const logoutResponseSchema = z.object({
+  success: z.literal(true),
+});
+export type LogoutResponse = z.infer<typeof logoutResponseSchema>;
+
+/**
+ * Public, secret-free view of a session, returned ONLY to the authenticated
+ * user who owns it (the session-list/revoke endpoints are Bearer-authenticated
+ * and user-scoped; cross-user access is an indistinguishable 404). It exposes
+ * only non-sensitive lifecycle metadata and NEVER the refresh token hash, token
+ * family id, user id, cookie, authorization header, or any persistence internal.
+ *
+ * `ipAddress`/`userAgent`: deliberately exposed. They are the session's own
+ * client metadata, shown only to that session's owner so they can recognize and
+ * revoke their devices (the standard "your active sessions" UX). This is the
+ * owner's own data, not another user's, so it is acceptable to surface.
+ */
+export const sessionSummarySchema = z.object({
+  id: z.string(),
+  /** True for the session the current access token is bound to. */
+  current: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  expiresAt: z.string(),
+  /** Best-effort client metadata captured at session creation (owner-only). */
+  userAgent: z.string().nullable(),
+  ipAddress: z.string().nullable(),
+});
+export type SessionSummary = z.infer<typeof sessionSummarySchema>;
+
+/**
+ * GET /v1/auth/sessions response body. Cursor-paginated list of the
+ * authenticated user's active sessions (revoked/expired sessions are omitted).
+ */
+export const sessionListResponseSchema = z.object({
+  items: z.array(sessionSummarySchema),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+export type SessionListResponse = z.infer<typeof sessionListResponseSchema>;
+
+/** DELETE /v1/auth/sessions/:sessionId response body. */
+export const sessionRevocationResponseSchema = z.object({
+  success: z.literal(true),
+});
+export type SessionRevocationResponse = z.infer<
+  typeof sessionRevocationResponseSchema
+>;

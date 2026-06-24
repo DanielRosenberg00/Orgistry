@@ -2,15 +2,32 @@
 
 Orgistry's initial authentication foundation: durable auth persistence, Argon2id
 password handling, JWT access tokens, and `register` / `login` / `me` endpoints,
-plus durable security events. It is built so the next sprint can add secure
-session lifecycle behavior (refresh rotation, logout, session management) without
-redesigning the user model, session model, token primitives, claim shape, auth
-contracts, password hashing, email normalization, or security-event persistence.
+plus durable security events. It is built so the next sprint could add secure
+session lifecycle behavior without redesigning the user model, session model,
+token primitives, claim shape, auth contracts, password hashing, email
+normalization, or security-event persistence.
 
-This sprint deliberately stops short of sessions-as-a-feature: there is no
-refresh endpoint, logout, session listing/revocation, or email-verification
-flow. Registration creates **only** a user and a session — no organization,
-workspace, membership, role, or permission.
+> **Sprint 3 update.** The secure session lifecycle that Sprint 2 prepared for —
+> refresh-token issuance + rotation, the HttpOnly refresh cookie, reuse
+> detection, logout, session listing/revocation, CSRF enforcement, and
+> Redis-backed rate limiting — is now implemented. See
+> [`session-lifecycle.md`](session-lifecycle.md). The "deferred" notes below
+> describe the Sprint 2 state and are annotated where Sprint 3 changed them.
+
+> **Sprint 4 update.** Registration now also provisions the registering user's
+> **personal workspace** — an `organization` (`type=personal`) plus an active
+> **Owner** `membership` — in the SAME transaction as the user, session, and
+> first refresh token. The current behavior and design live in
+> [`organization-foundation.md`](organization-foundation.md).
+
+This document is the **historical Sprint 2 reference**. It describes the auth
+foundation as it was first shipped: register/login/current-user with no refresh
+endpoint, logout, session listing/revocation, or email-verification flow, and
+where registration created **only** a user and a session. Later sprints extended
+this — the session lifecycle (Sprint 3) and personal-workspace provisioning
+(Sprint 4). Where this document describes the original state, §E records what has
+since been resolved and points to the current authoritative docs. Email
+verification remains out of scope.
 
 ## A. Developer Documentation
 
@@ -40,11 +57,15 @@ All responses use the standard success/error envelopes and carry a request id.
 ### How it works
 
 **Register.** Validate body (Zod) → normalize email → reject if the normalized
-email exists → Argon2id-hash the password → insert user → create a session →
-sign a short-lived access token → write `auth.registration_succeeded` → return
-`{ user, tokens }`. The normalized-email unique index is the authoritative guard
-for the concurrent case; the repository maps a unique violation to the same
-`EMAIL_ALREADY_REGISTERED` conflict.
+email exists → Argon2id-hash the password → **atomically** provision the account
+(user + personal workspace organization + active Owner membership + session +
+first refresh token, in one transaction) → sign a short-lived access token →
+write `auth.registration_succeeded` → return `{ user, tokens }`. The
+normalized-email unique index is the authoritative guard for the concurrent case;
+the repository maps a unique violation to the same `EMAIL_ALREADY_REGISTERED`
+conflict. As of Sprint 4 the whole provisioning is transactional (see
+[`organization-foundation.md`](organization-foundation.md)); a failure in any
+step rolls everything back, so a registered user always has a personal workspace.
 
 **Login.** Validate body → normalize email → look up user. On any failure
 (unknown email, inactive account, wrong password) the response is the **same**
@@ -174,8 +195,11 @@ These must not change without a deliberate redesign:
 - **Security-event sanitization.** Event metadata is recursively stripped of
   password/token/secret/authorization/cookie/hash/credential-like keys before
   persistence.
-- **Registration creates no workspace.** Register creates a user and a session —
-  never an organization, workspace, membership, role, or permission.
+- **Registration workspace provisioning (Sprint 4).** Register also creates the
+  user's personal workspace (organization + active Owner membership) in the same
+  transaction as the user, session, and first refresh token. It creates no
+  permission, entitlement, quota, project, or invitation. The full design lives
+  in [`organization-foundation.md`](organization-foundation.md).
 
 ### Error codes added
 
@@ -205,31 +229,36 @@ existing `UNAUTHORIZED`; validation failures to `VALIDATION_ERROR`.
 
 ## E. Known Limitations
 
-- Refresh token rotation is **not** implemented (schema scaffolding only).
-- The refresh cookie lifecycle is **not** implemented.
-- Logout is **not** implemented.
-- Session listing / revocation is **not** implemented.
-- Email verification behavior is **not** implemented (token table is scaffolding;
-  `users.email_verified_at` is always null on registration).
-- Organizations and memberships are **not** implemented; registration does **not**
-  create a personal workspace.
-- The web demo has **no** auth UI.
-- **Rate limiting is deferred — an accepted Sprint 2 limitation.** Registration
-  and login are not rate limited in this sprint. The Redis client and
-  `RATE_LIMIT_*` config foundations from Sprint 1 exist, but enforcement is
-  deliberately not wired in. The next auth/session-lifecycle sprint must add:
-  - login per IP,
-  - login per normalized email,
-  - register per IP,
-  - returning the standard `RATE_LIMITED` error envelope.
+This is the **historical Sprint 2 reference**, so the list below is the Sprint 2
+snapshot annotated with each item's current status. For the authoritative current
+state see [`session-lifecycle.md`](session-lifecycle.md) (Sprint 3) and
+[`organization-foundation.md`](organization-foundation.md) (Sprint 4).
 
-  Constraint for that work: **Redis must not become part of authentication
-  correctness** — a Redis outage may disable rate limiting but must never cause
-  a valid credential to be rejected or an invalid one to be accepted. Do not
-  build a broad generic rate-limit bucket system beyond these needs.
-- The system is **not** production-certified. The auth foundation is implemented
-  and validated, but refresh lifecycle, logout, email verification, rate
-  limiting, and organization-linked registration are not complete.
+**Resolved since Sprint 2:**
+
+- Refresh token rotation — **resolved in Sprint 3** (transactional rotation +
+  reuse detection).
+- Refresh cookie lifecycle — **resolved in Sprint 3** (centralized HttpOnly
+  cookie).
+- Logout — **resolved in Sprint 3** (server-side revoke, idempotent).
+- Session listing / revocation — **resolved in Sprint 3** (owner-scoped,
+  cursor-paginated).
+- Auth rate limiting — **resolved in Sprint 3** (Redis-backed login-per-IP,
+  login-per-email, register-per-IP, refresh-per-session, and refresh-per-IP
+  buckets returning `RATE_LIMITED`; the limiter fails open, so a Redis outage
+  disables limiting but never affects auth correctness).
+- Organization-linked registration — **resolved in Sprint 4**: registration
+  provisions the user's personal workspace (organization + active Owner
+  membership) atomically, and authenticated team-organization create/list/read
+  exist. See [`organization-foundation.md`](organization-foundation.md).
+
+**Still out of scope after Sprint 4:**
+
+- Email verification (the token table is scaffolding; `users.email_verified_at`
+  is always null on registration).
+- Permissions, member management, invitations, entitlements, quotas, projects,
+  API keys, organization audit logs, and any auth/organization web UI.
+- The system is **not** production-certified.
 
 ## F. Sprint Changelog
 

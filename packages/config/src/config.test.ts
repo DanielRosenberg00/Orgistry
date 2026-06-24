@@ -58,6 +58,34 @@ describe('loadConfig', () => {
     ]);
   });
 
+  it('derives refresh-cookie attributes and the CSRF header from env', () => {
+    const config = loadConfig({ ...baseEnv(), COOKIE_SECURE: 'true' });
+    expect(config.auth.refreshCookie).toMatchObject({
+      name: 'orgistry_rt',
+      path: '/v1/auth',
+      sameSite: 'lax',
+      httpOnly: true,
+      secure: true,
+    });
+    expect(config.auth.refreshCookie.maxAgeSeconds).toBe(
+      config.auth.refreshTokenTtlSeconds,
+    );
+    // The CSRF header is normalized to lowercase to match Fastify's headers.
+    expect(config.auth.csrfHeaderName).toBe('x-orgistry-csrf');
+  });
+
+  it('exposes per-bucket auth rate limits with sane defaults', () => {
+    const config = loadConfig(baseEnv());
+    expect(config.rateLimit.auth).toMatchObject({
+      windowSeconds: 60,
+      loginPerIpMax: 10,
+      loginPerEmailMax: 5,
+      registerPerIpMax: 5,
+      refreshPerSessionMax: 60,
+      refreshPerIpMax: 120,
+    });
+  });
+
   it('throws a ConfigValidationError when a required secret is missing', () => {
     const env = baseEnv();
     delete env.JWT_SECRET;

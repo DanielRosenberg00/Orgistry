@@ -38,6 +38,46 @@ export const ERROR_CODES = {
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   /** Registration rejected because the normalized email already exists. */
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
+
+  // ----- Session lifecycle (Sprint 3) -----
+  /**
+   * Refresh failed. Deliberately generic: returned identically whether the
+   * refresh cookie was missing, unknown, expired, or otherwise unusable, so no
+   * token state is disclosed. Distinct from `TOKEN_REUSE_DETECTED`.
+   */
+  INVALID_REFRESH_TOKEN: 'INVALID_REFRESH_TOKEN',
+  /**
+   * A refresh token that was already used/replaced/revoked was presented. The
+   * affected token family and its session are revoked (see the refresh design).
+   */
+  TOKEN_REUSE_DETECTED: 'TOKEN_REUSE_DETECTED',
+  /** A cookie-backed mutation was missing the required custom CSRF header. */
+  CSRF_REQUIRED: 'CSRF_REQUIRED',
+
+  // ----- Organizations (Sprint 4) -----
+  /**
+   * Organization does not exist OR the caller has no active membership in it.
+   * Deliberately identical for both cases so callers cannot probe for the
+   * existence of organizations they do not belong to.
+   */
+  ORGANIZATION_NOT_FOUND: 'ORGANIZATION_NOT_FOUND',
+  /** A requested organization slug is already taken. */
+  ORGANIZATION_SLUG_TAKEN: 'ORGANIZATION_SLUG_TAKEN',
+
+  // ----- Roles, permissions & member management (Sprint 5) -----
+  /**
+   * A target membership does not exist in the requested organization. Returned
+   * for member role-change/removal when the membership id is unknown or belongs
+   * to a different organization — the organization id is the authority boundary.
+   */
+  MEMBER_NOT_FOUND: 'MEMBER_NOT_FOUND',
+  /**
+   * The operation would leave an active organization with no active Owner. This
+   * is the structural Last Owner invariant: it blocks demoting or removing the
+   * last active Owner (including self-demotion / self-removal). Enforced
+   * transactionally, never as only a read-before-write pre-check.
+   */
+  LAST_OWNER_REQUIRED: 'LAST_OWNER_REQUIRED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

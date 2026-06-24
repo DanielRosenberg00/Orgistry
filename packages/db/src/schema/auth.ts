@@ -34,8 +34,11 @@ const updatedAt = () =>
 /** Account lifecycle. `disabled` blocks login without deleting the record. */
 export type UserStatus = 'active' | 'disabled';
 
-/** Who a security event is attributed to. */
-export type SecurityActorType = 'user' | 'system' | 'anonymous';
+/**
+ * Who a security event is attributed to. `api_key` is the machine actor for
+ * external API key authentication events (Sprint 8) — never a user.
+ */
+export type SecurityActorType = 'user' | 'system' | 'anonymous' | 'api_key';
 
 export const users = pgTable(
   'users',

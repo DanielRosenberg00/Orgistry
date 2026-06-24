@@ -16,6 +16,10 @@ import { createProjectService } from './modules/projects/project.service';
 import { createDbEntitlementRepository } from './modules/entitlements/plan.repo';
 import { createEntitlementService } from './modules/entitlements/entitlement.service';
 import { createPlanService } from './modules/entitlements/plan.service';
+import { createDbApiKeyRepository } from './modules/api-keys/api-key.repo';
+import { createApiKeyService } from './modules/api-keys/api-key.service';
+import { createApiKeyAuthenticator } from './modules/api-keys/api-key.authenticator';
+import { createExternalProjectsService } from './modules/api-keys/external-projects.service';
 import { createRedisRateLimiter } from './lib/rate-limit';
 import type { ReadinessProbe } from './lib/readiness';
 
@@ -89,10 +93,36 @@ async function main(): Promise<void> {
   // (requireMembership/requirePermission); a dedicated project repository owns
   // tenant-scoped project persistence; the entitlement service enforces the
   // max_projects quota after the permission check.
+  // One project repository backs both the internal Projects slice and the
+  // external read-only Projects API (the external service reuses tenant-scoped
+  // project persistence; it never calls requireMembership).
+  const projectRepo = createDbProjectRepository(dbClient.db);
   const projectService = createProjectService({
     accessControl: organizationRepo,
-    projects: createDbProjectRepository(dbClient.db),
+    projects: projectRepo,
     entitlements: entitlementService,
+  });
+
+  // API keys (Sprint 8). One repository backs management AND external auth.
+  const apiKeyRepo = createDbApiKeyRepository(dbClient.db);
+  const apiKeyService = createApiKeyService({
+    accessControl: organizationRepo,
+    apiKeys: apiKeyRepo,
+    entitlements: entitlementService,
+  });
+  // The external authenticator derives the organization from the key row, checks
+  // the entitlement on every request, and applies Redis-backed per-key/per-org
+  // rate limits (fail-open, so Redis never affects auth correctness).
+  const apiKeyAuthenticator = createApiKeyAuthenticator({
+    apiKeys: apiKeyRepo,
+    organizations: organizationRepo,
+    entitlements: entitlementService,
+    rateLimiter: createRedisRateLimiter(redis),
+    rateLimits: config.rateLimit.external,
+    lastUsedThrottleSeconds: config.apiKeys.lastUsedThrottleSeconds,
+  });
+  const externalProjectsService = createExternalProjectsService({
+    projects: projectRepo,
   });
 
   const app = buildApp({
@@ -105,6 +135,9 @@ async function main(): Promise<void> {
     rbacService,
     projectService,
     planService,
+    apiKeyService,
+    externalProjectsService,
+    apiKeyAuthenticator,
   });
 
   // Prevent unhandled 'error' events when Redis is unreachable; readiness is

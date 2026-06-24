@@ -5,7 +5,7 @@ import {
   type PlanKey,
 } from '@orgistry/contracts';
 import { planStateMissingError } from './entitlement.errors';
-import { evaluateCountQuota, requireQuota } from './quota';
+import { evaluateCountQuota, requireEntitlement, requireQuota } from './quota';
 import type {
   ChangeOrganizationPlanResult,
   EntitlementRepository,
@@ -75,8 +75,27 @@ export interface EntitlementService {
    */
   requireMemberAdditionQuota(organizationId: string): Promise<void>;
 
-  /** Resolve API-key entitlements (readiness for a future API key module). */
+  /** Resolve API-key entitlements (access flag + max quota). */
   resolveApiKeyEntitlements(organizationId: string): Promise<ApiKeyEntitlements>;
+
+  /**
+   * Require that the organization's plan grants `api_keys_access`, or reject
+   * with `ENTITLEMENT_REQUIRED`. The boolean feature gate for API keys — checked
+   * AFTER the user permission and BEFORE the quota, and re-checked on every
+   * external API request so a downgraded plan disables existing keys.
+   */
+  requireApiKeysAccess(organizationId: string): Promise<void>;
+
+  /**
+   * Require that creating one more API key fits under `max_api_keys`, or reject
+   * with `QUOTA_EXCEEDED`. The active-key count is supplied by the caller (the
+   * API key repository owns that count); this method owns only the policy
+   * comparison, keeping the entitlement/quota model unchanged.
+   */
+  requireApiKeyCreationQuota(
+    organizationId: string,
+    activeApiKeyCount: number,
+  ): Promise<void>;
 
   /** Resolve audit entitlements (readiness for a future audit module). */
   resolveAuditEntitlements(organizationId: string): Promise<AuditEntitlements>;
@@ -152,6 +171,19 @@ export function createEntitlementService(
     async resolveApiKeyEntitlements(organizationId) {
       const { values } = await resolveEntitlements(organizationId);
       return { access: values.api_keys_access, max: values.max_api_keys };
+    },
+
+    async requireApiKeysAccess(organizationId) {
+      const { values } = await resolveEntitlements(organizationId);
+      requireEntitlement(values, ENTITLEMENT_KEYS.apiKeysAccess);
+    },
+
+    async requireApiKeyCreationQuota(organizationId, activeApiKeyCount) {
+      const { values } = await resolveEntitlements(organizationId);
+      requireQuota(
+        ENTITLEMENT_KEYS.maxApiKeys,
+        evaluateCountQuota(activeApiKeyCount, values.max_api_keys),
+      );
     },
 
     async resolveAuditEntitlements(organizationId) {

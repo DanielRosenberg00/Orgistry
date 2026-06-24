@@ -135,6 +135,34 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(120),
+
+  // External API rate-limit buckets (Sprint 8, Redis-backed, fixed-window). These
+  // are SEPARATE from the auth buckets: external traffic is API-key authenticated,
+  // not browser-session authenticated, and is limited per key and per organization.
+  RATE_LIMIT_EXTERNAL_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+  RATE_LIMIT_EXTERNAL_PER_KEY_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(120),
+  RATE_LIMIT_EXTERNAL_PER_ORG_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600),
+
+  // API key `last_used_at` write throttle (Sprint 8). Successful external auth
+  // updates `last_used_at` at most once per this window per key, so a busy key
+  // does not generate a write on every request. Default: 60 seconds.
+  API_KEY_LAST_USED_THROTTLE_SECONDS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(60),
 });
 
 export type Env = z.infer<typeof envSchema>;

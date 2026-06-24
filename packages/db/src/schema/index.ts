@@ -68,3 +68,8 @@ export {
   type OrganizationPlanRow,
   type OrganizationPlanInsert,
 } from './plans';
+export {
+  apiKeys,
+  type ApiKeyRow,
+  type ApiKeyInsert,
+} from './api-keys';

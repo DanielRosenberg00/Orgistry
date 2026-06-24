@@ -19,6 +19,13 @@ and `max_projects` quota enforcement on project create. It extends the chain to
 `… → Permission → Entitlement → Quota → Organization-Scoped Resource`, keeping
 **permission** (what the user may do), **entitlement** (what the plan allows), and
 **quota** (how much may be used) strictly separate. There is no billing.
+**Sprint 8 adds organization-scoped API keys and a read-only external Projects
+API** — hash-backed machine credentials (entitlement- and quota-gated), a typed
+`projects:read` scope, and `GET /v1/external/projects` whose tenant is derived
+from the key (no org id in the route, no browser JWT). It proves the chain
+`Organization Plan → API Key Entitlement → API Key Quota → Hash-Backed API Key →
+Scoped External API Access → Tenant-Scoped Projects Read`. API keys are machine
+credentials — not user sessions and not user impersonation.
 
 ## What this is
 
@@ -133,6 +140,31 @@ upgrading the plan re-allows creation. `plan.changed_demo` is recorded on the
 internal event seam. See
 [`docs/entitlements-plans-quotas.md`](docs/entitlements-plans-quotas.md).
 
+API keys & the external read-only Projects API (Sprint 8):
+
+`POST /v1/organizations/:organizationId/api-keys` (`api_keys.create`),
+`GET /v1/organizations/:organizationId/api-keys` (`api_keys.read`),
+`DELETE /v1/organizations/:organizationId/api-keys/:apiKeyId` (`api_keys.revoke`),
+`GET /v1/external/projects` (API key, scope `projects:read`).
+
+API keys are **organization-scoped machine credentials — not user sessions and
+not user impersonation**. A raw key (`orgistry_<displayId>_<secret>`) is returned
+**once** by create; only its display prefix and a unique SHA-256 `secret_hash` are
+stored. Management routes are Bearer-USER-authenticated and compose
+`requireMembership → requirePermission(api_keys.*) → requireApiKeysAccess →`
+(create) `requireApiKeyCreationQuota` — consuming the Sprint 7 `api_keys_access`
+entitlement and `max_api_keys` quota (which counts only active keys: non-revoked
+**and** non-expired). The **external** route takes **no organization id** (the
+tenant is derived from the key row), accepts **no browser JWT**, requires the
+`projects:read` scope, re-checks the entitlement every request, applies
+Redis-backed per-key/per-org rate limits (fail-open), throttles `last_used_at`,
+and reuses the tenant-scoped Projects read. Lifecycle ACTION events
+(`api_key.created`/`revoked`) are kept conceptually distinct from failed-auth
+SECURITY events though they share the internal event table. Keys are revoked
+(audited, **idempotent** — no duplicate event, markers preserved), never
+hard-deleted; revoked/expired keys cannot authenticate. See
+[`docs/api-keys-external-api.md`](docs/api-keys-external-api.md).
+
 The four fixed roles (Owner/Admin/Member/Viewer) map to a fixed, code-defined
 permission catalog seeded idempotently into the database. **Permissions are the
 authorization primitive**: organization-scoped routes compose
@@ -157,17 +189,21 @@ real subscription status — plans are internal demo plans only, switched solely
 the demo endpoint), no **custom plans or per-organization custom entitlements**
 and no feature-flag system, no **custom or organization-defined roles** (the four
 system roles are fixed), permission/role mutation APIs, resource-level
-permissions, ABAC or policy engine, RLS, invitations, API key lifecycle
-(create/list/revoke) or external API, audit retention deletion job, an external
-projects API, project restore or hard delete, **user-facing** organization audit
-log (member, project, and plan actions are recorded internally on the audit seam
-only — no read API), organization lifecycle (archive/suspend) endpoints,
-workers/queues, object storage, or product/workspace/members/permission/**projects**/**plan**
-UI. The `max_members`, `max_api_keys`, `api_keys_access`, `audit_log_access`, and
-`audit_retention_days` entitlements are modeled and resolvable but their consuming
-features (invitations, API keys, audit read, retention) are future scope. The web
-demo holds **no** auth/organization/projects/plan UI or authenticated shell and
-**no** fake auth/org/permission state. The implemented surface is validated, but
+permissions, ABAC or policy engine, RLS, invitations, a **write-enabled** external
+API or any external resource beyond read-only Projects, API key **rotation /
+secret-reveal / update** endpoints, an advanced/custom scope editor, service
+accounts / OAuth client credentials / personal access tokens, an external SDK or
+published OpenAPI, audit retention deletion job, project restore or hard delete,
+**user-facing** organization audit log (member, project, plan, and API key actions
+are recorded internally on the audit seam only — no read API), organization
+lifecycle (archive/suspend) endpoints, workers/queues, object storage, or
+product/workspace/members/permission/**projects**/**plan**/**API-key** UI. The
+`api_keys_access` entitlement and `max_api_keys` quota are now **consumed** by the
+Sprint 8 API key module; the `max_members`, `audit_log_access`, and
+`audit_retention_days` entitlements remain modeled and resolvable but their
+consuming features (invitations, audit read, retention) are future scope. The web
+demo holds **no** auth/organization/projects/plan/API-key UI or authenticated
+shell and **no** fake auth/org/permission state. The implemented surface is validated, but
 the system is **not production-certified**. See
 [`docs/rbac-permissions.md`](docs/rbac-permissions.md) (§E),
 [`docs/organization-foundation.md`](docs/organization-foundation.md) (§E),
@@ -269,6 +305,18 @@ creates the `orgistry_test` database (`infra/postgres-init/`), so
 
 ## Documentation
 
+- [`docs/sprint-8-artifact-package.md`](docs/sprint-8-artifact-package.md) —
+  **official Sprint 8 completion artifact**: API keys + external Projects API
+  summary, documentation index, validation evidence, security review (secret
+  handling, tenant isolation, scope/revoked/expired behavior, event sanitization),
+  scope control, remaining risks, and next-sprint readiness.
+- [`docs/api-keys-external-api.md`](docs/api-keys-external-api.md) —
+  **Sprint 8 API keys & external API reference** (A–F): the key secret format and
+  hash-only storage, the permission/entitlement/quota/scope separation, the
+  create/list/revoke lifecycle, the external authenticator (scopes, rate limits,
+  last-used throttling), tenant derivation, the recipe for adding a new external
+  read endpoint or scope, architecture/tradeoffs, contracts/invariants,
+  integration, limitations.
 - [`docs/sprint-7-artifact-package.md`](docs/sprint-7-artifact-package.md) —
   **official Sprint 7 completion artifact**: entitlements/plans/quotas summary,
   documentation index, validation evidence, the permission-vs-entitlement-vs-quota

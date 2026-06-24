@@ -113,6 +113,31 @@ export const ERROR_CODES = {
    * assumed) instead of defaulting to a plan.
    */
   PLAN_STATE_MISSING: 'PLAN_STATE_MISSING',
+
+  // ----- API keys & external API (Sprint 8) -----
+  /**
+   * An API key does not exist as an addressable resource of the requested
+   * organization. Returned identically (404) for management revoke when the key
+   * id is unknown or belongs to a DIFFERENT organization — the organization id
+   * is the authority boundary, so this also prevents cross-tenant probing.
+   */
+  API_KEY_NOT_FOUND: 'API_KEY_NOT_FOUND',
+  /**
+   * External API key authentication failed. Deliberately generic (401): returned
+   * IDENTICALLY whether the Authorization header was missing, the credential was
+   * malformed, the key was unknown, revoked, expired, or its organization is
+   * inactive — so a caller cannot probe which keys exist or why a key failed.
+   * Browser session/JWT tokens are not API keys and fail here too.
+   */
+  API_KEY_UNAUTHORIZED: 'API_KEY_UNAUTHORIZED',
+  /**
+   * An authenticated API key lacks the scope a route requires (e.g. the external
+   * Projects endpoint requires `projects:read`). 403, with `details` naming the
+   * required scope (see `apiKeyScopeErrorDetailsSchema`). Distinct from
+   * `API_KEY_UNAUTHORIZED`: the key authenticated successfully but is not scoped
+   * for this action.
+   */
+  API_KEY_SCOPE_REQUIRED: 'API_KEY_SCOPE_REQUIRED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

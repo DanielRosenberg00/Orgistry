@@ -56,6 +56,9 @@ export type {
 // Projects — first organization-scoped business resource (Sprint 6).
 export type { ProjectRow, ProjectInsert } from './schema/projects';
 
+// API keys — organization-scoped machine credentials (Sprint 8).
+export type { ApiKeyRow, ApiKeyInsert } from './schema/api-keys';
+
 // Plans, entitlements & quotas (Sprint 7).
 export {
   DEFAULT_PLAN_KEY,

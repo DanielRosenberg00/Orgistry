@@ -43,6 +43,13 @@
       "when": 1782307004494,
       "tag": "0005_flimsy_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782311486569,
+      "tag": "0006_tense_jamie_braddock",
+      "breakpoints": true
     }
   ]
 }

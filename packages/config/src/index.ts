@@ -68,6 +68,17 @@ export interface Config {
       readonly refreshPerSessionMax: number;
       readonly refreshPerIpMax: number;
     };
+    /** External API rate limits (per key, per organization). */
+    readonly external: {
+      readonly windowSeconds: number;
+      readonly perKeyMax: number;
+      readonly perOrgMax: number;
+    };
+  };
+  /** API key behavior knobs (Sprint 8). */
+  readonly apiKeys: {
+    /** Minimum seconds between `last_used_at` writes for a single key. */
+    readonly lastUsedThrottleSeconds: number;
   };
 }
 
@@ -133,6 +144,14 @@ function toConfig(env: Env): Config {
         refreshPerSessionMax: env.RATE_LIMIT_REFRESH_PER_SESSION_MAX,
         refreshPerIpMax: env.RATE_LIMIT_REFRESH_PER_IP_MAX,
       },
+      external: {
+        windowSeconds: env.RATE_LIMIT_EXTERNAL_WINDOW_SECONDS,
+        perKeyMax: env.RATE_LIMIT_EXTERNAL_PER_KEY_MAX,
+        perOrgMax: env.RATE_LIMIT_EXTERNAL_PER_ORG_MAX,
+      },
+    },
+    apiKeys: {
+      lastUsedThrottleSeconds: env.API_KEY_LAST_USED_THROTTLE_SECONDS,
     },
   };
 }

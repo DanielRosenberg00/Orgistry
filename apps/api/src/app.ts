@@ -22,6 +22,11 @@ import { registerProjectRoutes } from './modules/projects/project.routes';
 import type { ProjectService } from './modules/projects/project.service';
 import { registerPlanRoutes } from './modules/entitlements/plan.routes';
 import type { PlanService } from './modules/entitlements/plan.service';
+import { registerApiKeyRoutes } from './modules/api-keys/api-key.routes';
+import type { ApiKeyService } from './modules/api-keys/api-key.service';
+import { registerExternalProjectRoutes } from './modules/api-keys/external-projects.routes';
+import type { ExternalProjectsService } from './modules/api-keys/external-projects.service';
+import type { ApiKeyAuthenticator } from './modules/api-keys/api-key.authenticator';
 import type { ReadinessProbe } from './lib/readiness';
 
 export interface BuildAppOptions {
@@ -70,6 +75,23 @@ export interface BuildAppOptions {
    * only when both are provided.
    */
   planService?: PlanService;
+  /**
+   * API key management service backing the organization-scoped key routes
+   * (`/v1/organizations/:id/api-keys*`). Requires `authService` (the routes are
+   * Bearer-USER-authenticated through it); registered only when both are provided.
+   */
+  apiKeyService?: ApiKeyService;
+  /**
+   * External read-only Projects service backing `GET /v1/external/projects`.
+   * Registered only together with `apiKeyAuthenticator` — the external route is
+   * authenticated by API key, NOT by the user auth service.
+   */
+  externalProjectsService?: ExternalProjectsService;
+  /**
+   * Authenticator for external API-key routes. Independent of `authService` —
+   * API keys are not user sessions. Required to register the external routes.
+   */
+  apiKeyAuthenticator?: ApiKeyAuthenticator;
   /** Logger override. Defaults to a JSON logger at the configured level. */
   logger?: FastifyServerOptions['logger'];
 }
@@ -163,6 +185,26 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
         authenticator: options.authService,
       });
     }
+
+    // Organization-scoped, permission-enforced API key MANAGEMENT routes. These
+    // are Bearer-USER-authenticated (key management is a user action), so they
+    // are wired alongside the other user routes.
+    if (options.apiKeyService) {
+      registerApiKeyRoutes(app, {
+        service: options.apiKeyService,
+        authenticator: options.authService,
+      });
+    }
+  }
+
+  // External read-only Projects route. Deliberately OUTSIDE the user-auth block:
+  // it is authenticated by API key, never by the user auth service, so it is
+  // registered whenever its own dependencies are present.
+  if (options.externalProjectsService && options.apiKeyAuthenticator) {
+    registerExternalProjectRoutes(app, {
+      service: options.externalProjectsService,
+      authenticator: options.apiKeyAuthenticator,
+    });
   }
 
   return app;

@@ -1,4 +1,5 @@
 import {
+  type ApiKeyRow,
   type MembershipRow,
   type OrganizationPlanRow,
   type OrganizationRow,
@@ -51,6 +52,8 @@ export interface InMemoryOrgStore {
   users: UserRow[];
   /** Organization-scoped projects (Sprint 6), written by the in-memory project repo. */
   projects: ProjectRow[];
+  /** Organization-scoped API keys (Sprint 8), written by the in-memory API key repo. */
+  apiKeys: ApiKeyRow[];
   /** Fixed internal demo plan catalog (Sprint 7), pre-seeded from PLAN_SEED. */
   plans: PlanRow[];
   /**
@@ -110,6 +113,7 @@ export function createInMemoryOrgStore(): InMemoryOrgStore {
     rolePermissions,
     users: [],
     projects: [],
+    apiKeys: [],
     plans,
     organizationPlans: [],
     securityEvents: [],

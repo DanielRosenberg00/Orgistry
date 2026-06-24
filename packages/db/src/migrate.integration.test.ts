@@ -74,6 +74,7 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       'projects',
       'plans',
       'organization_plans',
+      'api_keys',
     ];
     for (const table of tables) {
       const rows = await sql<{ exists: boolean }[]>`
@@ -256,6 +257,9 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       'ix_projects_org_id',
       'uq_plans_key',
       'uq_organization_plans_organization',
+      'uq_api_keys_secret_hash',
+      'ix_api_keys_org_created',
+      'ix_api_keys_org_active',
     ];
     const rows = await sql<{ indexname: string }[]>`
       SELECT indexname FROM pg_indexes WHERE schemaname = 'public'
@@ -285,6 +289,53 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
     const list = byName.get('ix_projects_org_created_active') ?? '';
     expect(list).toMatch(/\(organization_id, created_at, id\)/);
     expect(list.toLowerCase()).toContain('where (deleted_at is null)');
+  });
+
+  it('enforces api key secret-hash uniqueness and active-key index intent', async () => {
+    // Set up an organization + user to own the keys.
+    await sql`DELETE FROM api_keys`;
+    await sql`DELETE FROM memberships`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id = 'user_key_test'`;
+    await sql`
+      INSERT INTO users (id, email, normalized_email, password_hash, display_name)
+      VALUES ('user_key_test', 'k@x.com', 'k@x.com', 'hash', 'K')`;
+    await sql`
+      INSERT INTO organizations (id, name, slug, type, status, created_by_user_id)
+      VALUES ('org_key_test', 'Org', 'org-key-test', 'team', 'active', 'user_key_test')`;
+
+    await sql`
+      INSERT INTO api_keys (id, organization_id, name, display_prefix, secret_hash, scopes, created_by_user_id)
+      VALUES ('key_one', 'org_key_test', 'A', 'orgistry_AAAA1111', 'hash_dup', '["projects:read"]'::jsonb, 'user_key_test')`;
+    // A second key with the SAME secret hash is rejected by the unique index.
+    await expect(
+      sql`
+        INSERT INTO api_keys (id, organization_id, name, display_prefix, secret_hash, scopes, created_by_user_id)
+        VALUES ('key_two', 'org_key_test', 'B', 'orgistry_BBBB2222', 'hash_dup', '["projects:read"]'::jsonb, 'user_key_test')`,
+    ).rejects.toThrow();
+
+    // NOTE: the `id` column has NO database default — id generation is
+    // REPOSITORY-owned (`createId('key')` in `createDbApiKeyRepository`), the same
+    // convention as projects/organizations. A column with no default rejects an
+    // id-less insert, which proves the point: the prefix is enforced in code, not
+    // by the DB. The real generated-`key_`-id assertion therefore lives on the
+    // service path (api-key.routes.test.ts), not here.
+    await expect(
+      sql`
+        INSERT INTO api_keys (organization_id, name, display_prefix, secret_hash, scopes, created_by_user_id)
+        VALUES ('org_key_test', 'C', 'orgistry_CCCC3333', 'hash_c', '["projects:read"]'::jsonb, 'user_key_test')`,
+    ).rejects.toThrow();
+
+    // The active-key index is PARTIAL on revoked_at IS NULL (quota/active scans).
+    const defs = await sql<{ indexname: string; indexdef: string }[]>`
+      SELECT indexname, indexdef FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'api_keys'`;
+    const active = defs.find((d) => d.indexname === 'ix_api_keys_org_active');
+    expect(active?.indexdef.toLowerCase()).toContain('where (revoked_at is null)');
+
+    await sql`DELETE FROM api_keys`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id = 'user_key_test'`;
   });
 
   it('enforces normalized-email uniqueness', async () => {

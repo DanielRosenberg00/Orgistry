@@ -88,6 +88,31 @@ export const ERROR_CODES = {
    * addressable here, so this also prevents cross-tenant existence probing.
    */
   PROJECT_NOT_FOUND: 'PROJECT_NOT_FOUND',
+
+  // ----- Entitlements, plans & quotas (Sprint 7) -----
+  /**
+   * A numeric quota for the organization's plan has been reached. Returned when
+   * a write would exceed a `max_*` ceiling (e.g. creating a project at or above
+   * `max_projects`). The `details` payload (see `quotaErrorDetailsSchema`) names
+   * the quota and reports the limit and current usage. This is distinct from
+   * authorization: the caller may HAVE the permission and still be quota-blocked.
+   */
+  QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
+  /**
+   * The organization's plan does not grant a required boolean feature
+   * entitlement (e.g. `api_keys_access`). The `details` payload (see
+   * `entitlementErrorDetailsSchema`) names the missing entitlement. Distinct
+   * from a permission denial: the user may be authorized while the plan is not
+   * entitled.
+   */
+  ENTITLEMENT_REQUIRED: 'ENTITLEMENT_REQUIRED',
+  /**
+   * The organization has no plan state. Every active organization is provisioned
+   * with plan state, so this signals a data-integrity failure rather than a
+   * client error; the entitlement resolver fails safely (no entitlements are
+   * assumed) instead of defaulting to a plan.
+   */
+  PLAN_STATE_MISSING: 'PLAN_STATE_MISSING',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

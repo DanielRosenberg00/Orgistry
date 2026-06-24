@@ -11,6 +11,7 @@ import {
 } from '@orgistry/contracts';
 import { decodeCursor, encodeCursor } from '@orgistry/shared';
 import { AppError } from '../../lib/errors';
+import type { EntitlementService } from '../entitlements/entitlement.service';
 import {
   type OrganizationActor,
   requireMembership,
@@ -47,6 +48,13 @@ export interface ProjectServiceOptions {
   accessControl: AccessControlRepository;
   /** Tenant-aware project persistence. */
   projects: ProjectRepository;
+  /**
+   * Organization-level entitlement/quota service. Project CREATE enforces the
+   * `max_projects` quota through it, AFTER the permission check. This is the
+   * Sprint 7 separation made concrete: permission says the user may create a
+   * project; the quota says the organization's plan still has room.
+   */
+  entitlements: EntitlementService;
 }
 
 /** Per-request security metadata threaded from the route into action events. */
@@ -150,7 +158,7 @@ function actionContext(
 export function createProjectService(
   options: ProjectServiceOptions,
 ): ProjectService {
-  const { accessControl, projects } = options;
+  const { accessControl, projects, entitlements } = options;
 
   /** Resolve the actor (active membership + effective permissions) for a request. */
   async function actorFor(input: {
@@ -197,6 +205,13 @@ export function createProjectService(
         requestId: input.ctx.requestId,
       });
       requirePermission(actor, PERMISSION_KEYS.projectsCreate);
+
+      // Enforcement order: permission (above) THEN quota. A user without
+      // projects.create is already blocked; an authorized user is still blocked
+      // when the organization's plan is at its max_projects ceiling. The quota
+      // check throws QUOTA_EXCEEDED and runs BEFORE any write, so a quota failure
+      // creates no project and records no project.created event.
+      await entitlements.requireProjectCreationQuota(actor.organizationId);
 
       const project = await projects.createProject({
         organizationId: actor.organizationId,

@@ -3,6 +3,7 @@ import postgres from 'postgres';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runMigrations } from './migrator';
 import { PERMISSION_SEED, ROLE_PERMISSION_SEED } from './schema/permissions';
+import { PLAN_SEED } from './schema/plans';
 
 // Integration entry point: load the root `.env` so this runs locally with only
 // `cp .env.example .env`. CI sets these variables directly (no `.env` present).
@@ -71,6 +72,8 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       'permissions',
       'role_permissions',
       'projects',
+      'plans',
+      'organization_plans',
     ];
     for (const table of tables) {
       const rows = await sql<{ exists: boolean }[]>`
@@ -119,6 +122,79 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
     const adminCount = rows.filter((r) => r.role_id === 'role_admin').length;
     expect(ownerCount).toBe(PERMISSION_SEED.length);
     expect(adminCount).toBeLessThan(ownerCount);
+  });
+
+  it('seeds the fixed plan catalog idempotently and matches the contracts catalog', async () => {
+    const rows = await sql<
+      {
+        id: string;
+        key: string;
+        max_members: number;
+        max_projects: number;
+        api_keys_access: boolean;
+        max_api_keys: number;
+        audit_log_access: boolean;
+        audit_retention_days: number;
+      }[]
+    >`SELECT * FROM plans ORDER BY key`;
+    expect(rows).toHaveLength(PLAN_SEED.length);
+    // Exactly Free, Pro, Business with stable derived ids.
+    expect(rows.map((r) => r.key).sort()).toEqual(['business', 'free', 'pro']);
+    expect(rows.find((r) => r.key === 'pro')?.id).toBe('plan_pro');
+    // Values match the canonical catalog seed exactly (no drift).
+    for (const seed of PLAN_SEED) {
+      const row = rows.find((r) => r.key === seed.key);
+      expect(row).toBeDefined();
+      expect(row?.max_members).toBe(seed.maxMembers);
+      expect(row?.max_projects).toBe(seed.maxProjects);
+      expect(row?.api_keys_access).toBe(seed.apiKeysAccess);
+      expect(row?.max_api_keys).toBe(seed.maxApiKeys);
+      expect(row?.audit_log_access).toBe(seed.auditLogAccess);
+      expect(row?.audit_retention_days).toBe(seed.auditRetentionDays);
+    }
+  });
+
+  it('backfills organization plan state deterministically and idempotently', async () => {
+    // Simulate a pre-Sprint-7 organization that has no plan-state row, then run
+    // the SAME backfill statement the 0005 migration uses. Proves the backfill is
+    // deterministic (derived id, Free plan) and idempotent (NOT EXISTS guard).
+    await sql`DELETE FROM organization_plans`;
+    await sql`DELETE FROM memberships`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id = 'user_plan_backfill'`;
+    await sql`
+      INSERT INTO users (id, email, normalized_email, password_hash, display_name)
+      VALUES ('user_plan_backfill', 'p@x.com', 'p@x.com', 'hash', 'P')`;
+    await sql`
+      INSERT INTO organizations (id, name, slug, type, status, created_by_user_id)
+      VALUES ('org_plan_backfill', 'Org', 'org-plan-backfill', 'team', 'active', 'user_plan_backfill')`;
+
+    const backfill = sql`
+      INSERT INTO organization_plans (id, organization_id, plan_key, changed_by_user_id)
+      SELECT 'oplan_' || o.id, o.id, 'free', o.created_by_user_id
+      FROM organizations o
+      WHERE NOT EXISTS (
+        SELECT 1 FROM organization_plans op WHERE op.organization_id = o.id
+      )`;
+    await backfill;
+    // Idempotent: re-running inserts nothing more.
+    await sql.unsafe(`
+      INSERT INTO organization_plans (id, organization_id, plan_key, changed_by_user_id)
+      SELECT 'oplan_' || o.id, o.id, 'free', o.created_by_user_id
+      FROM organizations o
+      WHERE NOT EXISTS (
+        SELECT 1 FROM organization_plans op WHERE op.organization_id = o.id
+      )`);
+
+    const rows = await sql<{ id: string; plan_key: string }[]>`
+      SELECT id, plan_key FROM organization_plans WHERE organization_id = 'org_plan_backfill'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('oplan_org_plan_backfill');
+    expect(rows[0].plan_key).toBe('free');
+
+    await sql`DELETE FROM organization_plans`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id = 'user_plan_backfill'`;
   });
 
   it('enforces one active membership per (user, organization)', async () => {
@@ -178,6 +254,8 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       'uq_role_permissions_role_permission',
       'ix_projects_org_created_active',
       'ix_projects_org_id',
+      'uq_plans_key',
+      'uq_organization_plans_organization',
     ];
     const rows = await sql<{ indexname: string }[]>`
       SELECT indexname FROM pg_indexes WHERE schemaname = 'public'

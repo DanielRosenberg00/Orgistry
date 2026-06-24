@@ -82,6 +82,22 @@ function addMembership(
   return id;
 }
 
+/**
+ * Lift the organization onto a higher demo plan so its `max_projects` quota does
+ * not interfere with a test that needs many projects. Pagination/ordering tests
+ * are about list behavior, not the Sprint 7 quota — `max_projects` enforcement
+ * is proven directly in the quota tests below and in the entitlements suite.
+ */
+function liftProjectQuota(organizationId: string, planKey = 'business'): void {
+  const state = ctx.orgStore.organizationPlans.find(
+    (p) => p.organizationId === organizationId,
+  );
+  if (!state) {
+    throw new Error(`No plan state for organization ${organizationId}.`);
+  }
+  state.planKey = planKey as typeof state.planKey;
+}
+
 /** Create a project via the API and return its id (owner has projects.create). */
 async function createProject(
   token: string,
@@ -272,6 +288,7 @@ describe('GET /v1/organizations/:id/projects (list)', () => {
   it('paginates with an opaque cursor and enforces the requested limit', async () => {
     const owner = await registerUser('Owner');
     const orgId = await createTeamOrg(owner.token, 'Acme');
+    liftProjectQuota(orgId);
     for (let i = 0; i < 5; i += 1) {
       await createProject(owner.token, orgId, `P${i}`);
     }
@@ -303,6 +320,7 @@ describe('GET /v1/organizations/:id/projects (list)', () => {
   it('defaults the page limit to 20 when none is given', async () => {
     const owner = await registerUser('Owner');
     const orgId = await createTeamOrg(owner.token, 'Acme');
+    liftProjectQuota(orgId);
     for (let i = 0; i < 25; i += 1) {
       await createProject(owner.token, orgId, `P${i}`);
     }
@@ -660,6 +678,7 @@ describe('cursor pagination tie-breaker (equal created_at)', () => {
   it('pages stably with no duplicates or skips when timestamps tie', async () => {
     const owner = await registerUser('Owner');
     const orgId = await createTeamOrg(owner.token, 'Acme');
+    liftProjectQuota(orgId);
     for (let i = 0; i < 5; i += 1) {
       await createProject(owner.token, orgId, `Tie ${i}`);
     }

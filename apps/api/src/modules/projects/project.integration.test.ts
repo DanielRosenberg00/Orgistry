@@ -12,6 +12,8 @@ import { createDbOrganizationRepository } from '../organization/organization.rep
 import { createProjectService } from './project.service';
 import { createDbProjectRepository } from './project.repo';
 import { PROJECT_EVENT_TYPES } from './project.events';
+import { createEntitlementService } from '../entitlements/entitlement.service';
+import { createDbEntitlementRepository } from '../entitlements/plan.repo';
 
 /**
  * DB-backed Projects integration test.
@@ -105,6 +107,17 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
     return response.json().data.project.id;
   }
 
+  /**
+   * Lift the organization onto the Business demo plan so its `max_projects`
+   * quota does not interfere with a pagination test that needs many projects.
+   * Quota enforcement itself is proven in the dedicated quota tests.
+   */
+  async function liftProjectQuota(organizationId: string): Promise<void> {
+    await db.sql`
+      UPDATE organization_plans SET plan_key = 'business'
+      WHERE organization_id = ${organizationId}`;
+  }
+
   beforeAll(async () => {
     await runMigrations(connectionString as string);
     db = createDbClient(connectionString as string);
@@ -125,6 +138,9 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
       projectService: createProjectService({
         accessControl: orgRepo,
         projects: createDbProjectRepository(db.db),
+        entitlements: createEntitlementService({
+          repo: createDbEntitlementRepository(db.db),
+        }),
       }),
       logger: false,
     });
@@ -300,6 +316,7 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
   it('paginates a tenant\'s projects with a stable cursor', async () => {
     const owner = await registerUser('Owner');
     const orgId = await createTeamOrg(owner.token, 'Acme');
+    await liftProjectQuota(orgId);
     for (let i = 0; i < 5; i += 1) {
       await createProject(owner.token, orgId, `P${i}`);
     }

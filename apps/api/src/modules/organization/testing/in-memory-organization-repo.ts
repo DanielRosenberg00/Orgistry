@@ -21,7 +21,10 @@ import type {
   OrganizationRepository,
   RemoveMemberParams,
 } from '../organization.types';
-import type { InMemoryOrgStore } from './in-memory-org-store';
+import {
+  provisionDefaultOrganizationPlan,
+  type InMemoryOrgStore,
+} from './in-memory-org-store';
 
 /**
  * In-memory `OrganizationRepository` for unit tests.
@@ -137,6 +140,8 @@ export function createInMemoryOrganizationRepository(
       };
       store.organizations.push(organization);
       store.memberships.push(membership);
+      // Default plan state, exactly as the database provisioning seam writes it.
+      provisionDefaultOrganizationPlan(store, organization.id, params.userId);
       return { organization, membership, role: requireRole(membership.roleId) };
     },
 

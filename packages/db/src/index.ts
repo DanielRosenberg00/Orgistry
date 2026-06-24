@@ -55,3 +55,17 @@ export type {
 
 // Projects — first organization-scoped business resource (Sprint 6).
 export type { ProjectRow, ProjectInsert } from './schema/projects';
+
+// Plans, entitlements & quotas (Sprint 7).
+export {
+  DEFAULT_PLAN_KEY,
+  planRowId,
+  PLAN_SEED,
+} from './schema/plans';
+export type {
+  PlanKey,
+  PlanRow,
+  PlanInsert,
+  OrganizationPlanRow,
+  OrganizationPlanInsert,
+} from './schema/plans';

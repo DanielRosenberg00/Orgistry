@@ -1,5 +1,6 @@
 import {
   type DbExecutor,
+  DEFAULT_PLAN_KEY,
   ROLE_IDS,
   type MembershipRow,
   type OrganizationRow,
@@ -109,10 +110,18 @@ export interface InsertOrganizationParams {
 }
 
 /**
- * Insert an organization and its creator's ACTIVE Owner membership using the
- * given executor. Both inserts share the executor, so when it is a transaction
- * the pair is atomic. The Owner role is the seeded baseline role (`ROLE_IDS`);
- * this is a role assignment, NOT a permission grant.
+ * Insert an organization, its creator's ACTIVE Owner membership, AND its default
+ * plan state, using the given executor. All three inserts share the executor, so
+ * when it is a transaction they are atomic — a new organization can never exist
+ * without an Owner or without plan state.
+ *
+ * The Owner role is the seeded baseline role (`ROLE_IDS`); this is a role
+ * assignment, NOT a permission grant. The plan state is the default plan
+ * (`DEFAULT_PLAN_KEY`, Free); plan state belongs to the organization and is
+ * independent of the membership role. This is the single provisioning seam used
+ * by BOTH registration (personal workspace) and team-organization creation, so
+ * every organization — personal or team — receives default plan state the same
+ * way.
  */
 export async function insertOrganizationWithOwnerMembership(
   executor: DbExecutor,
@@ -138,6 +147,15 @@ export async function insertOrganizationWithOwnerMembership(
       status: 'active',
     })
     .returning();
+
+  // Default plan state. The creator is recorded as having set it; a later demo
+  // plan change overwrites the plan key and the actor.
+  await executor.insert(schema.organizationPlans).values({
+    id: createId('oplan'),
+    organizationId: organization.id,
+    planKey: DEFAULT_PLAN_KEY,
+    changedByUserId: params.createdByUserId,
+  });
 
   return { organization, membership };
 }

@@ -6,10 +6,15 @@ current-user, Argon2id password handling, JWT access tokens, durable security
 events); Sprint 3 added the secure browser session lifecycle (refresh-token
 rotation, HttpOnly refresh cookie, reuse detection, logout, session
 listing/revocation, CSRF enforcement, Redis-backed auth rate limiting);
-**Sprint 4 adds the organization foundation** — the `User → Organization →
+Sprint 4 added the organization foundation — the `User → Organization →
 Membership` tenant layer, an auto-provisioned personal workspace at registration,
-and authenticated team-organization create/list/read. No other product domain
-exists yet.
+and authenticated team-organization create/list/read; Sprint 5 added
+permission-first RBAC and member management. **Sprint 6 adds the Projects vertical
+slice** — the first organization-scoped business resource, completing the chain
+`User → Organization → Membership → Role → Permission → Organization-Scoped
+Resource`. Projects are intentionally small: a backend-only proof of tenant-scoped
+resource access, permission-first authorization, cursor pagination, soft delete,
+and safe cross-tenant failure.
 
 ## What this is
 
@@ -84,6 +89,25 @@ Member management:
 `PATCH /v1/organizations/:organizationId/members/:membershipId/role` (`members.change_role`),
 `DELETE /v1/organizations/:organizationId/members/:membershipId` (`members.remove`).
 
+The Projects vertical slice — first organization-scoped business resource (Sprint 6):
+
+`GET /v1/organizations/:organizationId/projects` (`projects.read`),
+`POST /v1/organizations/:organizationId/projects` (`projects.create`),
+`GET /v1/organizations/:organizationId/projects/:projectId` (`projects.read`),
+`PATCH /v1/organizations/:organizationId/projects/:projectId` (`projects.update`),
+`DELETE /v1/organizations/:organizationId/projects/:projectId` (`projects.delete`).
+
+Projects prove the tenant-scoped resource pattern: every query is scoped by the
+route **organization ID**, authorization composes `requireMembership` →
+`requirePermission(actor, "projects.read")` (never a role-name check), the list is
+cursor-paginated, deletion is **soft** (`deleted_at` + `deleted_by_user_id`; no
+hard delete, no restore), and cross-tenant or deleted targets return an
+indistinguishable `PROJECT_NOT_FOUND` 404 so existence never leaks.
+`project.created` / `.updated` / `.deleted` are recorded on the internal action-
+event seam (no read API). Projects are intentionally small — the canonical
+template for future organization-scoped resources. See
+[`docs/projects.md`](docs/projects.md).
+
 The four fixed roles (Owner/Admin/Member/Viewer) map to a fixed, code-defined
 permission catalog seeded idempotently into the database. **Permissions are the
 authorization primitive**: organization-scoped routes compose
@@ -104,12 +128,14 @@ Beyond the auth lifecycle, organization foundation, and the RBAC/member-manageme
 layer above, there is no email verification, password reset, MFA, OAuth, or
 passkeys; and no **custom or organization-defined roles** (the four system roles
 are fixed), permission/role mutation APIs, resource-level permissions, ABAC or
-policy engine, RLS, invitations, entitlements, quotas, projects, API keys,
-external API, **user-facing** organization audit log (member actions are recorded
-internally on the audit seam only), organization lifecycle (archive/suspend)
-endpoints, workers/queues, object storage, or product/workspace/members/permission
-UI. The web demo holds **no** auth/organization UI or authenticated shell and
-**no** fake auth/org/permission state. The implemented surface is validated, but
+policy engine, RLS, invitations, entitlements, quotas, API keys, an external
+projects API, project restore or hard delete, **user-facing** organization audit
+log (member and project actions are recorded internally on the audit seam only),
+organization lifecycle (archive/suspend) endpoints, workers/queues, object
+storage, or product/workspace/members/permission/**projects** UI. Projects exist
+as a backend slice only (Sprint 6) — there is no web Projects page or workspace
+switcher. The web demo holds **no** auth/organization/projects UI or authenticated
+shell and **no** fake auth/org/permission state. The implemented surface is validated, but
 the system is **not production-certified**. See
 [`docs/rbac-permissions.md`](docs/rbac-permissions.md) (§E),
 [`docs/organization-foundation.md`](docs/organization-foundation.md) (§E),
@@ -211,6 +237,14 @@ creates the `orgistry_test` database (`infra/postgres-init/`), so
 
 ## Documentation
 
+- [`docs/sprint-6-artifact-package.md`](docs/sprint-6-artifact-package.md) —
+  **official Sprint 6 completion artifact**: Projects vertical slice summary,
+  validation evidence, authorization/tenant-isolation proof, invariants, scope
+  control, and confidence assessment.
+- [`docs/projects.md`](docs/projects.md) — **Sprint 6 Projects reference** (A–F):
+  the organization-scoped resource pattern, route/service/repository/contracts/
+  database wiring, the recipe for adding the next tenant-scoped resource,
+  contracts/invariants, integration, limitations.
 - [`docs/sprint-5-artifact-package.md`](docs/sprint-5-artifact-package.md) —
   **official Sprint 5 completion artifact**: permission-first RBAC + member
   management summary, validation evidence, invariants, scope control, and

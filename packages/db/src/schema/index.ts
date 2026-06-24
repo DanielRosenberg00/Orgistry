@@ -50,3 +50,8 @@ export {
   type PermissionInsert,
   type RolePermissionRow,
 } from './permissions';
+export {
+  projects,
+  type ProjectRow,
+  type ProjectInsert,
+} from './projects';

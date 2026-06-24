@@ -52,3 +52,6 @@ export type {
   PermissionInsert,
   RolePermissionRow,
 } from './schema/permissions';
+
+// Projects — first organization-scoped business resource (Sprint 6).
+export type { ProjectRow, ProjectInsert } from './schema/projects';

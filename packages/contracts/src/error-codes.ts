@@ -78,6 +78,16 @@ export const ERROR_CODES = {
    * transactionally, never as only a read-before-write pre-check.
    */
   LAST_OWNER_REQUIRED: 'LAST_OWNER_REQUIRED',
+
+  // ----- Projects (Sprint 6) -----
+  /**
+   * A project does not exist as an addressable resource of the requested
+   * organization. Returned identically when the project id is unknown, belongs
+   * to a DIFFERENT organization, or has been soft-deleted. The organization id
+   * is the authority boundary — a project in another tenant is never
+   * addressable here, so this also prevents cross-tenant existence probing.
+   */
+  PROJECT_NOT_FOUND: 'PROJECT_NOT_FOUND',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

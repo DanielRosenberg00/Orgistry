@@ -18,6 +18,8 @@ import { registerOrganizationRbacRoutes } from './modules/organization/org-rbac.
 import type { OrganizationRbacService } from './modules/organization/org-rbac.service';
 import { registerRbacRoutes } from './modules/rbac/rbac.routes';
 import type { RbacService } from './modules/rbac/rbac.service';
+import { registerProjectRoutes } from './modules/projects/project.routes';
+import type { ProjectService } from './modules/projects/project.service';
 import type { ReadinessProbe } from './lib/readiness';
 
 export interface BuildAppOptions {
@@ -53,6 +55,12 @@ export interface BuildAppOptions {
    * equivalents above.
    */
   rbacService?: RbacService;
+  /**
+   * Project service backing the organization-scoped Projects routes
+   * (`/v1/organizations/:id/projects*`). Requires `authService` (the routes are
+   * Bearer-authenticated through it); registered only when both are provided.
+   */
+  projectService?: ProjectService;
   /** Logger override. Defaults to a JSON logger at the configured level. */
   logger?: FastifyServerOptions['logger'];
 }
@@ -127,6 +135,14 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     if (options.rbacService) {
       registerRbacRoutes(app, {
         service: options.rbacService,
+        authenticator: options.authService,
+      });
+    }
+
+    // Organization-scoped, permission-enforced Projects routes.
+    if (options.projectService) {
+      registerProjectRoutes(app, {
+        service: options.projectService,
         authenticator: options.authService,
       });
     }

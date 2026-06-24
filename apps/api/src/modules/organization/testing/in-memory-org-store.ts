@@ -2,6 +2,7 @@ import {
   type MembershipRow,
   type OrganizationRow,
   type PermissionRow,
+  type ProjectRow,
   type RolePermissionRow,
   type RoleRow,
   type UserRow,
@@ -43,7 +44,9 @@ export interface InMemoryOrgStore {
   rolePermissions: RolePermissionRow[];
   /** Shared user records (also written by the auth in-memory repo at registration). */
   users: UserRow[];
-  /** Member-management audit events recorded by the in-memory organization repo. */
+  /** Organization-scoped projects (Sprint 6), written by the in-memory project repo. */
+  projects: ProjectRow[];
+  /** Member-management & project action events recorded by the in-memory repos. */
   securityEvents: RecordedSecurityEvent[];
 }
 
@@ -80,6 +83,7 @@ export function createInMemoryOrgStore(): InMemoryOrgStore {
     permissions,
     rolePermissions,
     users: [],
+    projects: [],
     securityEvents: [],
   };
 }

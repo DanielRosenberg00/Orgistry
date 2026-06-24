@@ -70,6 +70,7 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       'memberships',
       'permissions',
       'role_permissions',
+      'projects',
     ];
     for (const table of tables) {
       const rows = await sql<{ exists: boolean }[]>`
@@ -175,6 +176,8 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       'ix_memberships_organization_id',
       'uq_permissions_key',
       'uq_role_permissions_role_permission',
+      'ix_projects_org_created_active',
+      'ix_projects_org_id',
     ];
     const rows = await sql<{ indexname: string }[]>`
       SELECT indexname FROM pg_indexes WHERE schemaname = 'public'
@@ -183,6 +186,27 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
     for (const index of indexes) {
       expect(present.has(index), `${index} should exist`).toBe(true);
     }
+  });
+
+  it('supports tenant-scoped project lookup and active-list intent (not just names)', async () => {
+    // Assert the index DEFINITIONS, so a future refactor cannot silently drop the
+    // Sprint 6 tenant-isolation invariant ("lookup is by organization_id + id")
+    // by renaming or recolumning an index while keeping the name list happy.
+    const defs = await sql<{ indexname: string; indexdef: string }[]>`
+      SELECT indexname, indexdef FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'projects'
+    `;
+    const byName = new Map(defs.map((d) => [d.indexname, d.indexdef]));
+
+    // Tenant-scoped point lookup: organization_id + id.
+    const lookup = byName.get('ix_projects_org_id') ?? '';
+    expect(lookup).toMatch(/\(organization_id, id\)/);
+
+    // Active list / keyset pagination: organization_id + created_at + id, and a
+    // PARTIAL predicate so only active (non-deleted) rows are indexed.
+    const list = byName.get('ix_projects_org_created_active') ?? '';
+    expect(list).toMatch(/\(organization_id, created_at, id\)/);
+    expect(list.toLowerCase()).toContain('where (deleted_at is null)');
   });
 
   it('enforces normalized-email uniqueness', async () => {

@@ -11,6 +11,8 @@ import { createMemberService } from './modules/organization/member.service';
 import { createOrganizationRbacService } from './modules/organization/org-rbac.service';
 import { createDbRbacRepository } from './modules/rbac/rbac.repo';
 import { createRbacService } from './modules/rbac/rbac.service';
+import { createDbProjectRepository } from './modules/projects/project.repo';
+import { createProjectService } from './modules/projects/project.service';
 import { createRedisRateLimiter } from './lib/rate-limit';
 import type { ReadinessProbe } from './lib/readiness';
 
@@ -70,6 +72,13 @@ async function main(): Promise<void> {
     repo: organizationRepo,
     rbacService,
   });
+  // The organization repository satisfies the access-control surface
+  // (requireMembership/requirePermission); a dedicated project repository owns
+  // tenant-scoped project persistence.
+  const projectService = createProjectService({
+    accessControl: organizationRepo,
+    projects: createDbProjectRepository(dbClient.db),
+  });
 
   const app = buildApp({
     config,
@@ -79,6 +88,7 @@ async function main(): Promise<void> {
     memberService,
     organizationRbacService,
     rbacService,
+    projectService,
   });
 
   // Prevent unhandled 'error' events when Redis is unreachable; readiness is

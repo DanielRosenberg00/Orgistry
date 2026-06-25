@@ -41,6 +41,15 @@ export interface RecordedSecurityEvent {
   eventType: string;
   metadata: Record<string, unknown>;
   requestId: string | null;
+  /**
+   * Identity + creation time. The producer fakes omit these (the audit read
+   * fake synthesizes deterministic values from insertion order); the audit
+   * route tests seed them explicitly to exercise ordering, pagination, and
+   * time-range filters precisely. Optional so existing producer fakes are
+   * unchanged.
+   */
+  id?: string;
+  createdAt?: Date;
 }
 
 export interface InMemoryOrgStore {

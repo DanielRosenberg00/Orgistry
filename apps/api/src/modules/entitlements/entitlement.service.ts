@@ -119,8 +119,17 @@ export interface EntitlementService {
     activeApiKeyCount: number,
   ): Promise<void>;
 
-  /** Resolve audit entitlements (readiness for a future audit module). */
+  /** Resolve audit entitlements (access flag + modeled retention window). */
   resolveAuditEntitlements(organizationId: string): Promise<AuditEntitlements>;
+
+  /**
+   * Require that the organization's plan grants `audit_log_access`, or reject
+   * with `ENTITLEMENT_REQUIRED`. The boolean feature gate for the audit log read
+   * API — checked AFTER the user permission (`audit_events.read`) and
+   * INDEPENDENTLY of it: a permitted user is still blocked when the plan is not
+   * entitled. Mirrors `requireApiKeysAccess`.
+   */
+  requireAuditLogAccess(organizationId: string): Promise<void>;
 
   /**
    * Change the organization's plan (demo control) and resolve the new
@@ -232,6 +241,11 @@ export function createEntitlementService(
         access: values.audit_log_access,
         retentionDays: values.audit_retention_days,
       };
+    },
+
+    async requireAuditLogAccess(organizationId) {
+      const { values } = await resolveEntitlements(organizationId);
+      requireEntitlement(values, ENTITLEMENT_KEYS.auditLogAccess);
     },
 
     async changePlan(params) {

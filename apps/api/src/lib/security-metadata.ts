@@ -13,6 +13,11 @@
  * value cannot leak through partial redaction). This is a denylist by design:
  * security metadata should be small and intentional, and dropping an unexpected
  * sensitive field is safer than letting it through.
+ *
+ * `ipaddress` / `useragent` / `sessionid` are request-correlation identifiers,
+ * not secrets: they are surfaced (when at all) through dedicated columns and DTO
+ * fields, never freeform metadata. Denylisting them keeps them out of any
+ * metadata blob defensively, so an audit/security reader can never expose them.
  */
 const FORBIDDEN_KEY_SUBSTRINGS = [
   'password',
@@ -25,13 +30,47 @@ const FORBIDDEN_KEY_SUBSTRINGS = [
   'otp',
   'apikey',
   'api_key',
+  'ipaddress',
+  'useragent',
+  'sessionid',
 ];
+
+/**
+ * Exact key names (lowercased) that are SAFE opaque identifiers and must be kept
+ * even though they contain a denylisted substring. These are non-secret,
+ * already-public ids the audit/security DTOs rely on for actor/target summaries
+ * (e.g. `apiKeyId` contains `apikey` but is just an opaque `key_…` id). Matching
+ * is EXACT — `apiKey` (a raw secret) or `apiKeySecret` is never allowlisted, so
+ * only the precise id keys survive, never a secret that merely shares a prefix.
+ */
+const SAFE_IDENTIFIER_KEYS = new Set([
+  'apikeyid',
+  'targetapikeyid',
+  'actorapikeyid',
+  'targetkeyid',
+  'membershipid',
+  'actormembershipid',
+  'targetmembershipid',
+  'userid',
+  'actoruserid',
+  'targetuserid',
+  'projectid',
+  'targetprojectid',
+  'invitationid',
+  'targetinvitationid',
+  'organizationid',
+  'targetorganizationid',
+]);
 
 const MAX_DEPTH = 4;
 const MAX_STRING_LENGTH = 1024;
 
 function isForbiddenKey(key: string): boolean {
   const lower = key.toLowerCase();
+  // Safe opaque identifiers win over the substring denylist (exact match only).
+  if (SAFE_IDENTIFIER_KEYS.has(lower)) {
+    return false;
+  }
   return FORBIDDEN_KEY_SUBSTRINGS.some((needle) => lower.includes(needle));
 }
 
@@ -69,11 +108,15 @@ function sanitizeObject(
 }
 
 /**
- * Strip sensitive fields from security/audit metadata before persistence.
+ * Strip sensitive fields from security/audit metadata.
  *
  * Recursively removes any key that looks like a secret (passwords, tokens,
- * secrets, authorization headers, cookies, hashes, credentials), caps string
- * length, and bounds nesting depth.
+ * secrets, authorization headers, cookies, hashes, credentials) or a
+ * request-correlation identifier (ip/user-agent/session id), caps string length,
+ * and bounds nesting depth. Safe opaque identifiers (`*Id` keys in
+ * `SAFE_IDENTIFIER_KEYS`) are deliberately preserved so actor/target summaries
+ * keep their ids. Used both at write time (producers) and at read time (the
+ * audit API), so a careless producer can never leak through the reader.
  */
 export function sanitizeSecurityMetadata(
   metadata: Record<string, unknown>,

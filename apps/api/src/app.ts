@@ -29,6 +29,8 @@ import type { InvitationService } from './modules/invitations/invitation.service
 import { registerExternalProjectRoutes } from './modules/api-keys/external-projects.routes';
 import type { ExternalProjectsService } from './modules/api-keys/external-projects.service';
 import type { ApiKeyAuthenticator } from './modules/api-keys/api-key.authenticator';
+import { registerAuditRoutes } from './modules/audit/audit.routes';
+import type { AuditService } from './modules/audit/audit.service';
 import type { ReadinessProbe } from './lib/readiness';
 
 export interface BuildAppOptions {
@@ -93,6 +95,14 @@ export interface BuildAppOptions {
    * the registration-with-invitation collaborator.
    */
   invitationService?: InvitationService;
+  /**
+   * Audit log read service backing the organization-scoped audit route
+   * (`GET /v1/organizations/:id/audit-events`). Requires `authService` (the
+   * route is Bearer-USER-authenticated through it); registered only when both
+   * are provided. The route additionally enforces the `audit_events.read`
+   * permission and the `audit_log_access` entitlement inside the service.
+   */
+  auditService?: AuditService;
   /**
    * External read-only Projects service backing `GET /v1/external/projects`.
    * Registered only together with `apiKeyAuthenticator` — the external route is
@@ -215,6 +225,15 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     if (options.invitationService) {
       registerInvitationRoutes(app, {
         service: options.invitationService,
+        authenticator: options.authService,
+      });
+    }
+
+    // Organization-scoped audit log read route. Bearer-USER authenticated; the
+    // service enforces audit_events.read AND audit_log_access independently.
+    if (options.auditService) {
+      registerAuditRoutes(app, {
+        service: options.auditService,
         authenticator: options.authService,
       });
     }

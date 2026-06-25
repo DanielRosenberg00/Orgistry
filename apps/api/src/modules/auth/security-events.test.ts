@@ -60,6 +60,66 @@ describe('sanitizeSecurityMetadata', () => {
     expect(result.note.length).toBeLessThan(long.length);
   });
 
+  it('keeps safe opaque identifiers even when the key contains a denylisted substring', () => {
+    // `apiKeyId` contains the `apikey` substring but is a non-secret `key_…` id
+    // the audit/security DTOs need for actor/target summaries.
+    const result = sanitizeSecurityMetadata({
+      apiKeyId: 'key_1',
+      targetApiKeyId: 'key_2',
+      actorApiKeyId: 'key_3',
+      targetKeyId: 'key_4',
+      membershipId: 'mem_1',
+      targetMembershipId: 'mem_2',
+      targetProjectId: 'prj_1',
+      targetInvitationId: 'inv_1',
+      targetUserId: 'user_1',
+    });
+
+    expect(result).toEqual({
+      apiKeyId: 'key_1',
+      targetApiKeyId: 'key_2',
+      actorApiKeyId: 'key_3',
+      targetKeyId: 'key_4',
+      membershipId: 'mem_1',
+      targetMembershipId: 'mem_2',
+      targetProjectId: 'prj_1',
+      targetInvitationId: 'inv_1',
+      targetUserId: 'user_1',
+    });
+  });
+
+  it('still drops secret-bearing API key material (exact-match allowlist only)', () => {
+    const result = sanitizeSecurityMetadata({
+      targetApiKeyId: 'key_1', // safe id — kept
+      apiKey: 'key_raw_secret',
+      apiKeySecret: 'shh',
+      apiKeyHash: 'deadbeef',
+      apiKeyToken: 'raw',
+      apiKeyValue: 'raw',
+      apiKeyCredential: 'raw',
+      nested: { apiKeySecret: 'shh', targetApiKeyId: 'key_2' },
+    });
+
+    expect(result).toEqual({
+      targetApiKeyId: 'key_1',
+      nested: { targetApiKeyId: 'key_2' },
+    });
+    expect(JSON.stringify(result)).not.toContain('shh');
+    expect(JSON.stringify(result)).not.toContain('deadbeef');
+  });
+
+  it('drops request-correlation identifiers (ip/user-agent/session) from metadata', () => {
+    const result = sanitizeSecurityMetadata({
+      reason: 'ok',
+      ipAddress: '203.0.113.1',
+      userAgent: 'curl/8',
+      sessionId: 'sess_1',
+      nested: { ipAddress: '203.0.113.2' },
+    });
+
+    expect(result).toEqual({ reason: 'ok', nested: {} });
+  });
+
   it('drops a raw refresh token even if one is wrongly placed in metadata', () => {
     // Defense-in-depth: callers must never put a raw token in metadata, but if
     // they do, any `token`-named key is dropped entirely (not masked in place).

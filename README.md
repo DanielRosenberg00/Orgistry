@@ -34,7 +34,19 @@ workspace AND joins the inviting organization). It completes the chain
 `Authenticated User → Active Membership → Permission → max_members Reservation
 Quota → Secure Opaque Token → Acceptance → Active Membership`. Invitations create
 memberships, never sessions; raw tokens are never persisted or logged and token
-hashes are never exposed.
+material never appears in URLs.
+**Sprint 10 adds the organization-scoped Audit Log read API** — a
+permission-gated (`audit_events.read`) and entitlement-gated (`audit_log_access`)
+read over the organization action events that Sprints 5–9 already record on the
+internal event seam. It is cursor-paginated and filterable, sanitizes event
+metadata defensively, maps internal event names to a stable public catalog, keeps
+authentication/session security events out of the default stream, and returns the
+plan's modeled `audit_retention_days` entitlement value as the **display-only**
+response field `meta.auditRetentionDays` (no retention deletion). Safe opaque ids
+(API key / membership / project / invitation ids) survive metadata sanitization
+while secrets, hashes, tokens, headers, cookies, and ip/user-agent/session data do
+not. See [`docs/audit-log.md`](docs/audit-log.md). Invitation token hashes are
+never exposed.
 
 ## What this is
 
@@ -233,16 +245,19 @@ delivering email to the local Mailpit container over SMTP), a **write-enabled** 
 API or any external resource beyond read-only Projects, API key **rotation /
 secret-reveal / update** endpoints, an advanced/custom scope editor, service
 accounts / OAuth client credentials / personal access tokens, an external SDK or
-published OpenAPI, audit retention deletion job, project restore or hard delete,
-**user-facing** organization audit log (member, project, plan, and API key actions
-are recorded internally on the audit seam only — no read API), organization
+published OpenAPI, audit retention **deletion job / enforcement** (Sprint 10
+ships the audit **read** API but retention remains display-only — no cleanup
+job), an **audit UI / export / webhook / SIEM / alerting** surface, project
+restore or hard delete, organization
 lifecycle (archive/suspend) endpoints, workers/queues, object storage, or
-product/workspace/members/permission/**projects**/**plan**/**API-key** UI. The
+product/workspace/members/permission/**projects**/**plan**/**API-key**/**audit** UI. The
 `api_keys_access` entitlement and `max_api_keys` quota are now **consumed** by the
 Sprint 8 API key module and the `max_members` quota is now **consumed** by the
 Sprint 9 invitation reservation/acceptance policy; the `audit_log_access` and
-`audit_retention_days` entitlements remain modeled and resolvable but their
-consuming features (audit read, retention) are future scope. The web
+`audit_retention_days` entitlements are now **consumed** by the Sprint 10 audit
+read API (`audit_log_access` gates access; the `audit_retention_days` entitlement
+value is surfaced as the display-only DTO field `meta.auditRetentionDays` — no
+retention deletion is performed). The web
 demo holds **no** auth/organization/projects/plan/API-key UI or authenticated
 shell and **no** fake auth/org/permission state. The implemented surface is validated, but
 the system is **not production-certified**. See
@@ -346,6 +361,16 @@ creates the `orgistry_test` database (`infra/postgres-init/`), so
 
 ## Documentation
 
+- [`docs/sprint-10-artifact-package.md`](docs/sprint-10-artifact-package.md) —
+  **official Sprint 10 completion artifact**: audit log read API summary,
+  contract/test coverage map, validation evidence, quality evolution, scope
+  control, and remaining risks.
+- [`docs/audit-log.md`](docs/audit-log.md) —
+  **Sprint 10 audit log reference** (A–F): the read pipeline (membership →
+  permission → entitlement → retention → query → sanitize/shape), the
+  public/persisted event mapping layer and action/security boundary, actor/target
+  summary semantics, cursor pagination + filter contracts, defensive metadata
+  sanitization, display-only retention, and known limitations.
 - [`docs/sprint-9-artifact-package.md`](docs/sprint-9-artifact-package.md) —
   **official Sprint 9 completion artifact**: invitation lifecycle summary,
   contract summary, security review (hash-only tokens, no token/hash leakage,

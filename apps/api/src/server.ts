@@ -23,6 +23,8 @@ import { createExternalProjectsService } from './modules/api-keys/external-proje
 import { createDbInvitationRepository } from './modules/invitations/invitation.repo';
 import { createInvitationService } from './modules/invitations/invitation.service';
 import { createMailpitInvitationMailer } from './modules/invitations/invitation.mailpit-mailer';
+import { createDbAuditRepository } from './modules/audit/audit.repo';
+import { createAuditService } from './modules/audit/audit.service';
 import { createRedisRateLimiter } from './lib/rate-limit';
 import type { ReadinessProbe } from './lib/readiness';
 
@@ -146,6 +148,18 @@ async function main(): Promise<void> {
     projects: projectRepo,
   });
 
+  // Audit log read (Sprint 10). The organization repository satisfies the
+  // access-control surface (requireMembership/requirePermission); a dedicated
+  // audit repository owns the tenant-scoped READ over the security_events seam;
+  // the entitlement service gates audit_log_access and supplies the retention
+  // metadata. The audit repository writes nothing — producers (Sprints 5–9)
+  // remain the only writers to that seam.
+  const auditService = createAuditService({
+    accessControl: organizationRepo,
+    audit: createDbAuditRepository(dbClient.db),
+    entitlements: entitlementService,
+  });
+
   const app = buildApp({
     config,
     readinessProbes,
@@ -158,6 +172,7 @@ async function main(): Promise<void> {
     planService,
     apiKeyService,
     invitationService,
+    auditService,
     externalProjectsService,
     apiKeyAuthenticator,
   });

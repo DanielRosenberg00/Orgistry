@@ -69,7 +69,11 @@ A runnable, fully typed pnpm monorepo with:
   list/revoke) with the HttpOnly refresh cookie, CSRF guard, and rate limiting,
   and the `/v1/organizations` module (create/list/read with a reusable
   organization context resolver).
-- **`apps/web-demo`** — React/Vite shell with a static foundation status page.
+- **`apps/web-demo`** — React/Vite admin demo: an authenticated, official thin
+  consumer of the Orgistry APIs (login/register, organization switcher, overview,
+  members, invitations, projects, plan & entitlements, API keys, audit log) with
+  memory-only access tokens, refresh-cookie session restore, and permission-aware
+  UX hints. See [`docs/web-demo.md`](docs/web-demo.md).
 - **`infra/`** — Docker Compose for PostgreSQL, Redis, and Mailpit.
 
 ## Auth & organizations at Sprint 4
@@ -292,7 +296,7 @@ pnpm db:migrate
 # 5a. Boot the API shell        -> http://localhost:3000
 pnpm dev:api
 
-# 5b. Boot the web demo shell    -> http://localhost:5173
+# 5b. Boot the web demo admin UI -> http://localhost:5173
 pnpm dev:web
 
 # (or run both together)
@@ -361,6 +365,14 @@ creates the `orgistry_test` database (`infra/postgres-init/`), so
 
 ## Documentation
 
+- [`docs/sprint-11-artifact-package.md`](docs/sprint-11-artifact-package.md) —
+  **official Sprint 11 completion artifact**: web demo admin surfaces summary,
+  security/scope verification, validation evidence, files changed, and the living
+  sprint changelog.
+- [`docs/web-demo.md`](docs/web-demo.md) — **Sprint 11 web demo reference** (A–F):
+  developer guide, architecture notes (memory-only tokens, refresh-cookie
+  bootstrap, organization selection, permission-aware UX), contracts & invariants,
+  integration notes (page→API map), and known limitations.
 - [`docs/sprint-10-artifact-package.md`](docs/sprint-10-artifact-package.md) —
   **official Sprint 10 completion artifact**: audit log read API summary,
   contract/test coverage map, validation evidence, quality evolution, scope

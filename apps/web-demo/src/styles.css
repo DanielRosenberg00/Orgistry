@@ -1,0 +1,316 @@
+/*
+ * Web demo styles.
+ *
+ * Deliberately small and dependency-free: a single hand-written stylesheet, no
+ * design system or CSS framework. The goal is a clear, readable admin surface
+ * for a desktop demo — not pixel-perfect polish. Class names are plain and
+ * descriptive so the markup reads like the styles.
+ */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e2e5ea;
+  --text: #1c2230;
+  --muted: #6b7280;
+  --primary: #2b59c3;
+  --primary-text: #ffffff;
+  --danger: #b42318;
+  --danger-bg: #fef3f2;
+  --success: #067647;
+  --success-bg: #ecfdf3;
+  --info-bg: #eff4ff;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+a {
+  color: var(--primary);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--bg);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+/* --- Auth screens --- */
+.auth-screen {
+  max-width: 420px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+}
+
+/* --- App shell --- */
+.app-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
+}
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 1.25rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.nav-link {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+.nav-link:hover {
+  background: var(--bg);
+}
+.nav-link.active {
+  background: var(--info-bg);
+  color: var(--primary);
+  font-weight: 600;
+}
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.5rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.content {
+  padding: 1.5rem;
+  max-width: 1040px;
+  width: 100%;
+}
+
+/* --- Cards & layout --- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.card h2,
+.card h3 {
+  margin-top: 0;
+}
+.row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.spread {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+.muted {
+  color: var(--muted);
+}
+.stack > * + * {
+  margin-top: 0.75rem;
+}
+
+/* --- Forms --- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.85rem;
+}
+.field label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.input,
+.select {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  background: var(--surface);
+  color: var(--text);
+}
+.input:focus,
+.select:focus {
+  outline: 2px solid var(--info-bg);
+  border-color: var(--primary);
+}
+
+/* --- Buttons --- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-text);
+  border-color: var(--primary);
+}
+.btn-danger {
+  color: var(--danger);
+  border-color: var(--border);
+}
+.btn-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+.btn-sm {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.85rem;
+}
+
+/* --- Tables --- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+/* --- Badges --- */
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.badge-active {
+  background: var(--success-bg);
+  color: var(--success);
+  border-color: transparent;
+}
+.badge-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+/* --- Banners (error / success / info) --- */
+.banner {
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+.banner-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid #fda29b;
+}
+.banner-success {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid #abefc6;
+}
+.banner-info {
+  background: var(--info-bg);
+  color: var(--primary);
+  border: 1px solid #b2ccff;
+}
+.banner code {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* --- Misc states --- */
+.state {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--muted);
+}
+.secret-box {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 0.6rem;
+  word-break: break-all;
+}
+.page-title {
+  margin: 0 0 0.25rem;
+}
+.page-intro {
+  margin: 0 0 1.25rem;
+  color: var(--muted);
+}

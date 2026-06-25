@@ -1,11 +1,16 @@
-/** Fallback page for unknown routes in the foundation shell. */
+import { Link } from 'react-router-dom';
+
+/** Fallback page for unknown routes. */
 export function NotFoundPage() {
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 720, margin: '3rem auto', padding: '0 1rem' }}>
-      <h1>Not found</h1>
-      <p>
-        No page is registered for this path. <a href="/">Return to status</a>.
-      </p>
-    </main>
+    <div className="auth-screen">
+      <div className="auth-card">
+        <h1>Not found</h1>
+        <p className="muted">No page is registered for this path.</p>
+        <p>
+          <Link to="/app">Go to the app</Link>
+        </p>
+      </div>
+    </div>
   );
 }

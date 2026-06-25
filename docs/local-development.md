@@ -19,6 +19,15 @@ pnpm dev:api         # API only  -> http://localhost:3000
 pnpm dev:web         # web only  -> http://localhost:5173
 ```
 
+The web demo (`apps/web-demo`) is an authenticated admin UI and a thin official
+consumer of the Orgistry APIs. Open <http://localhost:5173>, register an account
+(auto-provisions a personal organization and signs you in), and create a team
+organization from the switcher to exercise multi-org flows. Invitation emails land
+in Mailpit (<http://localhost:8025>). The backend's `CORS_ORIGINS` must include the
+web origin so the refresh-cookie/logout flows (`credentials: include`) work. Web
+checks: `pnpm --filter @orgistry/web-demo test` (jsdom smoke tests) and
+`pnpm --filter @orgistry/web-demo build`. See [`web-demo.md`](./web-demo.md).
+
 The API boots even if PostgreSQL or Redis is down — the connection is lazy and
 `/ready` reports the outage. Use this to confirm health vs. readiness behavior:
 

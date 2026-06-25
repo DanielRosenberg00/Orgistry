@@ -5,6 +5,7 @@ import {
   insertOrganizationWithOwnerMembership,
   resolveUniqueSlug,
 } from '../organization/organization.provisioning';
+import { acceptInvitationWithinTransaction } from '../invitations/invitation.acceptance';
 import { emailAlreadyRegisteredError } from './auth.errors';
 import type {
   AuthRepository,
@@ -135,6 +136,27 @@ export function createDbAuthRepository(db: Database): AuthRepository {
             expiresAt: params.refreshToken.expiresAt,
           })
           .returning();
+
+        // 5. (Sprint 9) Optionally accept an invitation IN THIS TRANSACTION, so
+        //    the invited membership + invitation acceptance commit together with
+        //    the new account, or the WHOLE registration rolls back. A revoked /
+        //    expired / quota-filled invitation (a race after the pre-check) throws
+        //    here, leaving no user, session, workspace, membership, or acceptance.
+        if (params.invitationAcceptance) {
+          await acceptInvitationWithinTransaction(tx, {
+            tokenHash: params.invitationAcceptance.tokenHash,
+            acceptingUserId: user.id,
+            acceptingUserNormalizedEmail: params.user.normalizedEmail,
+            maxMembers: params.invitationAcceptance.maxMembers,
+            ctx: {
+              actorUserId: user.id,
+              actorMembershipId: null,
+              requestId: params.invitationAcceptance.eventContext.requestId,
+              ipAddress: params.invitationAcceptance.eventContext.ipAddress,
+              userAgent: params.invitationAcceptance.eventContext.userAgent,
+            },
+          });
+        }
 
         return { user, organization, membership, session, refreshToken };
       });

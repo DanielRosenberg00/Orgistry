@@ -138,6 +138,36 @@ export const ERROR_CODES = {
    * for this action.
    */
   API_KEY_SCOPE_REQUIRED: 'API_KEY_SCOPE_REQUIRED',
+
+  // ----- Invitations (Sprint 9) -----
+  /**
+   * The presented invitation token does not resolve to an invitation. Returned
+   * (404) when the token is unknown or malformed — the token is a high-entropy
+   * secret, so an attacker without it learns nothing, and a holder of a real
+   * token sees a precise result. Distinct from the more specific lifecycle codes
+   * below, which apply only once a token HAS resolved to a row.
+   */
+  INVITATION_INVALID: 'INVITATION_INVALID',
+  /**
+   * The invitation has passed its `expires_at`. Expiry is DERIVED at
+   * inspect/accept/list time (there is no background expiration job), so a
+   * still-`pending` row whose deadline has passed is treated as expired
+   * everywhere. 410.
+   */
+  INVITATION_EXPIRED: 'INVITATION_EXPIRED',
+  /** The invitation was revoked by an organization administrator. 409. */
+  INVITATION_REVOKED: 'INVITATION_REVOKED',
+  /**
+   * The invitation has already been accepted (single-use invariant). A second
+   * acceptance never creates a second membership. 409.
+   */
+  INVITATION_ALREADY_ACCEPTED: 'INVITATION_ALREADY_ACCEPTED',
+  /**
+   * The accepting account's normalized email does not match the invitation's
+   * normalized invited email. 403. Acceptance is bound to the invited address so
+   * a leaked token cannot be redeemed by a different account.
+   */
+  INVITATION_EMAIL_MISMATCH: 'INVITATION_EMAIL_MISMATCH',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

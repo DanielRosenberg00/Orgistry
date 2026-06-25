@@ -26,6 +26,15 @@ from the key (no org id in the route, no browser JWT). It proves the chain
 `Organization Plan → API Key Entitlement → API Key Quota → Hash-Backed API Key →
 Scoped External API Access → Tenant-Scoped Projects Read`. API keys are machine
 credentials — not user sessions and not user impersonation.
+**Sprint 9 adds the organization invitation lifecycle** — secure, single-use,
+expiring invitations with hash-only token storage, organization-scoped
+create/list/revoke, a safe public token-inspection endpoint, existing-user
+acceptance, and registration-with-invitation (the new user still gets a personal
+workspace AND joins the inviting organization). It completes the chain
+`Authenticated User → Active Membership → Permission → max_members Reservation
+Quota → Secure Opaque Token → Acceptance → Active Membership`. Invitations create
+memberships, never sessions; raw tokens are never persisted or logged and token
+hashes are never exposed.
 
 ## What this is
 
@@ -165,6 +174,35 @@ SECURITY events though they share the internal event table. Keys are revoked
 hard-deleted; revoked/expired keys cannot authenticate. See
 [`docs/api-keys-external-api.md`](docs/api-keys-external-api.md).
 
+Organization invitations (Sprint 9):
+
+`POST /v1/organizations/:organizationId/invitations` (`invitations.create`),
+`GET /v1/organizations/:organizationId/invitations` (`invitations.read`),
+`DELETE /v1/organizations/:organizationId/invitations/:invitationId`
+(`invitations.revoke`), `POST /v1/invitations/inspect` (public; safe context),
+`POST /v1/invitations/accept` (Bearer; existing user), and an optional
+`invitationToken` on `POST /v1/auth/register`.
+
+An invitation is a **single-use, expiring** grant for one email to join one
+organization with one **fixed** role. The raw token is a high-entropy opaque
+string delivered **only** in the invitation email (over SMTP to the local
+Mailpit container); only its unique SHA-256 hash is stored, and the token travels
+in request **bodies** (never URLs), so it is never logged. Create composes
+`requireMembership → requirePermission(invitations.create) →` reject-existing-member
+`→` reject-duplicate-pending `→` reservation quota
+(`active members + pending invitations >= max_members` → `QUOTA_EXCEEDED`), then
+sends the email **fail-closed** (before persisting, so a delivery failure leaves
+no invitation and no event) and records `invitation.created`. Acceptance shares a
+single transactional seam: it re-validates lifecycle + email match, re-checks the
+active `max_members` quota, creates the active membership with the invited role,
+marks the invitation accepted (single use), and records `invitation.accepted` +
+`membership.created_from_invitation`. **Registration-with-invitation runs that
+acceptance INSIDE the registration transaction** — account, personal workspace,
+invited membership, and acceptance commit or roll back together, so no session is
+ever issued for a failed accept. Expiry is **derived** (no worker). Invitations
+create **memberships, not sessions**; an invited new user still receives a
+personal workspace. See [`docs/invitations.md`](docs/invitations.md).
+
 The four fixed roles (Owner/Admin/Member/Viewer) map to a fixed, code-defined
 permission catalog seeded idempotently into the database. **Permissions are the
 authorization primitive**: organization-scoped routes compose
@@ -189,7 +227,9 @@ real subscription status — plans are internal demo plans only, switched solely
 the demo endpoint), no **custom plans or per-organization custom entitlements**
 and no feature-flag system, no **custom or organization-defined roles** (the four
 system roles are fixed), permission/role mutation APIs, resource-level
-permissions, ABAC or policy engine, RLS, invitations, a **write-enabled** external
+permissions, ABAC or policy engine, RLS, an **invitation UI / bulk invites /
+reminders / production email provider** (Sprint 9 ships the invitation lifecycle
+delivering email to the local Mailpit container over SMTP), a **write-enabled** external
 API or any external resource beyond read-only Projects, API key **rotation /
 secret-reveal / update** endpoints, an advanced/custom scope editor, service
 accounts / OAuth client credentials / personal access tokens, an external SDK or
@@ -199,9 +239,10 @@ are recorded internally on the audit seam only — no read API), organization
 lifecycle (archive/suspend) endpoints, workers/queues, object storage, or
 product/workspace/members/permission/**projects**/**plan**/**API-key** UI. The
 `api_keys_access` entitlement and `max_api_keys` quota are now **consumed** by the
-Sprint 8 API key module; the `max_members`, `audit_log_access`, and
+Sprint 8 API key module and the `max_members` quota is now **consumed** by the
+Sprint 9 invitation reservation/acceptance policy; the `audit_log_access` and
 `audit_retention_days` entitlements remain modeled and resolvable but their
-consuming features (invitations, audit read, retention) are future scope. The web
+consuming features (audit read, retention) are future scope. The web
 demo holds **no** auth/organization/projects/plan/API-key UI or authenticated
 shell and **no** fake auth/org/permission state. The implemented surface is validated, but
 the system is **not production-certified**. See
@@ -305,6 +346,19 @@ creates the `orgistry_test` database (`infra/postgres-init/`), so
 
 ## Documentation
 
+- [`docs/sprint-9-artifact-package.md`](docs/sprint-9-artifact-package.md) —
+  **official Sprint 9 completion artifact**: invitation lifecycle summary,
+  contract summary, security review (hash-only tokens, no token/hash leakage,
+  email-match, single-use, quota non-mutation on failure, event sanitization),
+  validation evidence, scope control, and confidence assessment.
+- [`docs/invitations.md`](docs/invitations.md) —
+  **Sprint 9 invitations reference** (A–F): hash-only token storage and the
+  body-borne token, the create/list/revoke/inspect/accept lifecycle, the
+  reservation quota policy, the single-transaction registration boundary, the
+  fail-closed Mailpit SMTP mailer (and how to view email in the Mailpit UI),
+  the duplicate-pending policy, registration-with-invitation, the recipe for
+  extending it safely, architecture/tradeoffs, contracts/invariants, integration,
+  limitations.
 - [`docs/sprint-8-artifact-package.md`](docs/sprint-8-artifact-package.md) —
   **official Sprint 8 completion artifact**: API keys + external Projects API
   summary, documentation index, validation evidence, security review (secret

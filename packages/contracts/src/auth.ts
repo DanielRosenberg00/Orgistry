@@ -30,7 +30,15 @@ const emailSchema = z
 
 const displayNameSchema = z.string().trim().min(1).max(100);
 
-/** POST /v1/auth/register request body. */
+/** POST /v1/auth/register request body.
+ *
+ * `invitationToken` is OPTIONAL (Sprint 9): when present, the new account also
+ * joins the inviting organization with the invited role. It is the raw
+ * invitation token delivered out-of-band in the invitation email. Omitting it
+ * preserves the exact Sprint 2 registration behavior, so existing clients are
+ * unaffected. The token is validated server-side; the registration email must
+ * match the invitation's invited email.
+ */
 export const registerRequestSchema = z.object({
   email: emailSchema,
   password: z
@@ -38,6 +46,8 @@ export const registerRequestSchema = z.object({
     .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
     .max(MAX_PASSWORD_LENGTH),
   displayName: displayNameSchema,
+  /** Optional raw invitation token to accept during registration. */
+  invitationToken: z.string().min(1).optional(),
 });
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 

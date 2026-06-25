@@ -12,6 +12,10 @@ import {
   provisionDefaultOrganizationPlan,
   type InMemoryOrgStore,
 } from '../../organization/testing/in-memory-org-store';
+import {
+  applyInvitationAcceptanceInStore,
+  validateInvitationForAcceptanceInStore,
+} from '../../invitations/testing/invitation-store-acceptance';
 import { emailAlreadyRegisteredError } from '../auth.errors';
 import type {
   AuthRepository,
@@ -160,6 +164,19 @@ export function createInMemoryAuthRepository(options?: {
         deletedAt: null,
       };
 
+      // (Sprint 9) Validate the invitation BEFORE mutating any array, mirroring
+      // the DB registration transaction: a bad/revoked/expired/quota-filled
+      // invitation throws here, so no account rows are ever pushed. Application
+      // happens after the commit below, with no intervening await (atomic).
+      const invitationToAccept = params.invitationAcceptance
+        ? validateInvitationForAcceptanceInStore(orgStore, {
+            tokenHash: params.invitationAcceptance.tokenHash,
+            acceptingUserId: user.id,
+            acceptingUserNormalizedEmail: params.user.normalizedEmail,
+            maxMembers: params.invitationAcceptance.maxMembers,
+          })
+        : null;
+
       let slug = params.personalWorkspace.slugBase;
       for (let suffix = 2; orgStore.organizations.some((o) => o.slug === slug); suffix += 1) {
         slug = `${params.personalWorkspace.slugBase}-${suffix}`;
@@ -216,6 +233,15 @@ export function createInMemoryAuthRepository(options?: {
       provisionDefaultOrganizationPlan(orgStore, organization.id, user.id);
       sessions.push(session);
       refreshTokens.push(refreshToken);
+
+      // (Sprint 9) Accept the invitation in the SAME synchronous commit, so the
+      // invited membership + acceptance + events land atomically with the account.
+      if (invitationToAccept) {
+        applyInvitationAcceptanceInStore(orgStore, invitationToAccept, {
+          acceptingUserId: user.id,
+          requestId: params.invitationAcceptance?.eventContext.requestId ?? null,
+        });
+      }
 
       return { user, organization, membership, session, refreshToken };
     },

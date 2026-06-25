@@ -34,6 +34,11 @@ export interface Config {
     readonly smtpPort: number;
     readonly uiPort: number;
   };
+  /** Invitation behavior knobs (Sprint 9). */
+  readonly invitations: {
+    /** Raw invitation token lifetime in seconds. */
+    readonly ttlSeconds: number;
+  };
   readonly auth: {
     readonly jwtSecret: string;
     readonly cookieSecret: string;
@@ -115,6 +120,9 @@ function toConfig(env: Env): Config {
       host: env.MAILPIT_HOST,
       smtpPort: env.MAILPIT_SMTP_PORT,
       uiPort: env.MAILPIT_UI_PORT,
+    },
+    invitations: {
+      ttlSeconds: env.INVITATION_TTL_SECONDS,
     },
     auth: {
       jwtSecret: env.JWT_SECRET,

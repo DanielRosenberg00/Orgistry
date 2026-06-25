@@ -20,6 +20,9 @@ import { createDbApiKeyRepository } from './modules/api-keys/api-key.repo';
 import { createApiKeyService } from './modules/api-keys/api-key.service';
 import { createApiKeyAuthenticator } from './modules/api-keys/api-key.authenticator';
 import { createExternalProjectsService } from './modules/api-keys/external-projects.service';
+import { createDbInvitationRepository } from './modules/invitations/invitation.repo';
+import { createInvitationService } from './modules/invitations/invitation.service';
+import { createMailpitInvitationMailer } from './modules/invitations/invitation.mailpit-mailer';
 import { createRedisRateLimiter } from './lib/rate-limit';
 import type { ReadinessProbe } from './lib/readiness';
 
@@ -55,18 +58,6 @@ async function main(): Promise<void> {
     },
   ];
 
-  const authService = createAuthService({
-    repo: createDbAuthRepository(dbClient.db),
-    jwtSecret: config.auth.jwtSecret,
-    accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
-    sessionTtlSeconds: config.auth.sessionTtlSeconds,
-    refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
-    // Redis is the official v1 rate-limit store. It fails open, so a Redis
-    // outage disables rate limiting but never affects auth correctness.
-    rateLimiter: createRedisRateLimiter(redis),
-    rateLimits: config.rateLimit.auth,
-  });
-
   // One organization repository backs both the organization workflows and the
   // member-management/access-control workflows (they share the same persistence).
   const organizationRepo = createDbOrganizationRepository(dbClient.db);
@@ -87,6 +78,36 @@ async function main(): Promise<void> {
   const planService = createPlanService({
     accessControl: organizationRepo,
     entitlements: entitlementService,
+  });
+
+  // Invitations (Sprint 9). The service is constructed BEFORE the auth service
+  // so it can be wired in as the registration-with-invitation collaborator AND
+  // back the invitation routes. Email is delivered over SMTP to the local
+  // Mailpit container; delivery is fail-closed (a send failure aborts creation).
+  const invitationService = createInvitationService({
+    accessControl: organizationRepo,
+    invitations: createDbInvitationRepository(dbClient.db),
+    entitlements: entitlementService,
+    mailer: createMailpitInvitationMailer({
+      host: config.mailpit.host,
+      port: config.mailpit.smtpPort,
+    }),
+    ttlSeconds: config.invitations.ttlSeconds,
+    webBaseUrl: config.web.url,
+  });
+
+  const authService = createAuthService({
+    repo: createDbAuthRepository(dbClient.db),
+    jwtSecret: config.auth.jwtSecret,
+    accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+    sessionTtlSeconds: config.auth.sessionTtlSeconds,
+    refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+    // Redis is the official v1 rate-limit store. It fails open, so a Redis
+    // outage disables rate limiting but never affects auth correctness.
+    rateLimiter: createRedisRateLimiter(redis),
+    rateLimits: config.rateLimit.auth,
+    // Registration-with-invitation collaborator (same instance as the routes).
+    invitations: invitationService,
   });
 
   // The organization repository satisfies the access-control surface
@@ -136,6 +157,7 @@ async function main(): Promise<void> {
     projectService,
     planService,
     apiKeyService,
+    invitationService,
     externalProjectsService,
     apiKeyAuthenticator,
   });

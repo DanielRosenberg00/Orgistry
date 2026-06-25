@@ -53,10 +53,22 @@ export const envSchema = z.object({
   // Redis — available for future rate limiting and used by the readiness probe.
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
 
-  // Mailpit — available for future local email flows. Not used at runtime yet.
+  // Mailpit — local email delivery target. The Sprint 9 invitation mailer
+  // delivers invitation emails over SMTP to the Mailpit container at
+  // MAILPIT_HOST:MAILPIT_SMTP_PORT; delivered messages are viewable in the
+  // Mailpit web UI at MAILPIT_UI_PORT. Not a production email provider.
   MAILPIT_HOST: z.string().min(1).default('localhost'),
   MAILPIT_SMTP_PORT: portSchema.default(1025),
   MAILPIT_UI_PORT: portSchema.default(8025),
+
+  // Invitation token lifetime (Sprint 9). Bounds how long a raw invitation token
+  // remains acceptable; expiry is enforced at inspect/accept/list time. Default:
+  // 7 days.
+  INVITATION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(604_800),
 
   // Auth secrets. Required so environments are provisioned correctly.
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),

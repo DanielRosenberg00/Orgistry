@@ -59,6 +59,13 @@ export type { ProjectRow, ProjectInsert } from './schema/projects';
 // API keys — organization-scoped machine credentials (Sprint 8).
 export type { ApiKeyRow, ApiKeyInsert } from './schema/api-keys';
 
+// Invitations — organization invitation lifecycle (Sprint 9).
+export type {
+  InvitationStatus,
+  InvitationRow,
+  InvitationInsert,
+} from './schema/invitations';
+
 // Plans, entitlements & quotas (Sprint 7).
 export {
   DEFAULT_PLAN_KEY,

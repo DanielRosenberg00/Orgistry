@@ -22,6 +22,48 @@ export interface RequestContext {
   userAgent: string | null;
 }
 
+/**
+ * Narrow port the auth module uses for registration-with-invitation (Sprint 9).
+ *
+ * Defining the contract HERE keeps the auth module free of any invitation
+ * service import — the invitation service structurally satisfies this shape and
+ * is injected at wiring time. It is OPTIONAL on the auth service: when absent (or
+ * when no token is supplied), registration behaves exactly as before.
+ *
+ * `prepareForRegistration` runs BEFORE account provisioning. It resolves the raw
+ * token to its hash and the organization's `max_members` ceiling, and does an
+ * early lifecycle/email-match/quota pre-check so an obviously-bad token fails
+ * fast. The ACTUAL acceptance then happens INSIDE the registration transaction
+ * (`registerAccount`), re-validating authoritatively under a row lock — so the
+ * user, personal workspace, invited membership, and invitation acceptance all
+ * commit or roll back together, and no session is issued for a failed accept.
+ */
+export interface RegistrationInvitations {
+  prepareForRegistration(
+    rawToken: string,
+    normalizedEmail: string,
+  ): Promise<{ tokenHash: string; maxMembers: number }>;
+}
+
+/**
+ * Optional invitation acceptance bundled INTO the registration transaction. When
+ * present, `registerAccount` accepts the invitation (membership + accepted
+ * mutation + events) in the SAME transaction that creates the user, so the whole
+ * registration-with-invitation is atomic.
+ */
+export interface RegistrationInvitationAcceptance {
+  /** SHA-256 hash of the raw token (resolved by `prepareForRegistration`). */
+  tokenHash: string;
+  /** The organization plan's `max_members` ceiling (resolved before the tx). */
+  maxMembers: number;
+  /** Non-secret request metadata for the acceptance action events. */
+  eventContext: {
+    requestId: string | null;
+    ipAddress: string | null;
+    userAgent: string | null;
+  };
+}
+
 /** Values for inserting a new user. */
 export interface NewUser {
   email: string;
@@ -57,6 +99,13 @@ export interface RegisterAccountParams {
     familyId: string;
     expiresAt: Date;
   };
+  /**
+   * Optional invitation to accept IN THE SAME transaction (Sprint 9). When set,
+   * the new user also joins the inviting organization with the invited role and
+   * the invitation is marked accepted atomically with account creation. A failed
+   * acceptance rolls back the entire registration.
+   */
+  invitationAcceptance?: RegistrationInvitationAcceptance | null;
 }
 
 /** Rows created by a successful `registerAccount` transaction. */

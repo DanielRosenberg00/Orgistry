@@ -70,10 +70,32 @@ export interface EntitlementService {
 
   /**
    * Require that adding one more member fits under `max_members`, or reject with
-   * `QUOTA_EXCEEDED`. The reusable membership-creation quota boundary: a future
-   * invitation / member-add flow composes this without redesign.
+   * `QUOTA_EXCEEDED`. The reusable membership-creation quota boundary: invitation
+   * ACCEPTANCE composes this (it counts only active members), and it is checked
+   * again at the moment a membership is created.
    */
   requireMemberAdditionQuota(organizationId: string): Promise<void>;
+
+  /**
+   * The organization plan's `max_members` ceiling. Exposed so the invitation
+   * acceptance transaction can re-check the active-member count against the limit
+   * atomically with the membership insert (the count happens inside the
+   * transaction; this only resolves the plan-derived limit).
+   */
+  getMaxMembers(organizationId: string): Promise<number>;
+
+  /**
+   * Require that RESERVING one more seat fits under `max_members`, or reject with
+   * `QUOTA_EXCEEDED`. This is the Sprint 9 v1 reservation policy for invitation
+   * CREATION: a pending invitation reserves a seat, so creation is blocked when
+   * `active members + pending invitations >= max_members`. The pending count is
+   * supplied by the caller (the invitation repository owns it); this method
+   * resolves the limit, counts active members, and compares the reserved total.
+   */
+  requireMemberReservationQuota(
+    organizationId: string,
+    pendingInvitationCount: number,
+  ): Promise<void>;
 
   /** Resolve API-key entitlements (access flag + max quota). */
   resolveApiKeyEntitlements(organizationId: string): Promise<ApiKeyEntitlements>;
@@ -165,6 +187,24 @@ export function createEntitlementService(
       requireQuota(
         ENTITLEMENT_KEYS.maxMembers,
         evaluateCountQuota(current, values.max_members),
+      );
+    },
+
+    async getMaxMembers(organizationId) {
+      const { values } = await resolveEntitlements(organizationId);
+      return values.max_members;
+    },
+
+    async requireMemberReservationQuota(organizationId, pendingInvitationCount) {
+      const { values } = await resolveEntitlements(organizationId);
+      const activeMembers = await repo.countActiveMembers(organizationId);
+      // A pending invitation reserves a seat, so the reserved total is active
+      // members PLUS outstanding invitations. Creation is blocked when admitting
+      // one more reservation would cross the ceiling.
+      const reserved = activeMembers + pendingInvitationCount;
+      requireQuota(
+        ENTITLEMENT_KEYS.maxMembers,
+        evaluateCountQuota(reserved, values.max_members),
       );
     },
 

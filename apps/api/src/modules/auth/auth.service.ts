@@ -44,6 +44,8 @@ import {
 import type {
   AuthRepository,
   NewSecurityEvent,
+  RegisterAccountParams,
+  RegistrationInvitations,
   RequestContext,
 } from './auth.types';
 
@@ -74,6 +76,11 @@ export interface AuthServiceOptions {
   /** Redis-backed in production; a no-op limiter when omitted. */
   rateLimiter?: RateLimiter;
   rateLimits?: AuthRateLimits;
+  /**
+   * Registration-with-invitation collaborator (Sprint 9). OPTIONAL: when absent
+   * (or when a registration omits `invitationToken`), registration is unchanged.
+   */
+  invitations?: RegistrationInvitations;
   clock?: Clock;
 }
 
@@ -182,6 +189,7 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
     sessionTtlSeconds,
     refreshTokenTtlSeconds,
     rateLimiter = createNoopRateLimiter(),
+    invitations,
     clock = systemClock,
   } = options;
 
@@ -382,6 +390,30 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
         throw emailAlreadyRegisteredError();
       }
 
+      // Registration-with-invitation (Sprint 9): pre-resolve the invitation
+      // BEFORE provisioning. This fails fast on an obviously-bad token (unknown,
+      // expired, revoked, email mismatch, quota) and yields the token hash + plan
+      // ceiling the registration transaction needs to accept it ATOMICALLY. The
+      // authoritative re-validation happens inside that transaction.
+      let invitationAcceptance:
+        | RegisterAccountParams['invitationAcceptance']
+        | null = null;
+      if (input.invitationToken && invitations) {
+        const prepared = await invitations.prepareForRegistration(
+          input.invitationToken,
+          normalizedEmail,
+        );
+        invitationAcceptance = {
+          tokenHash: prepared.tokenHash,
+          maxMembers: prepared.maxMembers,
+          eventContext: {
+            requestId: ctx.requestId,
+            ipAddress: ctx.ipAddress,
+            userAgent: ctx.userAgent,
+          },
+        };
+      }
+
       const passwordHash = await hashPassword(input.password);
 
       // Registration is transactional: user + personal workspace (organization
@@ -411,6 +443,10 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
           familyId: createId('rtok'),
           expiresAt: new Date(now + refreshTokenTtlSeconds * 1000),
         },
+        // Sprint 9: when present, the invitation is accepted INSIDE this same
+        // transaction. A failed acceptance rolls the whole registration back, so
+        // the session/refresh result below is only built for a fully valid state.
+        invitationAcceptance,
       });
 
       const result = await buildSessionIssueResult(

@@ -24,6 +24,8 @@ import { registerPlanRoutes } from './modules/entitlements/plan.routes';
 import type { PlanService } from './modules/entitlements/plan.service';
 import { registerApiKeyRoutes } from './modules/api-keys/api-key.routes';
 import type { ApiKeyService } from './modules/api-keys/api-key.service';
+import { registerInvitationRoutes } from './modules/invitations/invitation.routes';
+import type { InvitationService } from './modules/invitations/invitation.service';
 import { registerExternalProjectRoutes } from './modules/api-keys/external-projects.routes';
 import type { ExternalProjectsService } from './modules/api-keys/external-projects.service';
 import type { ApiKeyAuthenticator } from './modules/api-keys/api-key.authenticator';
@@ -81,6 +83,16 @@ export interface BuildAppOptions {
    * Bearer-USER-authenticated through it); registered only when both are provided.
    */
   apiKeyService?: ApiKeyService;
+  /**
+   * Invitation lifecycle service backing the organization-scoped invitation
+   * management routes (`/v1/organizations/:id/invitations*`) and the
+   * token-bearing onboarding routes (`/v1/invitations/inspect`,
+   * `/v1/invitations/accept`). Requires `authService` (the management + accept
+   * routes are Bearer-authenticated through it); registered only when both are
+   * provided. The same service instance is also wired into the auth service as
+   * the registration-with-invitation collaborator.
+   */
+  invitationService?: InvitationService;
   /**
    * External read-only Projects service backing `GET /v1/external/projects`.
    * Registered only together with `apiKeyAuthenticator` — the external route is
@@ -192,6 +204,17 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     if (options.apiKeyService) {
       registerApiKeyRoutes(app, {
         service: options.apiKeyService,
+        authenticator: options.authService,
+      });
+    }
+
+    // Organization-scoped invitation management + token-bearing onboarding
+    // routes. The management routes and the accept route are Bearer-USER
+    // authenticated; the inspect route is intentionally public (it backs
+    // new-user onboarding) and is registered by `registerInvitationRoutes`.
+    if (options.invitationService) {
+      registerInvitationRoutes(app, {
+        service: options.invitationService,
         authenticator: options.authService,
       });
     }

@@ -57,7 +57,6 @@ describe('createRedisRateLimiter', () => {
         return 1;
       },
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const limiter = createRedisRateLimiter(redis as any);
 
     expect(await limiter.consume('k', 2, 60)).toBe(true);
@@ -75,7 +74,6 @@ describe('createRedisRateLimiter', () => {
         return 1;
       },
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const limiter = createRedisRateLimiter(redis as any);
     expect(await limiter.consume('k', 1, 60)).toBe(true);
   });

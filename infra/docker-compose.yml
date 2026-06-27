@@ -1,13 +1,14 @@
 # Local development infrastructure for Orgistry.
 #
 # Services:
-#   postgres  - durable local store          (host port 5432)
-#   redis     - future rate limiting + readiness probe (host port 6379)
-#   mailpit   - future local email flows; SMTP 1025, web UI http://localhost:8025
+#   postgres  - durable local store              (host port 5432)
+#   redis     - auth + external-API rate limiting + readiness probe (host port 6379)
+#   mailpit   - local invitation email delivery; SMTP 1025, web UI http://localhost:8025
 #
 # No worker/queue runtime, object storage, or production deployment concerns
-# are defined here — those are out of Sprint 1 scope. Credentials below are
-# local-only development defaults and are NOT secrets.
+# are defined here — those are intentionally out of scope (see
+# docs/known-limitations.md). Credentials below are local-only development
+# defaults and are NOT secrets.
 name: orgistry
 
 services:

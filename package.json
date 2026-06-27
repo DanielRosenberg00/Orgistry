@@ -13,10 +13,17 @@
     "dev:api": "pnpm --filter @orgistry/api run dev",
     "dev:web": "pnpm --filter @orgistry/web-demo run dev",
     "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test": "vitest run",
     "test:integration": "pnpm -r run test:integration",
-    "lint": "node tooling/lint-placeholder.mjs",
-    "validate": "pnpm run typecheck && pnpm run lint && pnpm run test",
+    "test:web": "pnpm --filter @orgistry/web-demo run test",
+    "build:web": "pnpm --filter @orgistry/web-demo run build",
+    "db:check": "node tooling/check-schema-drift.mjs",
+    "check:whitespace": "git diff --check",
+    "validate": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run test:web && pnpm run build:web && pnpm run db:check && pnpm run check:whitespace",
+    "validate:integration": "pnpm run db:reset:test && pnpm run test:integration",
+    "demo:seed": "node tooling/demo-seed.mjs",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
@@ -25,12 +32,19 @@
     "db:reset:test": "pnpm --filter @orgistry/db run reset:test"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/node": "^22.13.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^15.15.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.62.0",
     "vitest": "^3.0.5"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

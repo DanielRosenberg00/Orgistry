@@ -50,7 +50,7 @@ export const envSchema = z.object({
     .url()
     .describe('PostgreSQL connection string, e.g. postgres://user:pass@host:5432/db'),
 
-  // Redis — available for future rate limiting and used by the readiness probe.
+  // Redis — backs the auth + external-API rate limiters and the readiness probe.
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
 
   // Mailpit — local email delivery target. The Sprint 9 invitation mailer

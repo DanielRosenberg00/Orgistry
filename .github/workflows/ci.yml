@@ -5,11 +5,53 @@ on:
     branches: [main]
   pull_request:
 
+# Two jobs that mirror the local validation matrix (see docs/validation.md):
+#   validate    -> the offline gate, equivalent to `pnpm validate`
+#   integration -> the live-service gate, equivalent to `pnpm validate:integration`
 jobs:
+  # ---- Offline gate: no databases, no network services ----
   validate:
+    name: Validate (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint (ESLint)
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Web demo tests
+        run: pnpm test:web
+
+      - name: Web demo build
+        run: pnpm build:web
+
+      - name: Schema drift check
+        run: pnpm db:check
+
+      - name: Whitespace check
+        run: pnpm check:whitespace
+
+  # ---- Live-service gate: PostgreSQL + Redis (Mailpit is not exercised here) ----
+  integration:
+    name: Integration (PostgreSQL + Redis)
     runs-on: ubuntu-latest
 
-    # Live infrastructure for DB + readiness validation.
     services:
       postgres:
         image: postgres:16-alpine
@@ -34,7 +76,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-    # Mailpit is intentionally omitted — no CI command exercises email.
+    # Mailpit is intentionally omitted — no integration test exercises email
+    # delivery. The invitation mailer is covered by unit tests; the live SMTP
+    # path is verified manually via the local Mailpit container. See
+    # docs/known-limitations.md.
     env:
       NODE_ENV: test
       DATABASE_URL: postgres://orgistry:orgistry@localhost:5432/orgistry
@@ -59,19 +104,12 @@ jobs:
       - name: Create test database
         run: psql "$DATABASE_URL" -c 'CREATE DATABASE orgistry_test;'
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Lint (placeholder)
-        run: pnpm lint
-
-      - name: Unit tests
-        run: pnpm test
-
-      - name: Migration baseline (from scratch)
+      - name: Apply migration baseline (dev database)
         run: pnpm db:migrate
 
-      # Runs the DB migration-from-scratch test (TEST_DATABASE_URL) and the live
-      # API readiness test against PostgreSQL + Redis (DATABASE_URL/REDIS_URL).
-      - name: Integration tests (migration + live readiness)
-        run: pnpm test:integration
+      # Resets the test database to the migration baseline, then runs the DB
+      # migration-from-scratch test plus the live API readiness + route
+      # integration tests against PostgreSQL + Redis. Equivalent to
+      # `pnpm validate:integration`.
+      - name: Integration tests
+        run: pnpm validate:integration

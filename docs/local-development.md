@@ -39,11 +39,17 @@ curl -i http://localhost:3000/ready    # 200 if deps reachable, else 503
 ## Quality gates
 
 ```bash
-pnpm typecheck       # strict tsc across all packages/apps
-pnpm test            # unit tests (no infrastructure required)
-pnpm lint            # placeholder, exits 0 (see sprint-1-foundation.md)
-pnpm validate        # typecheck + lint + test
+pnpm typecheck            # strict tsc across all packages/apps
+pnpm lint                 # ESLint gate (API + packages + web demo)
+pnpm test                 # unit tests (no infrastructure required)
+pnpm validate             # full offline gate (see below)
+pnpm validate:integration # live gate — needs PostgreSQL + Redis
 ```
+
+`pnpm validate` runs the offline matrix: typecheck, lint, unit tests, web demo
+tests, web demo build, schema-drift check, and a whitespace check — failing
+non-zero on the first problem. See [`validation.md`](./validation.md) for the
+full matrix, what each command proves, and how to read failures.
 
 ## Database
 
@@ -78,8 +84,11 @@ pnpm infra:reset     # stop and delete volumes (wipes local data)
 | Service | Port(s) | Notes |
 | --- | --- | --- |
 | PostgreSQL | 5432 | durable store |
-| Redis | 6379 | readiness probe; future rate limiting |
-| Mailpit | 1025 / 8025 | SMTP / web UI (http://localhost:8025) |
+| Redis | 6379 | readiness probe; auth + external-API rate limiting |
+| Mailpit | 1025 / 8025 | SMTP / web UI (http://localhost:8025); invitation email delivery |
+
+See the [runbook](./runbook.md) for service details, data resets, and
+port-conflict handling, and [troubleshooting](./troubleshooting.md) for fixes.
 
 ## Notes
 

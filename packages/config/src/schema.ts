@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { enforceProductionConfigSafety } from './production-policy';
 
 /**
  * Runtime configuration schema for Orgistry.
@@ -8,10 +9,13 @@ import { z } from 'zod';
  * runs once at process startup (see `loadConfig`) and fails loudly so a
  * misconfigured process never boots into a partially-working state.
  *
- * Scope note: JWT/cookie secrets, refresh-cookie attributes, the CSRF header
+ * Scope note: the JWT secret, refresh-cookie attributes, the CSRF header
  * name, and per-bucket auth rate limits are all declared here. Sprint 3 wires
  * them into the secure session lifecycle (refresh rotation, logout, session
- * management, CSRF enforcement, Redis-backed rate limiting).
+ * management, CSRF enforcement, Redis-backed rate limiting). Sprint 15 adds
+ * the production safety guard (`production-policy.ts`): under
+ * `NODE_ENV=production`, development-default/weak secrets and
+ * `COOKIE_SECURE=false` are rejected at load time.
  */
 
 const booleanFromEnv = z
@@ -24,7 +28,7 @@ const portSchema = z.coerce.number().int().min(1).max(65535);
  * Raw environment schema. Keys map 1:1 to environment variable names so the
  * mapping between `.env` and validated config is obvious.
  */
-export const envSchema = z.object({
+const rawEnvSchema = z.object({
   // Runtime mode. `development` is the local default; `test` is used by the
   // automated suites and the test database reset flow.
   NODE_ENV: z
@@ -70,14 +74,15 @@ export const envSchema = z.object({
     .positive()
     .default(604_800),
 
-  // Auth secrets. Required so environments are provisioned correctly.
+  // Auth secret. Required so environments are provisioned correctly. The
+  // 16-character floor is the development/test baseline; production is held to
+  // the stricter policy in `production-policy.ts` (min 32 chars, no known
+  // dev defaults, no placeholder-style or degenerate values).
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
-  COOKIE_SECRET: z
-    .string()
-    .min(16, 'COOKIE_SECRET must be at least 16 characters'),
   // `true` in production-like environments, `false` on localhost over HTTP.
   // Default is the raw env string 'false'; the transform yields the boolean.
-  // Drives the refresh cookie's `Secure` attribute.
+  // Drives the refresh cookie's `Secure` attribute. Under
+  // `NODE_ENV=production` the guard below requires `true`.
   COOKIE_SECURE: booleanFromEnv.default('false'),
 
   // Access token lifetime. Short-lived by design; refresh-token rotation
@@ -176,5 +181,13 @@ export const envSchema = z.object({
     .nonnegative()
     .default(60),
 });
+
+/**
+ * The full environment schema: raw field validation plus the production
+ * safety guard. The guard is part of the schema itself (not a separate
+ * validation path) so every `loadConfig` caller — including API boot — gets
+ * it unconditionally.
+ */
+export const envSchema = rawEnvSchema.superRefine(enforceProductionConfigSafety);
 
 export type Env = z.infer<typeof envSchema>;

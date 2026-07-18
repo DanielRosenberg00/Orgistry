@@ -9,7 +9,6 @@ export function testConfig(): Config {
     DATABASE_URL: 'postgres://orgistry:orgistry@localhost:5432/orgistry_test',
     REDIS_URL: 'redis://localhost:6379',
     JWT_SECRET: 'test-jwt-secret-value-1234',
-    COOKIE_SECRET: 'test-cookie-secret-value-1234',
   });
 }
 

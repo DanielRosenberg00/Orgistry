@@ -41,7 +41,6 @@ export interface Config {
   };
   readonly auth: {
     readonly jwtSecret: string;
-    readonly cookieSecret: string;
     readonly cookieSecure: boolean;
     readonly accessTokenTtlSeconds: number;
     readonly sessionTtlSeconds: number;
@@ -126,7 +125,6 @@ function toConfig(env: Env): Config {
     },
     auth: {
       jwtSecret: env.JWT_SECRET,
-      cookieSecret: env.COOKIE_SECRET,
       cookieSecure: env.COOKIE_SECURE,
       accessTokenTtlSeconds: env.AUTH_ACCESS_TOKEN_TTL_SECONDS,
       sessionTtlSeconds: env.AUTH_SESSION_TTL_SECONDS,

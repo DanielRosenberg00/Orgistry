@@ -140,6 +140,7 @@ export const emailVerificationTokens = pgTable(
     tokenHash: text('token_hash').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     usedAt: timestamp('used_at', { withTimezone: true }),
+    invalidatedAt: timestamp('invalidated_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [

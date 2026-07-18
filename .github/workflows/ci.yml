@@ -86,7 +86,6 @@ jobs:
       TEST_DATABASE_URL: postgres://orgistry:orgistry@localhost:5432/orgistry_test
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-jwt-secret-value-1234
-      COOKIE_SECRET: ci-cookie-secret-value-1234
 
     steps:
       - uses: actions/checkout@v4

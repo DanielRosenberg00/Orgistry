@@ -57,6 +57,13 @@
       "when": 1782374275138,
       "tag": "0007_tough_mole_man",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784375937750,
+      "tag": "0008_many_molly_hayes",
+      "breakpoints": true
     }
   ]
 }

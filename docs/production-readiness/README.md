@@ -1,0 +1,149 @@
+# Orgistry Production Readiness Audit (Sprint 14)
+
+This directory is the authoritative production-readiness assessment for Orgistry.
+It establishes the repository's real current state, records evidence-backed
+production gaps, classifies their severity, and defines a dependency-ordered
+roadmap from the current portfolio-grade state to a production launch.
+
+This is an **audit and planning** deliverable. No production code was changed and
+no production fixes were implemented during the Sprint 14 audit itself (see
+[Limitations](#limitations)).
+
+> **Post-audit status (Sprint 15, 2026-07-18): Sprint 15 is COMPLETE.**
+> ORG-PR-003 and ORG-PR-047 are closed (production config guard +
+> `COOKIE_SECRET` removal — see
+> [docs/production-config-guard.md](../production-config-guard.md)), and
+> **DG-1, DG-2, and DG-5 were ratified by the Project Owner on 2026-07-18**;
+> DG-3/DG-4 remain open as permitted
+> ([sprint-15-decisions.md](sprint-15-decisions.md),
+> [sprint-15-artifact-package.md](sprint-15-artifact-package.md)).
+>
+> **Post-audit status (Sprint 16, 2026-07-18): Sprint 16 is COMPLETE** in its
+> repository scope. ORG-PR-024 and ORG-PR-048 are closed (full
+> email-verification lifecycle, tested); ORG-PR-002 is **materially advanced
+> but still open** — the production-shaped SMTPS adapter and fail-closed mail
+> config exist, but external-provider delivery has not been validated (no
+> credentials available). See
+> [docs/email-and-verification.md](../email-and-verification.md) and
+> [sprint-16-artifact-package.md](sprint-16-artifact-package.md). Five P1
+> blockers remain open (ORG-PR-001/002/004/005/006); the repository is still
+> **not ready for staging or production** — sprint completion is not launch
+> clearance.
+
+## Audit context
+
+- **Execution date:** 2026-07-02
+- **Repository revision audited:** `d0b2f97` (`main`), tree clean at audit start.
+- **Auditor role:** Staff Engineer / Production Readiness Auditor / Security &
+  Reliability Reviewer / Principal Technical Writer (single execution).
+- **Method:** whole-repository census, seven parallel domain investigations
+  reading source (not documentation) as the source of truth, self-verification of
+  load-bearing claims, then synthesis. See [Audit Method](#audit-method).
+
+## Navigation index
+
+| Document | Purpose |
+| --- | --- |
+| [production-target.md](production-target.md) | The production profile readiness is assessed against; assumptions and decision gates. |
+| [repository-inventory.md](repository-inventory.md) | Complete inventory of apps, packages, routes, tables, migrations, config, scripts, CI, tests, docs, with maturity classification. |
+| [product-gap-analysis.md](product-gap-analysis.md) | Original v1 capability matrix vs. actual status; frontend page classification. |
+| [security-assessment.md](security-assessment.md) | Cross-domain security posture with references into the findings register. |
+| [threat-model.md](threat-model.md) | Orgistry-specific assets, trust boundaries, threats, controls, residual risk. |
+| [standards-matrix.md](standards-matrix.md) | ASVS / SSDF / SAMM / SLSA practice-level mappings with limitations. |
+| **[findings-register.md](findings-register.md)** | **Authoritative source for all findings (`ORG-PR-NNN`).** |
+| [production-scorecard.md](production-scorecard.md) | Domain maturity, blocker status, largest gap, confidence. |
+| [production-roadmap.md](production-roadmap.md) | Sequenced phases, critical path, decision gates, the one recommended next sprint, launch gate. |
+| [launch-checklist.md](launch-checklist.md) | Five-stage checklist with finding/roadmap traceability. |
+| [sprint-14-artifact-package.md](sprint-14-artifact-package.md) | The official Sprint 14 closing artifact. |
+| [sprint-15-decisions.md](sprint-15-decisions.md) | Decision-gate record (DG-1…DG-5) as of Sprint 15. |
+| [sprint-15-artifact-package.md](sprint-15-artifact-package.md) | The Sprint 15 closing artifact (production config guard). |
+| [sprint-16-artifact-package.md](sprint-16-artifact-package.md) | The Sprint 16 closing artifact (production email + email verification). |
+
+## Source-of-truth hierarchy
+
+1. **Repository source code and migrations** — the ultimate authority. Where docs
+   and code disagree, code wins and the disagreement is recorded as a finding.
+2. **[findings-register.md](findings-register.md)** — authoritative for every
+   finding's ID, title, severity, classification, and evidence. All other
+   documents in this package reference it and must not restate a different
+   severity or title.
+3. This package's other documents — derived views over the register.
+4. Pre-existing repository docs (`docs/*.md`) — treated as claims to reconcile,
+   not as authority. Stale or contradictory docs are recorded as findings
+   (see [ORG-PR-046](findings-register.md#org-pr-046)), not silently rewritten.
+
+## Evidence conventions
+
+Every material claim cites concrete evidence in the form
+`path — symbol (approx line)`, a route `METHOD /path`, a table/constraint/index
+name, a test name, a CI job, or a config key. Line numbers are approximate and
+paired with a stable symbol name so they survive minor drift. Absence claims
+state what was searched (command/pattern), where, and what related code does
+exist — never a bare "X does not exist."
+
+Content is separated into: **verified fact**, **evidence-backed inference**,
+**explicit assumption**, **unknown**, and **externally unverifiable item**.
+Assumptions and unknowns are labeled inline and consolidated per document.
+
+## Finding severity conventions
+
+| Severity | Meaning |
+| --- | --- |
+| **P0** | Immediate critical risk (actively exploitable now). |
+| **P1** | Production launch blocker. |
+| **P2** | Required shortly before or after launch. |
+| **P3** | Hardening / maturity improvement. |
+| **P4** | Optional enhancement. |
+
+**Blocker semantics (overriding rule):** *Any unresolved P0 or P1 prevents a
+production-ready result regardless of the maturity of other domains.* Severity
+reflects exploitability, impact, target profile, and dependency position — not
+"is it a missing feature." Not every missing feature is P1, and P1 severity is
+**not** reduced merely because the project is not yet serving production traffic.
+
+Classifications used: Production blocker · Security risk · Reliability risk ·
+Data-integrity risk · Operational gap · Product completeness gap · Compliance
+dependency · Maintainability issue · Developer-experience issue · Optional
+enhancement · Not applicable.
+
+## Audit method
+
+1. **Baseline & census** — recorded Git state, enumerated all 338 tracked files,
+   read the root README, `package.json`, CI, Compose, and `.env.example`.
+2. **Production target** — selected a profile from repository evidence
+   ([production-target.md](production-target.md)).
+3. **Domain investigation** — seven parallel read-only investigations covering
+   auth/crypto, authorization/tenancy/concurrency, invitations/API-keys/audit,
+   database/migrations, API platform/contracts, web-demo frontend, and
+   testing/CI/supply-chain, plus a documentation-reconciliation pass.
+4. **Validation** — ran the required commands and recorded exact outcomes
+   ([Validation evidence](sprint-14-artifact-package.md#7-validation-evidence)).
+5. **Self-verification** — independently re-checked the config-guard, external-API
+   pre-auth write, and proxy/header claims that P1/P2 findings depend on.
+6. **Synthesis** — one findings register, then scorecard, roadmap, and checklist
+   derived from it, then a cross-document consistency pass.
+
+## Limitations
+
+- **Single audit pass** by one auditor; no independent second reviewer. An
+  external security review remains required before launch
+  ([ORG-PR-018](findings-register.md#org-pr-018), standards-matrix).
+- **No production environment exists**, so all deployment, backup, scaling, and
+  observability findings are assessed structurally from the repository, not from
+  a running system.
+- **Integration validation** ran against a throwaway alternate-port PostgreSQL
+  because host port 5432 is occupied by an unrelated database on the audit
+  machine; this is an environment limitation, not a repository defect.
+- **`pnpm audit`** results depend on the advisory database reachable at audit
+  time; they are reported verbatim, not independently triaged for exploitability.
+- Legal/compliance determinations are marked **Legal review required** and are
+  not resolved here.
+
+## Document relationships
+
+`findings-register.md` is the hub. `product-gap-analysis.md`,
+`security-assessment.md`, `threat-model.md`, and `standards-matrix.md` each view
+the findings through one lens and link back by ID. `production-scorecard.md`,
+`production-roadmap.md`, and `launch-checklist.md` are derived *from* the register
+(findings first, then sequencing — not the reverse). `sprint-14-artifact-package.md`
+summarizes the whole and is the closing record.

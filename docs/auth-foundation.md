@@ -24,10 +24,11 @@ This document is the **historical Sprint 2 reference**. It describes the auth
 foundation as it was first shipped: register/login/current-user with no refresh
 endpoint, logout, session listing/revocation, or email-verification flow, and
 where registration created **only** a user and a session. Later sprints extended
-this — the session lifecycle (Sprint 3) and personal-workspace provisioning
-(Sprint 4). Where this document describes the original state, §E records what has
-since been resolved and points to the current authoritative docs. Email
-verification remains out of scope.
+this — the session lifecycle (Sprint 3), personal-workspace provisioning
+(Sprint 4), and the email-verification lifecycle (Sprint 16; see
+[email-and-verification.md](email-and-verification.md)). Where this document
+describes the original state, §E records what has since been resolved and
+points to the current authoritative docs.
 
 ## A. Developer Documentation
 

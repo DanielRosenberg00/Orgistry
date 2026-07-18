@@ -42,8 +42,12 @@ User → Organization → Membership → Role → Permission → Entitlement →
 - **API keys & external API** — organization-scoped machine credentials
   (hash-only, one-time secret, typed scopes) and a read-only, tenant-derived
   `GET /v1/external/projects`.
-- **Invitations** — single-use, expiring, hash-only-token invitations with local
-  email delivery (Mailpit) and email-match enforcement.
+- **Invitations** — single-use, expiring, hash-only-token invitations with
+  email delivery through the shared account mailer and email-match enforcement.
+- **Email verification** — hash-only, expiring, single-use verification tokens
+  with transactional race-safe completion, resend invalidation, and a
+  driver-selected account mailer (Mailpit locally; authenticated implicit-TLS
+  SMTP for production; advisory policy — nothing is gated yet).
 - **Audit log** — a permission- and entitlement-gated, filterable read over
   sanitized organization action events.
 - **Web demo** — a thin React admin UI that consumes these APIs (it holds no
@@ -154,6 +158,13 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   trade-offs, and what the project demonstrates.
 - [Roadmap](docs/roadmap.md) — prospective work; critical production gaps vs
   optional enhancements.
+- [Production readiness audit](docs/production-readiness/README.md) — Sprint 14
+  whole-repository readiness assessment: findings register, scorecard, roadmap,
+  and launch checklist. Sprint 15 closed the production config-safety blocker
+  (see [production config guard](docs/production-config-guard.md)); Sprint 16
+  shipped the email-verification lifecycle and the production-shaped mailer
+  (see [email & verification](docs/email-and-verification.md)); the project
+  remains not ready for staging or production.
 
 **Authoritative (current):**
 
@@ -161,6 +172,12 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   models, design decisions.
 - [Security model](docs/security-model.md) — credentials, sessions, CSRF,
   tenancy, authorization, API keys, invitations, audit.
+- [Production config guard](docs/production-config-guard.md) — the
+  `NODE_ENV=production` configuration safety policy: what it rejects, where it
+  lives, why it fails closed.
+- [Email & verification](docs/email-and-verification.md) — the account-mailer
+  boundary, driver selection, and the email-verification lifecycle and
+  invariants.
 - [API surface index](docs/api-surface.md) — every route by domain, with auth,
   permission, and entitlement.
 - [Validation matrix](docs/validation.md) — what to run, what it proves, how to
@@ -193,14 +210,17 @@ SameSite=Lax refresh cookie with transactional rotation and reuse detection;
 custom-header CSRF defense; fail-open Redis rate limits; ID-based tenant
 isolation; permission-first authorization with Last Owner protection; separated
 entitlement/quota gates; hash-only one-time API key secrets with scopes;
-hash-only invitation tokens with email-match enforcement; sanitized audit
-metadata. Full detail and non-production caveats:
+hash-only invitation tokens with email-match enforcement; hash-only single-use
+email-verification tokens with transactional completion (advisory in v1);
+sanitized audit metadata. Full detail and non-production caveats:
 [docs/security-model.md](docs/security-model.md).
 
 ## Known limitations
 
 Orgistry is **not production-certified**. Out of scope by design: billing
-(Stripe), OAuth/MFA/password reset, production email (Mailpit only), workers/
+(Stripe), OAuth/MFA/password reset, externally validated production email
+delivery (a production-shaped SMTP adapter exists but has never sent through a
+real provider; verification is advisory), workers/
 queues, PostgreSQL RLS, custom roles, resource-level/ABAC permissions, audit
 retention enforcement / export / SIEM, write-enabled external API, API key
 rotation, full browser E2E tests, and production deployment automation. The UI is

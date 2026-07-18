@@ -53,11 +53,31 @@ host port (e.g. `5433`) in `infra/docker-compose.yml` and update
 
 ## Mailpit unavailable
 
-- Invitation creation fails with a delivery error. The mailer is **fail-closed**:
-  if SMTP delivery fails, no invitation is persisted and no event is recorded.
-  Start Mailpit (`pnpm infra:up`) and confirm `localhost:1025` is reachable.
+- Invitation creation fails with a delivery error. Invitation delivery is
+  **fail-closed**: if SMTP delivery fails, no invitation is persisted and no
+  event is recorded. Start Mailpit (`pnpm infra:up`) and confirm
+  `localhost:1025` is reachable.
+- Registration still succeeds when Mailpit is down — the post-registration
+  verification email is **best-effort** by design. The account simply starts
+  unverified with no email delivered; use the **Resend email** action in the
+  web demo banner (or `POST /v1/auth/email-verification/request`) once Mailpit
+  is back.
+- An explicit verification resend fails with an error while Mailpit is down;
+  the previously issued verification link (if any) stays usable.
 - Can't see an email you expect: open <http://localhost:8025> and check the
-  Mailpit inbox; confirm `MAILPIT_HOST`/`MAILPIT_SMTP_PORT` match the container.
+  Mailpit inbox; confirm `MAILPIT_HOST`/`MAILPIT_SMTP_PORT` match the container
+  and that `MAIL_DRIVER` is `mailpit` (the default).
+
+## Mail configuration rejected at startup
+
+- `SMTP_HOST is required when MAIL_DRIVER=smtp` (any mode): selecting the
+  production smtp driver requires `SMTP_HOST`/`SMTP_USERNAME`/`SMTP_PASSWORD`.
+  For local development leave `MAIL_DRIVER=mailpit`.
+- Under `NODE_ENV=production` the config guard additionally refuses
+  `MAIL_DRIVER=mailpit`/`memory`, placeholder-style `SMTP_PASSWORD` values,
+  local-only/reserved-domain `MAIL_FROM_EMAIL`, and a non-HTTPS or localhost
+  `WEB_DEMO_URL`. See
+  [production-config-guard.md](./production-config-guard.md).
 
 ## Database migration / reset failures
 
@@ -107,7 +127,7 @@ cross-origin, and refresh/logout rely on a cookie sent with
 ## Integration test environment variables
 
 The integration suites need `NODE_ENV=test`, `DATABASE_URL`, `TEST_DATABASE_URL`,
-`REDIS_URL`, `JWT_SECRET`, and `COOKIE_SECRET`. If these are unset the suites
+`REDIS_URL`, and `JWT_SECRET`. If these are unset the suites
 **skip with a warning** rather than fail — a green run full of skips is not a
 validated run. `cp .env.example .env` provides working defaults; CI sets them
 explicitly in the workflow `env` block.

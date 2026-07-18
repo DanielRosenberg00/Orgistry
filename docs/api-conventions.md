@@ -70,6 +70,15 @@ Organization codes (Sprint 4): `ORGANIZATION_NOT_FOUND` (404 — does not exist
 non-members cannot probe existence) and `ORGANIZATION_SLUG_TAKEN` (409 — a
 requested explicit slug is already in use).
 
+Email-verification codes (Sprint 16): `EMAIL_VERIFICATION_TOKEN_INVALID`
+(404 — unknown token, or a token whose account cannot complete verification;
+indistinguishable so account state never leaks),
+`EMAIL_VERIFICATION_TOKEN_EXPIRED` (410), and
+`EMAIL_VERIFICATION_TOKEN_USED` (409 — consumed earlier or invalidated by a
+resend/sibling completion; reuse never verifies twice). All three describe
+token validity only. See
+[`email-and-verification.md`](email-and-verification.md).
+
 ## Auth endpoints
 
 See [`auth-foundation.md`](auth-foundation.md) (register/login/me) and

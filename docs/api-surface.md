@@ -36,6 +36,8 @@ defined under `apps/api/src/routes` and `apps/api/src/modules/*`.
 | POST | `/v1/auth/logout` | Cookie+CSRF | — | Revoke session; always clears the cookie. |
 | GET | `/v1/auth/sessions` | Bearer | `sessions.read` | List the caller's sessions (cursor-paginated). |
 | DELETE | `/v1/auth/sessions/:sessionId` | Bearer | `sessions.revoke` | Revoke a session; clears the cookie if it is the current one. |
+| POST | `/v1/auth/email-verification/request` | Bearer | — | Issue/resend a verification email for the CURRENT user's stored address (no body; enumeration-safe). Safe success when already verified. Returns `{ sent, alreadyVerified }`. |
+| POST | `/v1/auth/email-verification/complete` | none | — | Complete verification by raw token possession. Body `{ token }` (never a URL path). Returns `{ verified: true }`; errors: `EMAIL_VERIFICATION_TOKEN_INVALID` 404, `…_EXPIRED` 410, `…_USED` 409. |
 
 ## Organizations
 

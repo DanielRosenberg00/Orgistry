@@ -23,6 +23,12 @@ omits production concerns (see [known limitations](./known-limitations.md)).
   stored **hash-only**, delivered exclusively through an **HttpOnly,
   SameSite=Lax** cookie scoped to the auth path. It never appears in a response
   body. `Secure` is controlled by `COOKIE_SECURE` (true in HTTPS environments).
+  Under `NODE_ENV=production`, config loading refuses `COOKIE_SECURE=false` and
+  dev-default/weak `JWT_SECRET` values, so an unsafe production process cannot
+  boot — see [production-config-guard.md](production-config-guard.md). The
+  cookie is intentionally **unsigned**: its integrity model is the hashed,
+  rotated, high-entropy refresh token itself (the former `COOKIE_SECRET`
+  variable was dead config and was removed in Sprint 15).
 - **Refresh token rotation.** Refresh rotates **transactionally** — exactly one
   successor per token. The previous token is consumed on use.
 - **Refresh reuse detection.** Presenting an already-rotated (stolen/replayed)
@@ -37,7 +43,8 @@ omits production concerns (see [known limitations](./known-limitations.md)).
   origin allow-list denies. The CSRF defense is never on the auth-correctness
   path.
 - **Rate limits.** Redis-backed fixed-window limiters protect auth surfaces
-  (login per-IP/per-email, register per-IP, refresh per-session/per-IP) and the
+  (login per-IP/per-email, register per-IP, refresh per-session/per-IP,
+  email-verification request per-user/per-IP and completion per-IP) and the
   external API (per-key, per-org). They **fail open**: if Redis is down, requests
   are allowed rather than blocked, so an outage never breaks authentication.
 - **Session revocation.** Sessions can be listed and individually revoked;
@@ -78,12 +85,52 @@ omits production concerns (see [known limitations](./known-limitations.md)).
   tenant is derived from the key row) and accepts **no browser JWT**. Revoked or
   expired keys cannot authenticate; revocation is audited and idempotent.
 
+## Email verification (Sprint 16)
+
+- **Hash-only, expiring, single-use tokens.** Verification tokens are 32-byte
+  CSPRNG values stored only as SHA-256 hashes; they expire (default 24 h) and
+  are consumed transactionally. A `SELECT … FOR UPDATE` row lock makes
+  completion race-safe — two concurrent completions of one token can never
+  both succeed — and `users.email_verified_at` is set once, conditionally.
+- **Fragment-only link transport.** The emailed verification link carries the
+  raw token in the URL **fragment** (`/auth/verify-email#token=…`), which
+  browsers never send in an HTTP request — so the token cannot reach the web
+  server, a reverse proxy, an access log, or a `Referer` header. The frontend
+  captures it once into transient memory, removes the fragment from the
+  URL/history, and submits it in a POST body; it is never placed in a query
+  string, browser storage, or the DOM.
+- **Resend replacement.** The authenticated request endpoint doubles as
+  resend; every issue invalidates all prior unused tokens in the same
+  transaction, so at most one usable token generation exists per user. The
+  previously delivered link stays usable until the mailer has accepted the
+  replacement message, so a failed resend never strands the user with an
+  undelivered sole token (SMTP and the database are not atomic; the residual
+  window is documented in
+  [email-and-verification.md](./email-and-verification.md)).
+- **Header-injection protection.** Every value that reaches an email header
+  (sender identity, recipient, subject — including feature-supplied content
+  such as organization names) passes one central CR/LF/NUL guard before any
+  transport sees it, so no input can forge additional headers or recipients.
+- **Enumeration-safe by construction.** Request/resend accepts no email
+  address — it operates only on the authenticated user's stored email.
+  Completion (public; the token in the request **body**, never a URL) reveals
+  token validity only: a token for a missing/disabled account is
+  indistinguishable from an unknown token.
+- **Advisory in Sprint 16.** The verified flag is exposed on the current-user
+  contract and shown in the web demo, but nothing gates on it yet;
+  enforcement is a future, deliberate server-side change.
+- **Deterministic mailer selection.** Account email (invitations +
+  verification) flows through one explicit driver (`MAIL_DRIVER`). Production
+  config refuses the local Mailpit and in-memory drivers, placeholder SMTP
+  credentials, non-routable senders, and non-HTTPS/localhost public web URLs
+  — see [email-and-verification.md](./email-and-verification.md).
+
 ## Invitations
 
 - **Hash-only token storage.** The raw invitation token is high-entropy and opaque,
-  delivered **only** in the invitation email (SMTP → Mailpit) and carried in
-  request **bodies**, never URLs — so it is never logged. Only its SHA-256 hash is
-  stored.
+  delivered **only** in the invitation email (via the shared account mailer;
+  Mailpit locally) and carried in request **bodies**, never URLs — so it is
+  never logged. Only its SHA-256 hash is stored.
 - **Email-match enforcement.** Acceptance (including registration-with-invitation)
   requires the accepting account's email to match the invited email. Invitations
   are single-use and expiring (expiry derived on read; no worker).
@@ -101,9 +148,11 @@ omits production concerns (see [known limitations](./known-limitations.md)).
 
 ## Known non-production limitations
 
-This model omits, by design: OAuth/MFA/password reset, production email, database
-RLS, audit retention enforcement/export, custom roles, resource-level
-permissions, and hardened concurrency on quota checks. Rate limiting and quotas
+This model omits, by design: OAuth/MFA/password reset, externally validated
+production email delivery (the production SMTP adapter exists but has never
+sent through a real provider), verification **enforcement** (the flag is
+advisory), database RLS, audit retention enforcement/export, custom roles,
+resource-level permissions, and hardened concurrency on quota checks. Rate limiting and quotas
 accept fail-open and race-window trade-offs respectively. See
 [known limitations](./known-limitations.md) for the full list. Do not treat
 Orgistry as a hardened, certified system.

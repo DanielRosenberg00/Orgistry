@@ -34,9 +34,12 @@ real body of work with security and correctness implications.
   environment provisioning exists. *Would add:* a production Dockerfile per app,
   IaC (Terraform/Helm), and a deploy workflow. *Done when:* a tagged build deploys
   to a target environment reproducibly.
-- **Secrets management.** Secrets are local-only `.env` placeholders. *Would add:*
+- **Secrets management.** Secrets are local-only `.env` placeholders (though as
+  of Sprint 15 the config loader refuses dev-default/weak secrets under
+  `NODE_ENV=production` — see
+  [production-config-guard.md](production-config-guard.md)). *Would add:*
   integration with a secrets manager and a documented rotation procedure for
-  `JWT_SECRET` / `COOKIE_SECRET`. *Done when:* no secret is sourced from a
+  `JWT_SECRET`. *Done when:* no secret is sourced from a
   committed file in any non-local environment.
 - **Hardened quota concurrency.** Quota checks read-then-write without a global
   lock, leaving small race windows at the ceiling. *Would add:* transactional
@@ -77,9 +80,13 @@ the categories a reviewer would expect.
 
 ### Authentication extensions
 
-- **Password reset** — email-driven reset flow (needs production email).
-- **Email verification enforcement** — gate sensitive actions on a verified
-  address; the `email_verification_tokens` table already exists.
+- **Password reset** — email-driven reset flow (the Sprint 16 account-mailer
+  boundary and token conventions are its intended foundation; Sprint 17).
+- **Email verification enforcement** — the full verification lifecycle
+  (issue/resend/complete, hash-only single-use tokens, web flow) shipped in
+  Sprint 16 as an **advisory** feature; enforcement (gating sensitive actions
+  on a verified address) remains future work. See
+  [email-and-verification.md](./email-and-verification.md).
 - **OAuth / social login** — third-party identity providers.
 - **MFA / passkeys** — TOTP and/or WebAuthn second factor.
 
@@ -106,9 +113,13 @@ and a natural extension of the existing auth foundation.
 
 ### Email provider integration
 
-- **Production email provider** — replace local Mailpit-only SMTP with a real
-  provider (deliverability, templates, bounce handling). Invitations, and any
-  future password-reset/verification email, depend on this.
+- **External delivery validation** — Sprint 16 added a production SMTP
+  adapter (nodemailer transport: implicit TLS, negotiated SASL auth) behind
+  explicit driver selection (production can no longer silently use Mailpit),
+  but delivery through a real provider to a real inbox has not been validated
+  (no credentials in the validation environment). Remaining beyond that:
+  deliverability operations (SPF/DKIM setup), bounce/complaint handling, and
+  suppression lists.
 
 ### Audit / export features
 
@@ -128,8 +139,9 @@ and a natural extension of the existing auth foundation.
 - **Full browser end-to-end suite** — Playwright/Cypress covering the real demo
   flows (login, org switch, quota errors, invitation, API key one-time secret,
   audit). The web demo currently has jsdom component/routing tests only.
-- **Live SMTP/Mailpit assertion in CI** — automate the invitation-email path that
-  is currently verified manually.
+- **Live SMTP/Mailpit assertion in CI** — the SMTP conversation (including
+  TLS + AUTH) is unit-tested against an in-process fake server since
+  Sprint 16; asserting against a live Mailpit container in CI remains open.
 
 ### Frontend / UX improvements
 

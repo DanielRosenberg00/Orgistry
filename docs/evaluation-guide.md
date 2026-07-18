@@ -86,6 +86,10 @@ order, each chosen to show a distinct idea:
   ID and no JWT.
 - **Invitations** (`apps/api/src/modules/invitations`) — hash-only token,
   email-match enforcement, fail-closed send, single transactional acceptance seam.
+- **Mail + email verification** (`apps/api/src/modules/mail`,
+  `apps/api/src/modules/auth/email-verification.*`) — the one account-mailer
+  boundary with explicit driver selection (production refuses dev sinks), and
+  the hash-only, single-use, transactionally race-safe verification lifecycle.
 - **Audit** (`apps/api/src/modules/audit`) — permission+entitlement gating and
   defensive metadata sanitization.
 
@@ -113,8 +117,10 @@ Detail: [web demo](./web-demo.md). Thin-consumer rationale: the
 
 Read the [security model](./security-model.md), then verify these in code:
 
-- **Hash-only storage** for passwords, refresh tokens, API key secrets, and
-  invitation tokens; raw API key/invitation secrets shown or sent exactly once.
+- **Hash-only storage** for passwords, refresh tokens, API key secrets,
+  invitation tokens, and email-verification tokens; raw secrets shown or sent
+  exactly once (verification completion is additionally `FOR UPDATE`
+  race-safe: two concurrent completions can never both succeed).
 - **Refresh rotation + reuse detection** — transactional single-successor
   rotation; a replayed token revokes the whole family and session.
 - **CSRF off the correctness path** — custom-header requirement plus strict CORS
@@ -131,7 +137,7 @@ windows).
 
 ## What tests demonstrate important behavior
 
-The offline suite runs **489 unit tests** and **19 web-demo tests** (counts as of
+The offline suite runs **569 unit tests** and **34 web-demo tests** (counts as of
 the latest validation run; re-run `pnpm validate` to confirm). High-signal areas
 to open:
 
@@ -155,16 +161,18 @@ With infra up and the API running, `pnpm demo:seed` builds a presentable state b
 driving the **real public API** (never the database directly), then prints
 local-only credentials and a ready-to-run `curl` for the external API. Follow the
 [demo walkthrough](./demo-walkthrough.md) for the full reviewer journey:
-register/login → org switcher → overview → projects (hit `QUOTA_EXCEEDED` on Free)
-→ plan change to Pro → invite a user (read it in Mailpit) → create an API key
-(one-time secret) → call the external API → view the audit log → observe
-permission-aware UX with backend-authoritative errors.
+register/login → verify your email from the Mailpit link (single-use; resend
+invalidates the old link) → org switcher → overview → projects (hit
+`QUOTA_EXCEEDED` on Free) → plan change to Pro → invite a user (read it in
+Mailpit) → create an API key (one-time secret) → call the external API → view
+the audit log → observe permission-aware UX with backend-authoritative errors.
 
 ## What limitations to keep in mind
 
 Judge against the stated scope, not an imagined production target. Orgistry
-explicitly does **not** implement billing, OAuth, MFA, password reset, production
-email, PostgreSQL RLS, custom roles, resource-level/ABAC permissions, audit
+explicitly does **not** implement billing, OAuth, MFA, password reset,
+externally validated production email delivery (verification is advisory),
+PostgreSQL RLS, custom roles, resource-level/ABAC permissions, audit
 export/retention enforcement, webhooks, SDKs, or full browser E2E; and it accepts
 quota race windows, fail-open rate limiting, and a demo-quality UI. These are
 deliberate non-goals, documented in [known limitations](./known-limitations.md),

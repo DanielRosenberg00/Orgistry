@@ -41,7 +41,10 @@ Concretely, the sprint added:
   (`src/organization/`);
 - per-domain API hooks built on shared cursor pagination (`src/hooks/`);
 - shared loading / empty / error / permission UI components (`src/components/`);
-- seven admin pages plus login/register (`src/pages/`);
+- seven admin pages plus login/register and the public email-verification
+  completion page (`src/pages/`);
+- an advisory unverified-email banner with resend
+  (`src/components/EmailVerificationBanner.tsx`; Sprint 16);
 - jsdom component/route smoke tests (`src/**/*.test.tsx`, `src/test/`).
 
 ### Where the frontend pieces live
@@ -73,10 +76,12 @@ apps/web-demo/src
 │   ├── ProtectedRoute.tsx    route guard
 │   ├── OrganizationSwitcher.tsx
 │   ├── ErrorBanner.tsx       consistent backend-error rendering
+│   ├── EmailVerificationBanner.tsx  advisory unverified banner + resend (Sprint 16)
 │   ├── QueryStates.tsx       LoadingState / EmptyState / QueryBoundary / LoadMore
 │   └── PermissionNote.tsx    UX-only "you can't do this" hint
-├── pages/                    Login, Register, Overview, Members, Invitations,
-│                             Projects, Plan, ApiKeys, Audit, NotFound
+├── pages/                    Login, Register, VerifyEmail (public completion),
+│                             Overview, Members, Invitations, Projects, Plan,
+│                             ApiKeys, Audit, NotFound
 ├── lib/format.ts             date formatting
 └── test/                     fixtures + mock-API harness + setup
 ```
@@ -99,9 +104,14 @@ pnpm dev:web         # web only  -> http://localhost:5173
 ```
 
 Open <http://localhost:5173>, register an account (this auto-provisions a
-personal organization and signs you in), then create a **team** organization from
-the switcher to exercise the multi-org flow. Invitation emails land in Mailpit at
-<http://localhost:8025>.
+personal organization and signs you in; a verification email is sent
+best-effort and an advisory unverified banner appears until you follow it),
+then create a **team** organization from the switcher to exercise the
+multi-org flow. Invitation and verification emails land in Mailpit at
+<http://localhost:8025>; the verification link opens `/auth/verify-email` with
+the token in the URL fragment (never sent to any server), which captures it,
+scrubs the fragment from the URL, submits it in a POST body, never persists
+it, and refreshes the current user on success.
 
 Configuration (all optional, with local-dev defaults in `src/config.ts`):
 

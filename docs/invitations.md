@@ -41,8 +41,10 @@ Two facts to anchor everything below:
   onboarding) and an **accept** endpoint (Bearer; existing user joins).
 - Optional **invitation token on registration**, so a brand-new user both gets a
   personal workspace AND joins the inviting organization.
-- A fail-closed invitation **mailer** that delivers over SMTP to the local
-  **Mailpit** container, behind a swappable `InvitationMailer` interface.
+- Fail-closed invitation **email delivery** through the shared account-mailer
+  boundary (since Sprint 16: `AccountMailer` in `apps/api/src/modules/mail/`,
+  driver-selected — Mailpit locally, authenticated SMTPS in production; see
+  [email-and-verification.md](email-and-verification.md)).
 - Invitation/member **action events** (`invitation.created`, `invitation.revoked`,
   `invitation.accepted`, `membership.created_from_invitation`).
 - Contracts/DTOs and stable error codes.
@@ -75,14 +77,15 @@ apps/api/src/modules/invitations/
   invitation.errors.ts                        stable error factories
   invitation.token.ts                         generate/hash (opaque token seam)
   invitation.lifecycle.ts                     expiry/acceptability (single source)
-  invitation.mailer.ts                        InvitationMailer + pure message builder
-  invitation.mailpit-mailer.ts                Mailpit SMTP transport (zero-dep, fail-closed)
+  invitation.mailer.ts                        pure invitation email rendering + accept URL
   invitation.acceptance.ts                    shared acceptance transaction body
   invitation.types.ts                         repository boundary + internal types
   invitation.repo.ts                          Drizzle persistence + acceptance tx
   invitation.service.ts                        workflows + registration guard
   invitation.routes.ts                        thin HTTP handlers
-  testing/                                     in-memory repo, capturing mailer, test app
+  testing/                                     in-memory repo, test app
+apps/api/src/modules/mail/                     shared account mailer (drivers, serialization,
+                                               in-memory test mailer) — Sprint 16
 apps/api/src/modules/auth/                     register() integration (optional guard)
 apps/api/src/modules/entitlements/            getMaxMembers + reservation quota
 ```
@@ -97,7 +100,7 @@ route (validate body, org id from path)
       reject duplicate non-expired pending invitation
       requireMemberReservationQuota(active + pending >= max_members → QUOTA_EXCEEDED)
       generate raw token + hash; compute expiry
-      mailer.sendInvitationEmail(...)          ← FAIL-CLOSED: send BEFORE persist
+      mailer.deliver(renderInvitationEmail(…)) ← FAIL-CLOSED: send BEFORE persist
       repo.createInvitation(...)               ← insert + record invitation.created (one tx)
   → map row → Invitation DTO (never the token/hash)
 ```
@@ -107,12 +110,11 @@ route (validate body, org id from path)
 - **Add a field to the DTO**: extend `invitationSchema` in contracts and the
   `toInvitation` mapper. Never surface `tokenHash`, `acceptedByUserId`, or
   `revokedByUserId` — they are persistence internals.
-- **Email delivery**: the runtime mailer is `createMailpitInvitationMailer`
-  (`invitation.mailpit-mailer.ts`), a zero-dependency SMTP client that delivers
-  to the local Mailpit container (`MAILPIT_*` config). To target a different
-  local sink, implement `InvitationMailer` and inject it in `server.ts` — the
-  service and the fail-closed ordering are unchanged. A production email provider
-  is deliberately out of scope.
+- **Email delivery**: the service depends on the shared `AccountMailer`
+  boundary (`apps/api/src/modules/mail/`). The runtime driver is selected by
+  `MAIL_DRIVER` (Mailpit locally, authenticated SMTPS in production, in-memory
+  in tests) — the service and the fail-closed ordering are unchanged whichever
+  driver is active. See [email-and-verification.md](email-and-verification.md).
 - **A new acceptance path** (e.g. a future flow): resolve the invitation by token
   hash, then call `repo.acceptInvitation` — the single transactional seam that
   enforces every invariant. Do not re-implement acceptance.
@@ -120,11 +122,11 @@ route (validate body, org id from path)
 
 ### Local email delivery (Mailpit) and token transport
 
-Invitation email is delivered for real over SMTP to the local **Mailpit**
-container defined in `infra/docker-compose.yml` (`MAILPIT_HOST` :
-`MAILPIT_SMTP_PORT`, default `localhost:1025`). The transport
-(`invitation.mailpit-mailer.ts`) is a small, zero-dependency SMTP client over
-Node's `net` socket — no production email provider, no worker/queue.
+With the default `MAIL_DRIVER=mailpit`, invitation email is delivered for real
+over SMTP to the local **Mailpit** container defined in
+`infra/docker-compose.yml` (`MAILPIT_HOST` : `MAILPIT_SMTP_PORT`, default
+`localhost:1025`). The transport (`apps/api/src/modules/mail/`) is a small,
+zero-dependency SMTP client over Node's `net`/`tls` sockets — no worker/queue.
 
 To see an invitation email locally:
 

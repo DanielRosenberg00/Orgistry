@@ -15,11 +15,29 @@ These are intentional non-goals, not bugs:
 - **No billing.** No Stripe, checkout, billing portal, subscription, invoice, or
   payment. Plans (Free/Pro/Business) are fixed internal **demo** plans changed
   only via the demo endpoint.
-- **No extended auth.** No OAuth/social login, MFA/passkeys, email verification
-  enforcement, or password reset.
-- **No production email.** Email is delivered only to the local Mailpit container
-  over SMTP. There is no production email provider, and no bulk invites,
-  reminders, or invitation UI beyond the web demo flows.
+- **No extended auth.** No OAuth/social login, MFA/passkeys, or password
+  reset/recovery. Email verification EXISTS (Sprint 16) but is **advisory
+  only**: nothing gates login, organization access, invitations, projects, or
+  API keys on the verified flag. Enforcement is a future, deliberate change
+  (the extension point is the `emailVerified` field on the current-user
+  contract plus `users.email_verified_at`).
+- **Production email delivery is unproven.** Sprint 16 added a production
+  SMTP adapter (nodemailer transport; fail-closed config; see
+  [email-and-verification.md](email-and-verification.md)), and production can
+  no longer silently fall back to Mailpit. Stated capabilities: SMTP over
+  implicit TLS (SMTPS) with certificate/hostname verification and the
+  authentication mechanism negotiated by nodemailer from the server's
+  advertised capabilities (AUTH PLAIN has direct automated test evidence;
+  other mechanisms rely on nodemailer, untested here) — verified by automated
+  tests against an in-process server, plus live delivery to the local Mailpit
+  container. **No delivery through a real external provider to a real inbox
+  has been performed** (no provider credentials exist in this repository or
+  its validation environments), so real-provider compatibility is asserted,
+  not evidenced; ORG-PR-002 stays open until it is. The driver offers no
+  STARTTLS upgrade — a provider endpoint must accept implicit-TLS
+  connections (conventionally port 465). Also intentionally absent: bounce
+  processing, complaint processing, suppression lists, marketing/bulk email,
+  templates/CMS, and notification preferences.
 - **No background processing.** No workers, queues, schedulers, or cron. Anything
   that would need a background job (e.g. expiry sweeps, retention deletion) is
   instead derived on read or simply not performed.
@@ -44,15 +62,30 @@ These are intentional non-goals, not bugs:
   hard-delete or restore** — deletes are soft.
 - **No object storage** and **no production deployment automation** (no
   Terraform, Helm, Kubernetes manifests, or release pipeline).
+- **No production secret management.** There is no secrets manager, no secret
+  rotation procedure, and no JWT `kid`/versioned-secret rotation path (rotating
+  `JWT_SECRET` invalidates all live access tokens). The Sprint 15 production
+  config guard ([production-config-guard.md](production-config-guard.md))
+  refuses known-bad and obviously weak secrets under `NODE_ENV=production`,
+  but **config validation does not prove real entropy** — a determined operator
+  can still supply a weak-but-passing value. External email delivery is
+  unvalidated, and no password recovery or backup/PITR/restore system exists.
+  The project remains **not ready for staging or production** (see the
+  [production-readiness audit](production-readiness/README.md)).
 
 ## Testing and validation limitations
 
 - **No full browser end-to-end tests.** The web demo is covered by jsdom
   component/routing tests, not a real-browser E2E harness (Playwright/Cypress).
-- **Mailpit/SMTP is not exercised by automated tests.** The invitation mailer has
-  unit coverage; the live SMTP delivery path is verified manually via the local
-  Mailpit container and the [demo walkthrough](./demo-walkthrough.md). CI does not
-  run Mailpit.
+- **Live Mailpit is not exercised in CI.** The SMTP conversation (including a
+  real implicit-TLS handshake and authentication against an in-process fake
+  server) has automated coverage in the mail module suites; delivery to the
+  live Mailpit container is verified manually via the
+  [demo walkthrough](./demo-walkthrough.md). CI does not run Mailpit.
+- **No external-provider delivery test.** The production SMTP adapter has
+  never sent through a real provider to a real inbox (no credentials
+  available). The safe validation procedure is documented in
+  [email-and-verification.md](email-and-verification.md#external-provider-validation).
 - **Integration tests require live PostgreSQL + Redis.** Without them the
   integration suites skip (with a warning), so a fully offline run validates
   types, lint, unit tests, the web build, and schema drift — but not the live DB

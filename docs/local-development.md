@@ -85,7 +85,7 @@ pnpm infra:reset     # stop and delete volumes (wipes local data)
 | --- | --- | --- |
 | PostgreSQL | 5432 | durable store |
 | Redis | 6379 | readiness probe; auth + external-API rate limiting |
-| Mailpit | 1025 / 8025 | SMTP / web UI (http://localhost:8025); invitation email delivery |
+| Mailpit | 1025 / 8025 | SMTP / web UI (http://localhost:8025); account email delivery (invitations + email verification) with the default `MAIL_DRIVER=mailpit` |
 
 See the [runbook](./runbook.md) for service details, data resets, and
 port-conflict handling, and [troubleshooting](./troubleshooting.md) for fixes.

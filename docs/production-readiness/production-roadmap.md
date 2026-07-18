@@ -1,0 +1,226 @@
+# Production Roadmap
+
+Dependency-ordered path from the current state (**C — Ready to begin production
+implementation**) to a production launch, derived from
+[findings-register.md](findings-register.md). Findings were established first; this
+sequencing follows from their dependencies — the roadmap was not written first and
+back-filled.
+
+## Sequencing principles
+
+1. **Decisions before build.** Resolve the production target and policy gates
+   (DG-1…DG-5) before infrastructure commits.
+2. **Close blockers on the critical path first**; run independent hardening in
+   parallel.
+3. **Prefer root-cause fixes** that retire multiple downstream findings (e.g. a
+   background runtime unlocks all retention jobs).
+4. **Verification and restore drill gate the launch**, not passing unit tests.
+
+## Dependency graph (text)
+
+```
+Phase 1: Target & Decisions (DG-1..DG-5)
+      │
+      ├──────────────┬───────────────────────────┐
+      ▼              ▼                           ▼
+Phase 2:        Phase 3:                    (parallel)
+Account         Security & Data-Integrity    Frontend hardening
+Lifecycle       Hardening                     (ORG-PR-023/035/036)
+(needs email ── (ORG-PR-003/009/010/011/012/  Supply-chain/CI
+ ORG-PR-002)     013/014/017/018/019/020/       (ORG-PR-019/020/018/042)
+                 029/030/032/033/034/037/38/    — can start immediately
+                 044/047/049/050/051/052/053)
+      │              │
+      └──────┬───────┘
+             ▼
+Phase 4: Production Infrastructure & Deployment
+   (ORG-PR-001/006/021/022/042 ; needs Phase 1 decisions)
+             │
+             ▼
+Phase 5: Reliability, Recovery & Operations
+   (ORG-PR-005/007/008/015/016/025/027/028/043 ; needs Phase 4)
+             │
+             ▼
+Phase 6: End-to-End Verification & Security Review
+   (ORG-PR-026/040/041/044 + external pentest/DAST)
+             │
+             ▼
+   ★ PRODUCTION LAUNCH GATE ★  (restore drill mandatory)
+```
+
+## Phases → proposed sprints
+
+### Phase 1 — Production configuration safety & decision ratification
+- **Sprint 15 (recommended next — see below).** Config-safety implementation
+  (ORG-PR-003/047) + ratification of the implementation-relevant decision gates.
+  The production target itself was selected in Sprint 14
+  ([production-target.md](production-target.md)).
+
+### Phase 2 — Account lifecycle completion
+- **Sprint 16 — Production email + verification.** ✅ **Repository scope
+  COMPLETE (2026-07-18)** — see
+  [sprint-16-artifact-package.md](sprint-16-artifact-package.md). Delivered:
+  the shared account-mailer boundary with a production-shaped SMTPS adapter
+  and fail-closed driver selection, the full email-verification lifecycle
+  (request/resend + public completion, hash-only single-use tokens,
+  transactional race-safe consumption), and the web-demo flow. **Closed:
+  ORG-PR-024, ORG-PR-048. ORG-PR-002 remains OPEN (materially advanced):**
+  the original exit criterion "live send to external inbox in staging"
+  requires provider credentials and a staging environment that do not exist
+  yet; verification integration tests are done. Unblocks Sprint 17
+  (ORG-PR-004).
+- *(original Sprint 16 plan)* Objective: real mailer adapter,
+  email verification, resend. Closes ORG-PR-002, 024, 048; unblocks 004. Deps:
+  DG-1. Non-goals: MFA, OAuth. Exit: live send to external inbox in staging;
+  verification integration tests.
+- **Sprint 17 — Recovery & credential management.** Password reset, password/email
+  change, register de-enumeration. Closes ORG-PR-004, 039, 030. Deps: Sprint 16.
+  Exit: reset/change integration tests incl. expiry/reuse/enumeration.
+
+### Phase 3 — Security & data-integrity hardening (largely parallelizable)
+- **Sprint 18 — Edge & app-security hardening.** Security headers, `trustProxy`,
+  global/edge rate limiting, throttle `invitations/inspect`, per-actor mutation
+  limits, bound pre-auth external writes, logger redaction, request-id
+  sanitization. Closes ORG-PR-010, 011, 012, 013, 032, 033, 052. Exit: header/
+  limiter/proxy tests; load test bounds pre-auth writes.
+- **Sprint 19 — Authorization & concurrency correctness.** Role-transition guard
+  (per DG-2), atomic quota enforcement + concurrency tests, personal-workspace
+  constraint, read-path consistency, audit-read index, `security_events` org
+  index. Closes ORG-PR-017, 029, 038, 044, 053, 014. Exit: concurrency suites +
+  `EXPLAIN` shows index use; schema-drift passes.
+- **Sprint 20 — Supply-chain & CI hardening (parallel, can start now).** SHA-pin
+  actions + `permissions` block, Dependabot/Renovate, `audit`/CodeQL/secret-scan,
+  triage & remediate `drizzle-orm`/`esbuild` advisories, pin images, enable
+  `noUncheckedIndexedAccess`. Closes ORG-PR-018, 019, 020, 040, 042, 054. Exit:
+  scanners in CI; `pnpm audit` clean or documented acceptance.
+
+### Phase 4 — Production infrastructure & deployment
+- **Sprint 21 — Deployable artifact & pipeline.** Per-app non-root Dockerfiles,
+  minimal IaC for the target profile, build→migrate→deploy pipeline with rollback,
+  secrets manager + rotation, least-privilege DB roles, pool/statement/lock
+  timeouts. Closes ORG-PR-001, 006, 021, 022, 042. Deps: Phase 1–3. Exit: a
+  tagged build deploys reproducibly to staging; secret rotation rehearsed.
+
+### Phase 5 — Reliability, recovery & operations
+- **Sprint 22 — Backups, DR & background jobs.** Automated encrypted backups +
+  PITR, **tested restore drill**, migration-recovery rehearsal, scheduler/worker,
+  retention/expiry jobs, retention enforcement, account deletion/export.
+  Closes ORG-PR-005, 015, 016, 025, 028, 043. Exit: restore drill reconstructs DB
+  to a timestamp and passes checks; jobs observable & idempotent.
+- **Sprint 23 — Observability & incident readiness.** Metrics + tracing +
+  dashboards + alerts, production runbooks, incident process, ops documentation.
+  Closes ORG-PR-007, 008, 027; supports ORG-PR-009 alerting. Exit: dashboard +
+  synthetic-failure alert; tabletop against one runbook.
+
+### Phase 6 — End-to-end verification & security review
+- **Sprint 24 — Verification & external review.** Failure-injection integration
+  tests, browser E2E, live SMTP CI assertion, external pentest + DAST, standards
+  re-map. Closes ORG-PR-026, 041; verifies 044; addresses external-verification
+  items. Exit: E2E + failure-injection green; pentest findings triaged.
+
+### Frontend (parallel track, any time after Phase 1)
+- **Sprint FE — Frontend hardening.** Error boundary, CSP alignment, destructive
+  confirmations, deep-link return, session-expiry UX, a11y. Closes ORG-PR-023,
+  035, 036. Independent of the backend critical path.
+
+## Critical path
+
+`Sprint 15 → Sprint 16 → Sprint 21 → Sprint 22 → Sprint 24 → Launch`, with
+Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restore
+(Sprint 22) is the longest-pole reliability item and must precede production data.
+
+## Parallelizable work
+
+- **Sprint 20** (supply-chain/CI) and **Sprint FE** (frontend) can start
+  immediately, independent of the critical path.
+- **Sprint 18** and **Sprint 19** (both Phase 3) can run concurrently by different
+  owners.
+- **Sprint 23** (observability) can begin once infra (Sprint 21) exists, in
+  parallel with Sprint 22.
+
+## Decision gates
+
+- Status at Sprint 15 closure (see
+  [sprint-15-decisions.md](sprint-15-decisions.md)): **DG-1 (distribution
+  model), DG-2 (role-transition policy), and DG-5 (RPO/RTO) are RATIFIED by
+  the Project Owner (2026-07-18).** Ratification is the product decision
+  only — downstream implementation remains scheduled work (DG-2 enforcement
+  in Sprint 19; DG-1/DG-5 infrastructure and backup work in Sprints 21/22).
+  **DG-3 compliance regime (legal)** and **DG-4 quota-billing semantics**
+  remain open — DG-3 requires legal/privacy review and additionally gates
+  Phase 5 privacy scope; DG-4 requires a product/billing-semantics decision.
+  Neither blocks Sprint 15.
+
+## Dependency notes
+
+- **Infrastructure dependency:** everything in Phases 4–6 depends on Sprint 21.
+- **External service dependency:** a real email provider (Sprint 16) gates
+  recovery/verification.
+- **Legal dependency:** ORG-PR-025/043 scope is blocked on DG-3 legal review.
+- **Security-review dependency:** launch is blocked on Sprint 24's external review.
+
+## Production launch gate
+
+Launch is permitted only when: **all P1 closed**; all launch-blocking P2 closed
+(see [launch-checklist.md](launch-checklist.md)); the **restore drill has
+passed**; an **external security review** is complete with no unresolved
+high-severity issue; and observability + incident runbooks are live. Passing
+`pnpm validate`/`validate:integration` is necessary but **not** sufficient.
+
+## Recommended next sprint: Sprint 15 — Production Configuration and Secret Safety
+
+Chosen from the findings, not from the spec's examples. Sprint 14 already selected
+and documented a usable production target ([production-target.md](production-target.md));
+this sprint **implements** the config-safety blocker and ratifies only the decision
+gates that directly bear on that implementation — it is not another repository-wide
+planning sprint.
+
+- **Why first:** the cheapest, highest-leverage security blocker is the config
+  layer — ORG-PR-003 lets a production process boot with the shipped guessable
+  `JWT_SECRET` and a non-Secure refresh cookie (threat **T-CONF**, rated
+  Critical). Fixing it is an **S**-effort config-plus-tests change that removes the
+  most dangerous day-one misconfiguration. It has no dependencies, so it can start
+  immediately, and production infrastructure (Sprint 21) should not be built on a
+  config layer that still accepts unsafe production values.
+- **P1 findings it closes:** **ORG-PR-003** (production config secret guards).
+  Also closes **ORG-PR-047** (resolve/remove the unused `COOKIE_SECRET`). It does
+  **not** by itself close ORG-PR-001/002/004/005/006 — those are separate sprints;
+  this sprint only ratifies the decision gates that scope them.
+- **Depends on:** nothing (can start immediately).
+- **What cannot proceed safely before it:** production infrastructure design
+  (Sprint 21) and any staging deploy (would otherwise boot with unsafe defaults).
+- **Objective:** eliminate unsafe production configuration and ratify the
+  implementation-relevant decision gates.
+- **Scope:** (1) add a production `superRefine` to `packages/config` rejecting the
+  known dev-default `JWT_SECRET`/`COOKIE_SECRET`, enforcing `COOKIE_SECURE=true`
+  and an entropy floor under `NODE_ENV=production`; (2) resolve or remove
+  `COOKIE_SECRET` (ORG-PR-047); (3) ratify DG-1 (distribution model), DG-2
+  (role-transition policy — informs later sprints), and DG-5 (RPO/RTO) as they
+  gate the infrastructure/backup sprints; DG-3 (legal) and DG-4 remain open gates.
+  **Explicit non-goals:** building infrastructure, email, recovery, or backups;
+  re-running any repository-wide audit or re-selecting the production target.
+- **Deliverables:** config guard + unit tests; updated `.env.example` guidance; a
+  short decision record for the ratified gates.
+- **Required tests:** unit tests proving a config with a dev-default secret or
+  `COOKIE_SECURE=false` fails to load under `NODE_ENV=production`, and that a
+  valid production config loads.
+- **Exit criteria:** a config with dev-default secrets or `COOKIE_SECURE=false`
+  **fails to boot** under `NODE_ENV=production` (test-proven); `COOKIE_SECRET`
+  resolved; DG-1/DG-2/DG-5 recorded with owners; `pnpm validate` green.
+- **Relative effort:** S.
+- **Work blocked until completion:** Sprint 21 (infrastructure) and any staging
+  deployment.
+- **Sprint 15 outcome (2026-07-18): COMPLETE.** The engineering
+  implementation is complete and validated — ORG-PR-003 and ORG-PR-047 closed
+  with test evidence (see the [findings register](findings-register.md)
+  resolutions and
+  [docs/production-config-guard.md](../production-config-guard.md)) — and the
+  decision-gate exit criterion is met: **DG-1, DG-2, and DG-5 were ratified
+  by the Project Owner on 2026-07-18**
+  ([sprint-15-decisions.md](sprint-15-decisions.md)); DG-3/DG-4 remain open
+  as the sprint specification permits. (Historical note: the sprint was
+  briefly recorded as NOT COMPLETE while the gates awaited the owner
+  decision.) See
+  [sprint-15-artifact-package.md](sprint-15-artifact-package.md). Sprint 15
+  completion is not staging or production readiness — five P1 blockers
+  remain.

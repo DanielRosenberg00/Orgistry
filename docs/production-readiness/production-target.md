@@ -1,0 +1,162 @@
+# Production Target
+
+Readiness is meaningless without a target to measure against. This document
+defines the production profile Orgistry is assessed against, separating what the
+repository actually implies from explicit assumptions, and states how the result
+would change under a different target.
+
+## Verified project characteristics (repository evidence)
+
+- **Open-source reference foundation.** `LICENSE` is Apache-2.0; `README.md`
+  frames Orgistry as an "identity and access foundation … engineering reference /
+  portfolio project," explicitly "not production-certified."
+- **Self-hostable stack.** `infra/docker-compose.yml` defines PostgreSQL, Redis,
+  and Mailpit for local use; there is no cloud IaC, Kubernetes, or managed-service
+  assumption anywhere (`git ls-files`).
+- **Single backend authority.** `apps/api` (Fastify) is the source of truth;
+  `apps/web-demo` is a thin React consumer holding no authority (README,
+  `docs/architecture.md`).
+- **Modest, multi-tenant B2B shape.** The domain is organizations → memberships →
+  roles → permissions → entitlements → quotas → org-scoped resources
+  (`docs/architecture.md`). Fixed demo plans (Free/Pro/Business); no billing
+  (`packages/db/src/schema/plans.ts`).
+- **Local-only email + no background processing** (`docs/known-limitations.md`).
+- **No deployment, backup, or observability tooling** (`docs/roadmap.md`).
+
+## Explicit assumptions
+
+These are not resolved by the repository and are stated as assumptions:
+
+- **A1 — Distribution model:** the primary target is a **self-hosted foundation**
+  that a single operator/small team can deploy for their own organization(s),
+  with a **low-scale single-tenant/managed hosted evaluation** as the secondary
+  path. This matches the Apache-2.0 + Compose + "reference" evidence. It is *not*
+  a large multi-tenant public SaaS.
+- **A2 — Scale:** low tens of thousands of users, low thousands of organizations,
+  modest request rates (tens of req/s peak). Nothing in the repo implies more.
+- **A3 — Data sensitivity:** account credentials (hashed), email addresses, IP/UA
+  in session/security events, org membership — **moderate PII, no special
+  categories, no payment data** (no billing exists).
+- **A4 — Single region** deployment initially; multi-region is out of scope.
+- **A5 — One operator/small team** runs it; no dedicated 24/7 SRE org.
+
+## Selected production profile
+
+**Profile: Self-hosted, single-region, low-scale multi-tenant B2B identity
+foundation, operated by a small team.**
+
+The recommended deployment is the **simplest architecture that satisfies this
+profile** — explicitly **not Kubernetes**:
+
+```
+            ┌─────────────────────────────────────────────┐
+   Internet │  Reverse proxy / TLS termination (nginx/Caddy │
+  ──────────▶  or a managed load balancer)                  │
+            │   • HSTS, security headers, global rate limit │
+            └───────────────┬───────────────────────────────┘
+                            │  (trusted proxy hop → trustProxy)
+                    ┌────────▼─────────┐        ┌──────────────────┐
+                    │  API container   │        │  Static web-demo │
+                    │  (Fastify, non-  │        │  (built assets   │
+                    │   root, N≥2)     │        │   behind proxy)  │
+                    └───┬─────────┬────┘        └──────────────────┘
+                        │         │
+              ┌─────────▼──┐  ┌───▼────────┐   ┌────────────────────┐
+              │ Managed    │  │ Managed    │   │ Real SMTP/email    │
+              │ PostgreSQL │  │ Redis      │   │ provider (TLS+auth)│
+              │ +backups/  │  └────────────┘   └────────────────────┘
+              │  PITR      │
+              └────────────┘
+       + Scheduler/worker for maintenance jobs (retention/expiry)
+       + Secrets manager + CI/CD build→migrate→deploy pipeline
+```
+
+Two API replicas behind the proxy cover rolling deploys and basic availability;
+managed Postgres/Redis remove most operational burden at this scale. A single
+scheduler runs maintenance jobs. No queue system, service mesh, or orchestrator
+is required at A2 scale.
+
+## Objectives
+
+**These objectives are assumption-derived, not repository-verified facts.** Every
+value below follows from assumptions A1–A5 and the decision gates DG-1…DG-5; the
+repository does not specify availability, latency, RPO/RTO, operator model, region,
+traffic, or compliance regime. Treat each as a proposed target to confirm, not an
+established requirement.
+
+| Objective | Target (this profile — assumption) | Rationale / how it changes under a larger target |
+| --- | --- | --- |
+| **Availability** | ~99.5% (single region, rolling deploys) | A public multi-tenant SaaS would demand ≥99.9% + multi-AZ, changing infra materially. |
+| **Latency** | p95 < 300 ms for API reads at A2 scale | Requires the audit-read index (ORG-PR-014) and pool/statement timeouts (ORG-PR-021). |
+| **RPO** | ≤ 1 hour (PITR) before production data; daily snapshot acceptable for controlled evaluation | Larger/regulated targets push RPO toward minutes + cross-region replicas. |
+| **RTO** | ≤ 4 hours, via rehearsed restore | Must be rehearsed (ORG-PR-005); larger target → automated failover. |
+| **Email delivery** | Authenticated TLS SMTP/API provider with verified domain | Blocking for invitations/recovery (ORG-PR-002). |
+| **Billing** | **None** (fixed demo plans) | Out of scope; the entitlement/quota seam is designed to accept billing later without reworking authorization. |
+| **Operator model** | Small team, business-hours on-call, runbook-driven | Larger target → dedicated on-call + SLOs/error budgets. |
+| **Compliance exposure** | Moderate PII → data-subject rights (export/delete), retention, breach process (**legal review required**) | GDPR/CCPA-like obligations if serving EU/CA users; special categories or payment data would add PCI/other regimes. |
+| **Support** | Best-effort, self-service docs + issue tracker | — |
+
+## Self-hosted vs. hosted implications
+
+- **Self-hosted foundation (primary):** the operator owns infrastructure, secrets,
+  backups, and compliance. Orgistry must ship a deployable artifact
+  (ORG-PR-001), production config guards (ORG-PR-003), secrets/rotation guidance
+  (ORG-PR-006), a real mailer adapter (ORG-PR-002), and operations docs
+  (ORG-PR-027). Availability/backup/DR become the operator's responsibility, but
+  Orgistry must make them *possible and documented*.
+- **Hosted SaaS (secondary):** Orgistry (the operator) additionally owns
+  observability (ORG-PR-007), incident response (ORG-PR-008), retention/privacy
+  enforcement (ORG-PR-015/025/043), and abuse controls (ORG-PR-009/012/013). The
+  multi-tenant abuse/DoS surface raises the priority of edge rate limiting and the
+  audit-table findings.
+
+Both paths share the same P1 blockers; the hosted path adds operational P2s.
+
+### Findings whose severity/scope is target-dependent
+
+The register severities assume this target profile. These findings shift with the
+decision gates:
+
+| Finding | Impact classification |
+| --- | --- |
+| ORG-PR-001, 002, 003, 004, 005, 006 | Applies to both deployment models (P1 either way) |
+| ORG-PR-009, 012, 013 (abuse/DoS controls) | Higher priority under **hosted** multi-tenant exposure; severity depends on DG-1 |
+| ORG-PR-007, 008 (observability/incident) | Operator responsibility when **self-hosted**; a hosted-only launch blocker under DG-1 |
+| ORG-PR-029 (quota TOCTOU) | P3 today; **rises to P2 if DG-4** makes quotas billing-enforced |
+| ORG-PR-005 backup design | Scope set by **DG-5** RPO/RTO (daily snapshot vs. ≤1h PITR) |
+| ORG-PR-017 (Admin→Owner) | Resolution is a **DG-2** product policy decision |
+| ORG-PR-025, 043 (privacy) | **Legal review required**; scope set by DG-3 |
+
+## Decision gates
+
+Current status is tracked in [sprint-15-decisions.md](sprint-15-decisions.md).
+**DG-1, DG-2, and DG-5 were ratified by the Project Owner on 2026-07-18**;
+DG-3 and DG-4 remain open. The profile and objective values in this document
+were originally engineering assumptions (as the sections above record); the
+distribution model (A1) and the RPO/RTO objectives are now owner-approved
+decisions via DG-1/DG-5.
+
+- **DG-1 — Distribution model confirmation.** *RATIFIED (Project Owner,
+  2026-07-18):* self-hosted primary / low-scale hosted evaluation secondary;
+  explicitly not a large public SaaS.
+- **DG-2 — Role-transition policy.** *RATIFIED (Project Owner, 2026-07-18):*
+  only an active Owner may grant or remove the Owner role; Admins may not
+  confer Owner on themselves or others; last-owner protection remains
+  mandatory. Enforcement is Sprint 19 work (ORG-PR-017 stays open until then).
+- **DG-3 — Compliance regime.** Which privacy regime(s) apply (drives ORG-PR-025/
+  043 scope). **Legal review required.** *Open.*
+- **DG-4 — Quota semantics.** Whether quotas will ever gate billing raises
+  ORG-PR-029 from P3 to P2. *Open.*
+- **DG-5 — Target RPO/RTO.** *RATIFIED (Project Owner, 2026-07-18):* RPO ≤ 1
+  hour with PITR available before production data is accepted (daily
+  snapshots only for evaluation-only environments with no production data);
+  RTO ≤ 4 hours via a documented, rehearsed restore. Implementation is
+  Sprint 21/22 work (ORG-PR-005 stays open until then).
+
+## What this target explicitly is not
+
+- Not an enterprise/Kubernetes-scale platform. Recommending Kubernetes here would
+  violate the "simplest architecture that satisfies the profile" principle.
+- Not a payment-processing system (no billing exists).
+- Not a compliance-certified product; no certification is claimed anywhere in this
+  package.

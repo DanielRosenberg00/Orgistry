@@ -71,7 +71,7 @@ and commit it.
 
 Requires live PostgreSQL + Redis (start them with `pnpm infra:up`; see the
 [runbook](./runbook.md)). The relevant environment variables must be set
-(`DATABASE_URL`, `TEST_DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `COOKIE_SECRET`,
+(`DATABASE_URL`, `TEST_DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`,
 `NODE_ENV=test`); `cp .env.example .env` provides working local defaults.
 
 ```bash
@@ -107,11 +107,17 @@ with skips is not a validated run — check the output.
 
 ## Mailpit / email
 
-No automated test exercises live SMTP. The invitation mailer is covered by unit
-tests; the live delivery path is verified manually through the local Mailpit
-container (see the [demo walkthrough](./demo-walkthrough.md)). CI therefore does
-not start Mailpit. This is a deliberate, documented limitation
-([known limitations](./known-limitations.md)).
+The SMTP conversation is exercised by automated tests against an **in-process
+fake SMTP server** (`apps/api/src/modules/mail/*.test.ts`) — including the
+production driver's real implicit-TLS handshake and authentication exchange
+(the protocol implementation is nodemailer since the Sprint 16 refinement),
+header-injection rejection, and the email-verification lifecycle end to end
+(unit + DB-backed integration suites, using the in-memory mailer). What is NOT automated: delivery to the
+**live Mailpit container** (verified manually via the
+[demo walkthrough](./demo-walkthrough.md); CI does not start Mailpit) and
+delivery through a **real external provider** (never performed — no
+credentials; see [known limitations](./known-limitations.md) and
+[email-and-verification.md](./email-and-verification.md)).
 
 ## CI
 

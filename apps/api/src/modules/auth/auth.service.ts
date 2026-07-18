@@ -45,6 +45,7 @@ import type {
   AuthRepository,
   NewSecurityEvent,
   RegisterAccountParams,
+  RegistrationEmailVerification,
   RegistrationInvitations,
   RequestContext,
 } from './auth.types';
@@ -81,6 +82,12 @@ export interface AuthServiceOptions {
    * (or when a registration omits `invitationToken`), registration is unchanged.
    */
   invitations?: RegistrationInvitations;
+  /**
+   * Post-registration verification-email collaborator (Sprint 16). OPTIONAL and
+   * best-effort: see `RegistrationEmailVerification` — it never throws, so it
+   * can never fail a committed registration.
+   */
+  emailVerification?: RegistrationEmailVerification;
   clock?: Clock;
 }
 
@@ -190,6 +197,7 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
     refreshTokenTtlSeconds,
     rateLimiter = createNoopRateLimiter(),
     invitations,
+    emailVerification,
     clock = systemClock,
   } = options;
 
@@ -467,6 +475,17 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
         eventType: SECURITY_EVENT_TYPES.registrationSucceeded,
         ctx,
       });
+      // Sprint 16: automatic first verification email. BEST-EFFORT and
+      // post-commit by design — the collaborator never throws, so an email
+      // provider outage cannot fail (or roll back) a registration that has
+      // already durably succeeded. The new user starts UNVERIFIED either way
+      // and can resend from the authenticated endpoint.
+      if (emailVerification) {
+        await emailVerification.sendInitialVerificationEmail(
+          { id: account.user.id, email: account.user.email },
+          ctx,
+        );
+      }
       return result;
     },
 

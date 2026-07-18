@@ -41,9 +41,10 @@ import {
   invitationInvalidError,
 } from './invitation.errors';
 import { assertAcceptable, deriveInvitationStatus } from './invitation.lifecycle';
+import type { AccountMailer } from '../mail/account-mailer';
 import {
   buildInvitationAcceptUrl,
-  type InvitationMailer,
+  renderInvitationEmail,
 } from './invitation.mailer';
 import {
   generateInvitationToken,
@@ -177,8 +178,8 @@ export interface InvitationServiceOptions {
   invitations: InvitationRepository;
   /** Organization-level entitlement/quota service (the member quota boundary). */
   entitlements: EntitlementService;
-  /** Local invitation email transport (fail-closed on create). */
-  mailer: InvitationMailer;
+  /** Shared account-email boundary (fail-closed on create). */
+  mailer: AccountMailer;
   /** Raw invitation token lifetime in seconds (config-driven; default 7 days). */
   ttlSeconds: number;
   /** Web origin used to build the acceptance link in the invitation email. */
@@ -355,13 +356,15 @@ export function createInvitationService(
 
       // FAIL-CLOSED: send the email BEFORE persisting. If delivery throws,
       // nothing is written — no orphan invitation and no invitation.created event.
-      await mailer.sendInvitationEmail({
-        to: input.email,
-        organizationName: organization.name,
-        roleName: ROLE_NAME_BY_KEY[input.role],
-        acceptUrl: buildInvitationAcceptUrl(webBaseUrl, rawToken),
-        expiresAt,
-      });
+      await mailer.deliver(
+        renderInvitationEmail({
+          to: input.email,
+          organizationName: organization.name,
+          roleName: ROLE_NAME_BY_KEY[input.role],
+          acceptUrl: buildInvitationAcceptUrl(webBaseUrl, rawToken),
+          expiresAt,
+        }),
+      );
 
       const view = await invitations.createInvitation({
         organizationId: actor.organizationId,

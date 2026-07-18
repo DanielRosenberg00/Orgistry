@@ -1,26 +1,26 @@
+import type { AccountEmail } from '../mail/account-mailer';
+
 /**
- * Invitation mailer — the email delivery seam for Sprint 9.
+ * Invitation email rendering (Sprint 9; migrated onto the shared account
+ * mailer in Sprint 16).
  *
- * Invitation creation is FAIL-CLOSED on delivery: the service sends the email
- * BEFORE persisting the invitation, so if delivery rejects, nothing is written
- * (no orphan invitation, no `invitation.created` event). The mailer is therefore
- * a narrow, swappable boundary:
+ * This module is now purely about WHAT an invitation email says. HOW it is
+ * delivered — sender identity, transport (Mailpit / production SMTP /
+ * in-memory), serialization, timeouts — lives in `../mail`. The invitation
+ * service renders a message here and hands it to the injected
+ * `AccountMailer.deliver`.
  *
- *  - `InvitationMailer` is the interface the service depends on;
- *  - `createMailpitInvitationMailer` (see `invitation.mailpit-mailer.ts`) is the
- *    DEFAULT RUNTIME transport — it delivers over SMTP to the local Mailpit
- *    container (`MAILPIT_*` config), where the message is visible in the Mailpit
- *    web UI;
- *  - tests inject a capturing in-memory mailer (see the testing helpers).
+ * Invitation creation remains FAIL-CLOSED on delivery: the service sends the
+ * email BEFORE persisting the invitation, so if delivery rejects, nothing is
+ * written (no orphan invitation, no `invitation.created` event).
  *
- * TOKEN TRANSPORT POLICY (Policy A): the raw invitation token is delivered ONLY
- * as a link in this email — email is the intended out-of-band channel. It is
- * legitimately present in the email body/link and travels over SMTP to Mailpit.
+ * TOKEN TRANSPORT POLICY (Policy A): the raw invitation token is delivered
+ * ONLY as a link in this email — email is the intended out-of-band channel.
  * It NEVER appears in API responses, API URL paths, application logs, action
  * events, or database rows (only the hash is stored). This module never logs.
  */
 
-/** A composed invitation email. `acceptUrl` carries the raw token (out-of-band). */
+/** Inputs for one invitation email. `acceptUrl` carries the raw token (out-of-band). */
 export interface InvitationEmailMessage {
   /** The invited recipient address (display form). */
   to: string;
@@ -32,22 +32,6 @@ export interface InvitationEmailMessage {
   acceptUrl: string;
   /** When the invitation stops being acceptable. */
   expiresAt: Date;
-}
-
-export interface InvitationMailer {
-  /**
-   * Deliver an invitation email. MUST reject (throw) when the message cannot be
-   * sent, so the fail-closed create flow can abort before persisting.
-   */
-  sendInvitationEmail(message: InvitationEmailMessage): Promise<void>;
-}
-
-/** A fully composed email ready to serialize/send. */
-export interface ComposedInvitationEmail {
-  from: string;
-  to: string;
-  subject: string;
-  text: string;
 }
 
 /**
@@ -65,14 +49,13 @@ export function buildInvitationAcceptUrl(
 }
 
 /**
- * Compose the human-readable invitation email (pure; no IO, no logging). The
+ * Render the human-readable invitation email (pure; no IO, no logging). The
  * body includes the recipient, organization, role, the acceptance link, and the
  * expiry — everything the spec requires the invitation email to carry.
  */
-export function composeInvitationEmail(
+export function renderInvitationEmail(
   message: InvitationEmailMessage,
-  from: string,
-): ComposedInvitationEmail {
+): AccountEmail {
   const subject = `You're invited to join ${message.organizationName} on Orgistry`;
   const text = [
     `You've been invited to join ${message.organizationName} on Orgistry.`,
@@ -87,28 +70,5 @@ export function composeInvitationEmail(
     '',
     "If you weren't expecting this, you can safely ignore this email.",
   ].join('\n');
-  return { from, to: message.to, subject, text };
-}
-
-/**
- * Serialize a composed email to an RFC 822 message for SMTP `DATA`. Headers and
- * body are CRLF-joined; body lines beginning with '.' are dot-stuffed so the
- * single-dot terminator can never be forged by content.
- */
-export function serializeInvitationEmail(
-  email: ComposedInvitationEmail,
-  now: Date,
-): string {
-  const headers = [
-    `From: ${email.from}`,
-    `To: ${email.to}`,
-    `Subject: ${email.subject}`,
-    `Date: ${now.toUTCString()}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-  ];
-  const body = email.text
-    .split('\n')
-    .map((line) => (line.startsWith('.') ? `.${line}` : line));
-  return [...headers, '', ...body].join('\r\n');
+  return { to: message.to, subject, text };
 }

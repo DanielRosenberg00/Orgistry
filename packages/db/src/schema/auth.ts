@@ -20,9 +20,9 @@ import {
  *  - Lifecycle state is explicit (`status`, `*_at` timestamps,
  *    `revoked_at`/`revoked_reason`) rather than inferred.
  *
- * `refresh_tokens` and `email_verification_tokens` are persistence scaffolding:
- * the columns and indexes a later sprint needs for rotation, reuse detection,
- * and email verification exist now, but no endpoint exercises them yet.
+ * `refresh_tokens` backs the Sprint 3 session lifecycle (rotation, reuse
+ * detection); `email_verification_tokens` backs the Sprint 16 email
+ * verification lifecycle (request/resend + public completion).
  */
 
 // Shared timestamp helpers keep every table's audit columns identical.
@@ -55,8 +55,8 @@ export const users = pgTable(
     passwordHash: text('password_hash').notNull(),
     displayName: text('display_name').notNull(),
     status: text('status').$type<UserStatus>().notNull().default('active'),
-    // Null until email verification completes (verification flow is a later
-    // sprint; the column exists so the user model is stable).
+    // Null until email verification completes (Sprint 16: set once, inside the
+    // same transaction that consumes the verification token; never cleared).
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -127,6 +127,21 @@ export const refreshTokens = pgTable(
   ],
 );
 
+/**
+ * Email-verification tokens (activated in Sprint 16).
+ *
+ * Lifecycle is explicit — the two terminal timestamps have DISTINCT meanings
+ * and are never overloaded:
+ *  - `used_at`        — the token was CONSUMED by a successful verification;
+ *  - `invalidated_at` — the token was RETIRED unused (superseded by a
+ *    request/resend that issued a replacement, or retired as a sibling when
+ *    another token completed verification).
+ *
+ * A token is usable only while `used_at IS NULL AND invalidated_at IS NULL
+ * AND expires_at > now()`. At most one usable token exists per user after any
+ * request/resend (the issue path invalidates all prior unused tokens in the
+ * same transaction that inserts the replacement).
+ */
 export const emailVerificationTokens = pgTable(
   'email_verification_tokens',
   {
@@ -186,5 +201,7 @@ export type RefreshTokenRow = typeof refreshTokens.$inferSelect;
 export type RefreshTokenInsert = typeof refreshTokens.$inferInsert;
 export type EmailVerificationTokenRow =
   typeof emailVerificationTokens.$inferSelect;
+export type EmailVerificationTokenInsert =
+  typeof emailVerificationTokens.$inferInsert;
 export type SecurityEventRow = typeof securityEvents.$inferSelect;
 export type SecurityEventInsert = typeof securityEvents.$inferInsert;

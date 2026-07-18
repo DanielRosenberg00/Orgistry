@@ -87,7 +87,7 @@ async function inviteOk(
 ): Promise<{ id: string; rawToken: string }> {
   const response = await invite(token, organizationId, email, role);
   expect(response.statusCode).toBe(201);
-  const rawToken = ctx.mailer.lastToken();
+  const rawToken = ctx.mailer.lastLinkToken();
   expect(rawToken).toBeTruthy();
   return { id: response.json().data.invitation.id, rawToken: rawToken as string };
 }
@@ -164,7 +164,7 @@ describe('invitation create', () => {
 
     // The mailer was exercised; the raw token is in the email, not the response.
     expect(ctx.mailer.messages).toHaveLength(1);
-    const rawToken = ctx.mailer.lastToken();
+    const rawToken = ctx.mailer.lastLinkToken();
     expect(rawToken).toBeTruthy();
     expect(JSON.stringify(response.json())).not.toContain(rawToken as string);
 

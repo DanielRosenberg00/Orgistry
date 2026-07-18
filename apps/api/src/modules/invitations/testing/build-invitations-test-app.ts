@@ -19,9 +19,9 @@ import { createInMemoryEntitlementRepository } from '../../entitlements/testing/
 import { createInvitationService } from '../invitation.service';
 import { createInMemoryInvitationRepository } from './in-memory-invitation-repo';
 import {
-  createCapturingInvitationMailer,
-  type CapturingInvitationMailer,
-} from './in-memory-invitation-mailer';
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../../mail/testing/in-memory-account-mailer';
 
 /**
  * Build a fully wired app with the auth, organization, member, entitlement, AND
@@ -41,7 +41,7 @@ export interface InvitationsTestContext {
   app: FastifyInstance;
   authRepo: InMemoryAuthRepository;
   orgStore: InMemoryOrgStore;
-  mailer: CapturingInvitationMailer;
+  mailer: InMemoryAccountMailer;
   config: Config;
 }
 
@@ -60,7 +60,7 @@ export async function buildInvitationsTestApp(
   const entitlementService = createEntitlementService({
     repo: createInMemoryEntitlementRepository(orgStore),
   });
-  const mailer = createCapturingInvitationMailer();
+  const mailer = createInMemoryAccountMailer();
 
   const invitationService = createInvitationService({
     accessControl: orgRepo,

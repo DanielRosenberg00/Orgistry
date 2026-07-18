@@ -76,9 +76,11 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-    # Mailpit is intentionally omitted — no integration test exercises email
-    # delivery. The invitation mailer is covered by unit tests; the live SMTP
-    # path is verified manually via the local Mailpit container. See
+    # Mailpit is intentionally omitted — no integration test exercises LIVE
+    # SMTP delivery. The account mailer (invitations + email verification) is
+    # covered by unit tests against an in-process fake SMTP server (incl. the
+    # TLS+AUTH production driver); integration suites inject the in-memory
+    # mailer. Live Mailpit delivery is verified manually. See
     # docs/known-limitations.md.
     env:
       NODE_ENV: test

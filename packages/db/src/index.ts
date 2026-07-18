@@ -20,6 +20,8 @@ export type {
   SessionInsert,
   RefreshTokenRow,
   RefreshTokenInsert,
+  EmailVerificationTokenRow,
+  EmailVerificationTokenInsert,
   SecurityEventInsert,
 } from './schema/auth';
 

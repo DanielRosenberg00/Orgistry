@@ -12,7 +12,7 @@ import { createEntitlementService } from '../entitlements/entitlement.service';
 import { createDbEntitlementRepository } from '../entitlements/plan.repo';
 import { createInvitationService } from './invitation.service';
 import { createDbInvitationRepository } from './invitation.repo';
-import { createCapturingInvitationMailer } from './testing/in-memory-invitation-mailer';
+import { createInMemoryAccountMailer } from '../mail/testing/in-memory-account-mailer';
 import { INVITATION_EVENT_TYPES } from './invitation.events';
 
 /**
@@ -44,7 +44,7 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
   const config = testConfig();
   let db: ReturnType<typeof createDbClient>;
   let app: FastifyInstance;
-  let mailer: ReturnType<typeof createCapturingInvitationMailer>;
+  let mailer: ReturnType<typeof createInMemoryAccountMailer>;
   let emailSeq = 0;
 
   function authHeader(token: string): Record<string, string> {
@@ -98,7 +98,7 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
       payload: { email, role: 'member' },
     });
     expect(response.statusCode).toBe(201);
-    const rawToken = mailer.lastToken();
+    const rawToken = mailer.lastLinkToken();
     expect(rawToken).toBeTruthy();
     return { id: response.json().data.invitation.id, rawToken: rawToken as string };
   }
@@ -110,7 +110,7 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
     const entitlements = createEntitlementService({
       repo: createDbEntitlementRepository(db.db),
     });
-    mailer = createCapturingInvitationMailer();
+    mailer = createInMemoryAccountMailer();
     const invitationService = createInvitationService({
       accessControl: orgRepo,
       invitations: createDbInvitationRepository(db.db),

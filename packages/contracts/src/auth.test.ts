@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   MIN_PASSWORD_LENGTH,
   authUserSchema,
+  emailVerificationCompleteRequestSchema,
+  emailVerificationCompleteResponseSchema,
+  emailVerificationRequestResponseSchema,
   loginRequestSchema,
   refreshResponseSchema,
   registerRequestSchema,
@@ -109,5 +112,43 @@ describe('session lifecycle contracts', () => {
       hasMore: false,
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe('email verification contracts (Sprint 16)', () => {
+  it('request response reports only sent/alreadyVerified — never token material', () => {
+    const keys = Object.keys(emailVerificationRequestResponseSchema.shape).sort();
+    expect(keys).toEqual(['alreadyVerified', 'sent']);
+    expect(JSON.stringify(keys)).not.toMatch(/token/i);
+  });
+
+  it('complete request takes the raw token in the body', () => {
+    expect(
+      emailVerificationCompleteRequestSchema.safeParse({ token: 'raw-token' })
+        .success,
+    ).toBe(true);
+    expect(
+      emailVerificationCompleteRequestSchema.safeParse({ token: '' }).success,
+    ).toBe(false);
+    expect(
+      emailVerificationCompleteRequestSchema.safeParse({}).success,
+    ).toBe(false);
+  });
+
+  it('complete request rejects absurdly long tokens', () => {
+    expect(
+      emailVerificationCompleteRequestSchema.safeParse({
+        token: 'x'.repeat(513),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('complete response confirms verification without echoing anything else', () => {
+    const keys = Object.keys(emailVerificationCompleteResponseSchema.shape);
+    expect(keys).toEqual(['verified']);
+    expect(
+      emailVerificationCompleteResponseSchema.safeParse({ verified: true })
+        .success,
+    ).toBe(true);
   });
 });

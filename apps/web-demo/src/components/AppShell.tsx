@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useAuth } from '../auth/useAuth';
 import { useOrganization } from '../organization/useOrganization';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
+import { EmailVerificationBanner } from './EmailVerificationBanner';
 import { ErrorBanner } from './ErrorBanner';
 import { LoadingState } from './QueryStates';
 
@@ -91,6 +92,8 @@ export function AppShell() {
         </header>
 
         <main className="content">
+          {/* Advisory in Sprint 16: informs and offers resend, never blocks. */}
+          <EmailVerificationBanner />
           <ShellBody isLoading={isLoading} error={error} hasSelection={!!selected}>
             <Outlet />
           </ShellBody>

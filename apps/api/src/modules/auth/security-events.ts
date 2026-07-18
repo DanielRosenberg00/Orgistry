@@ -22,6 +22,13 @@ export const SECURITY_EVENT_TYPES = {
   logoutSucceeded: 'auth.logout_succeeded',
   sessionRevoked: 'auth.session_revoked',
   rateLimitExceeded: 'auth.rate_limit_exceeded',
+  // ----- Email verification (Sprint 16) -----
+  // Metadata is minimal and sanitized: NEVER the raw token, its hash, or the
+  // verification URL. Failed completions attribute to no user (the token is
+  // unproven), recording only a coarse `reason`.
+  emailVerificationRequested: 'auth.email_verification_requested',
+  emailVerificationSucceeded: 'auth.email_verification_succeeded',
+  emailVerificationFailed: 'auth.email_verification_failed',
 } as const;
 
 export type SecurityEventType =

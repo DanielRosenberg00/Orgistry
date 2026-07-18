@@ -163,3 +163,46 @@ export const sessionRevocationResponseSchema = z.object({
 export type SessionRevocationResponse = z.infer<
   typeof sessionRevocationResponseSchema
 >;
+
+/* -------------------------------------------------------------------------- */
+/* Email verification (Sprint 16)                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * POST /v1/auth/email-verification/request response body (Bearer-authenticated;
+ * also the resend endpoint — there is deliberately no separate resend route).
+ * The endpoint takes NO body: it operates only on the authenticated user's
+ * stored email, so no arbitrary address can ever be probed. `alreadyVerified`
+ * true means safe success without sending (`sent` false). The raw token and
+ * its hash are NEVER part of any response — the token travels only in the
+ * emailed link.
+ */
+export const emailVerificationRequestResponseSchema = z.object({
+  /** True when a verification email was handed to the mailer. */
+  sent: z.boolean(),
+  /** True when the account was already verified (nothing sent). */
+  alreadyVerified: z.boolean(),
+});
+export type EmailVerificationRequestResponse = z.infer<
+  typeof emailVerificationRequestResponseSchema
+>;
+
+/**
+ * POST /v1/auth/email-verification/complete request body (public; possession
+ * of the emailed raw token IS the verification proof). The token travels in
+ * the body — never in a backend URL path — so it cannot reach API access logs.
+ */
+export const emailVerificationCompleteRequestSchema = z.object({
+  token: z.string().min(1).max(512),
+});
+export type EmailVerificationCompleteRequest = z.infer<
+  typeof emailVerificationCompleteRequestSchema
+>;
+
+/** POST /v1/auth/email-verification/complete response body. */
+export const emailVerificationCompleteResponseSchema = z.object({
+  verified: z.literal(true),
+});
+export type EmailVerificationCompleteResponse = z.infer<
+  typeof emailVerificationCompleteResponseSchema
+>;

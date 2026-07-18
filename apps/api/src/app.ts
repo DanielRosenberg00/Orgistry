@@ -10,6 +10,8 @@ import { registerHealthRoute } from './routes/health';
 import { registerReadinessRoute } from './routes/readiness';
 import { registerAuthRoutes } from './modules/auth/auth.routes';
 import type { AuthService } from './modules/auth/auth.service';
+import { registerEmailVerificationRoutes } from './modules/auth/email-verification.routes';
+import type { EmailVerificationService } from './modules/auth/email-verification.service';
 import { registerOrganizationRoutes } from './modules/organization/organization.routes';
 import type { OrganizationService } from './modules/organization/organization.service';
 import { registerMemberRoutes } from './modules/organization/member.routes';
@@ -42,6 +44,13 @@ export interface BuildAppOptions {
    * only contexts (and some unit tests) can build the app without a database.
    */
   authService?: AuthService;
+  /**
+   * Email-verification service backing `/v1/auth/email-verification/*`
+   * (Sprint 16). Requires `authService` (the request/resend route is
+   * Bearer-authenticated through it); the completion route is public but is
+   * registered alongside it. Registered only when both are provided.
+   */
+  emailVerificationService?: EmailVerificationService;
   /**
    * Organization service backing the `/v1/organizations` routes. Requires
    * `authService` (the routes are Bearer-authenticated through it); registered
@@ -158,6 +167,16 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       refreshCookie: config.auth.refreshCookie,
       csrfHeaderName: config.auth.csrfHeaderName,
     });
+
+    // Email-verification routes (Sprint 16). The request/resend route
+    // authenticates via the auth service; the completion route is public by
+    // design (raw-token possession is the proof).
+    if (options.emailVerificationService) {
+      registerEmailVerificationRoutes(app, {
+        service: options.emailVerificationService,
+        authenticator: options.authService,
+      });
+    }
 
     // Organization routes authenticate via the auth service, so they are only
     // wired when both services are present.

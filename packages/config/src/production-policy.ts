@@ -59,6 +59,30 @@ const PLACEHOLDER_MARKERS: readonly string[] = [
   'default-secret',
 ];
 
+/**
+ * Sender addresses this repository ships as local-only defaults, rejected
+ * exactly in production (Sprint 16).
+ */
+const KNOWN_DEVELOPMENT_SENDERS: readonly string[] = [
+  'no-reply@orgistry.local',
+  'invitations@orgistry.local',
+];
+
+/**
+ * Reserved / non-routable domain suffixes (RFC 2606, RFC 6761, mDNS). A
+ * production sender address on one of these can never deliver mail.
+ */
+const RESERVED_SENDER_DOMAIN_SUFFIXES: readonly string[] = [
+  '.local',
+  '.localhost',
+  '.test',
+  '.invalid',
+  '.example',
+  '@example.com',
+  '@example.org',
+  '@example.net',
+];
+
 function containsPlaceholderMarker(secret: string): string | undefined {
   const lowered = secret.toLowerCase();
   return PLACEHOLDER_MARKERS.find((marker) => lowered.includes(marker));
@@ -105,6 +129,98 @@ function collectProductionSecretIssues(
   return issues;
 }
 
+/**
+ * Like {@link collectProductionSecretIssues} but WITHOUT the 32-character
+ * length floor. Used for provider-issued credentials (`SMTP_PASSWORD`) whose
+ * length the operator does not control — we still refuse every value this
+ * repository documents as local-only, obvious placeholders, and degenerate
+ * strings, but a legitimate provider credential must never be rejected for
+ * being shorter than our own generated-secret floor.
+ */
+function collectProviderCredentialIssues(
+  fieldName: string,
+  secret: string,
+): string[] {
+  const fixHint =
+    'set the real credential issued by the email provider in the deployment environment';
+  const issues: string[] = [];
+
+  if (KNOWN_DEVELOPMENT_SECRETS.includes(secret)) {
+    issues.push(
+      `${fieldName} is a known development-only default and must not be used in production; ${fixHint}`,
+    );
+  }
+  const marker = containsPlaceholderMarker(secret);
+  if (marker !== undefined) {
+    issues.push(
+      `${fieldName} contains the placeholder marker "${marker}" and must not be used in production; ${fixHint}`,
+    );
+  }
+  if (isObviouslyDegenerateSecret(secret)) {
+    issues.push(
+      `${fieldName} is a single repeated character and must not be used in production; ${fixHint}`,
+    );
+  }
+  return issues;
+}
+
+/** Reject sender addresses that can never deliver mail from production. */
+function collectProductionSenderIssues(senderEmail: string): string[] {
+  const lowered = senderEmail.toLowerCase();
+  const fixHint =
+    'set MAIL_FROM_EMAIL to a deliverable address on a domain the deployment controls';
+
+  if (KNOWN_DEVELOPMENT_SENDERS.includes(lowered)) {
+    return [
+      `MAIL_FROM_EMAIL is the repository's local-only default sender and must not be used in production; ${fixHint}`,
+    ];
+  }
+  const suffix = RESERVED_SENDER_DOMAIN_SUFFIXES.find((candidate) =>
+    lowered.endsWith(candidate),
+  );
+  if (suffix !== undefined) {
+    return [
+      `MAIL_FROM_EMAIL uses the reserved, non-routable domain suffix "${suffix}" and must not be used in production; ${fixHint}`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * The public web URL is embedded in every emailed verification/invitation
+ * link, so a localhost or plain-HTTP value in production produces links that
+ * are broken or downgrade the token to an insecure transport.
+ */
+function collectProductionWebUrlIssues(webUrl: string): string[] {
+  const issues: string[] = [];
+  let parsed: URL;
+  try {
+    parsed = new URL(webUrl);
+  } catch {
+    // Unparseable values are already rejected by the base `.url()` schema.
+    return issues;
+  }
+
+  if (parsed.protocol !== 'https:') {
+    issues.push(
+      'WEB_DEMO_URL must use https in production; emailed verification and invitation links embed this origin',
+    );
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local')
+  ) {
+    issues.push(
+      'WEB_DEMO_URL must not point at localhost in production; emailed verification and invitation links embed this origin',
+    );
+  }
+  return issues;
+}
+
 /** Single issue-creation path: every production violation is a custom Zod issue on its field. */
 function addProductionIssue(
   ctx: z.RefinementCtx,
@@ -122,10 +238,27 @@ function addProductionIssue(
  * - `JWT_SECRET` values that are known development defaults, placeholder-like,
  *   degenerate, or shorter than {@link PRODUCTION_SECRET_MIN_LENGTH};
  * - `COOKIE_SECURE=false` (the refresh cookie must only travel over HTTPS,
- *   including behind a TLS-terminating reverse proxy).
+ *   including behind a TLS-terminating reverse proxy);
+ * - `MAIL_DRIVER` values other than `smtp` (production must never silently
+ *   deliver account email to the local Mailpit sink or the in-memory fake);
+ * - `SMTP_PASSWORD` values that are known development defaults,
+ *   placeholder-like, or degenerate (no length floor — provider-issued
+ *   credential lengths are not ours to dictate);
+ * - `MAIL_FROM_EMAIL` values that are the shipped local-only default or on a
+ *   reserved, non-routable domain;
+ * - `WEB_DEMO_URL` values that are plain-HTTP or localhost (emailed links
+ *   embed this origin).
  */
 export function enforceProductionConfigSafety(
-  env: { NODE_ENV: string; JWT_SECRET: string; COOKIE_SECURE: boolean },
+  env: {
+    NODE_ENV: string;
+    JWT_SECRET: string;
+    COOKIE_SECURE: boolean;
+    MAIL_DRIVER: 'mailpit' | 'smtp' | 'memory';
+    MAIL_FROM_EMAIL: string;
+    SMTP_PASSWORD?: string;
+    WEB_DEMO_URL: string;
+  },
   ctx: z.RefinementCtx,
 ): void {
   if (env.NODE_ENV !== 'production') {
@@ -145,5 +278,32 @@ export function enforceProductionConfigSafety(
       'COOKIE_SECURE',
       'COOKIE_SECURE must be "true" when NODE_ENV=production so the refresh cookie is only sent over HTTPS; this is required even behind a TLS-terminating reverse proxy',
     );
+  }
+
+  if (env.MAIL_DRIVER !== 'smtp') {
+    addProductionIssue(
+      ctx,
+      'MAIL_DRIVER',
+      `MAIL_DRIVER must be "smtp" when NODE_ENV=production; the "${env.MAIL_DRIVER}" driver is a local development/test sink and would silently swallow account email`,
+    );
+  }
+
+  // The completeness rule in `mail-policy.ts` already requires SMTP_PASSWORD
+  // whenever MAIL_DRIVER=smtp; here we additionally refuse obvious non-secrets.
+  if (env.SMTP_PASSWORD !== undefined) {
+    for (const message of collectProviderCredentialIssues(
+      'SMTP_PASSWORD',
+      env.SMTP_PASSWORD,
+    )) {
+      addProductionIssue(ctx, 'SMTP_PASSWORD', message);
+    }
+  }
+
+  for (const message of collectProductionSenderIssues(env.MAIL_FROM_EMAIL)) {
+    addProductionIssue(ctx, 'MAIL_FROM_EMAIL', message);
+  }
+
+  for (const message of collectProductionWebUrlIssues(env.WEB_DEMO_URL)) {
+    addProductionIssue(ctx, 'WEB_DEMO_URL', message);
   }
 }

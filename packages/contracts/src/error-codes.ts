@@ -168,6 +168,26 @@ export const ERROR_CODES = {
    * a leaked token cannot be redeemed by a different account.
    */
   INVITATION_EMAIL_MISMATCH: 'INVITATION_EMAIL_MISMATCH',
+
+  // ----- Email verification (Sprint 16) -----
+  // These three codes describe TOKEN validity only — never account existence
+  // or user state. A token whose user is missing or inactive reports
+  // EMAIL_VERIFICATION_TOKEN_INVALID, indistinguishable from an unknown token.
+  /**
+   * The presented verification token does not resolve to a usable row. Returned
+   * (404) when the token is unknown, malformed, or its account cannot complete
+   * verification — the token is a high-entropy secret, so an attacker without
+   * one learns nothing.
+   */
+  EMAIL_VERIFICATION_TOKEN_INVALID: 'EMAIL_VERIFICATION_TOKEN_INVALID',
+  /** The verification token has passed its `expires_at`. 410. */
+  EMAIL_VERIFICATION_TOKEN_EXPIRED: 'EMAIL_VERIFICATION_TOKEN_EXPIRED',
+  /**
+   * The verification token was already consumed by a successful verification,
+   * or was invalidated when a newer token was issued (resend) or a sibling
+   * completed. Single-use invariant: reuse never verifies twice. 409.
+   */
+  EMAIL_VERIFICATION_TOKEN_USED: 'EMAIL_VERIFICATION_TOKEN_USED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

@@ -7,6 +7,7 @@ import type {
 } from '@orgistry/contracts';
 import {
   api,
+  getAccessToken,
   onSessionExpired,
   refreshAccessToken,
   setAccessToken,
@@ -112,8 +113,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Re-derive the current user from the backend (e.g. after email
+  // verification completes). Failures are swallowed: the cached user stays,
+  // and an unrecoverable 401 is already handled by the session-expired path.
+  const refreshUser = useCallback(async () => {
+    if (!getAccessToken()) return;
+    try {
+      const { user: me } = await api.get<CurrentUserResponse>('/v1/auth/me');
+      setUser(me);
+    } catch {
+      // Keep the existing user; session expiry is signaled separately.
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ status, user, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ status, user, login, register, logout, refreshUser }}
+    >
       {children}
     </AuthContext.Provider>
   );

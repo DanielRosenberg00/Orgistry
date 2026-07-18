@@ -9,6 +9,9 @@ export function testConfig(): Config {
     DATABASE_URL: 'postgres://orgistry:orgistry@localhost:5432/orgistry_test',
     REDIS_URL: 'redis://localhost:6379',
     JWT_SECRET: 'test-jwt-secret-value-1234',
+    // Tests must never open real SMTP sockets; suites that assert on delivery
+    // inject the in-memory account mailer and inspect its captured messages.
+    MAIL_DRIVER: 'memory',
   });
 }
 

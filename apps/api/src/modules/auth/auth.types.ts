@@ -46,6 +46,23 @@ export interface RegistrationInvitations {
 }
 
 /**
+ * Narrow port for the automatic post-registration verification email
+ * (Sprint 16). BEST-EFFORT BY CONTRACT: implementations must never throw —
+ * registration, personal-workspace creation, session issuance, and invitation
+ * acceptance have already committed by the time this runs, and an email
+ * outage must not undo any of it. A failed delivery is recorded by the
+ * implementation and the user can resend from the authenticated endpoint.
+ * OPTIONAL on the auth service: when absent, registration behaves exactly as
+ * before Sprint 16 (used by suites that don't exercise email).
+ */
+export interface RegistrationEmailVerification {
+  sendInitialVerificationEmail(
+    user: { id: string; email: string },
+    ctx: RequestContext,
+  ): Promise<void>;
+}
+
+/**
  * Optional invitation acceptance bundled INTO the registration transaction. When
  * present, `registerAccount` accepts the invitation (membership + accepted
  * mutation + events) in the SAME transaction that creates the user, so the whole

@@ -29,6 +29,25 @@ export interface Config {
   readonly redis: {
     readonly url: string;
   };
+  /**
+   * Account-mailer selection and sender identity (Sprint 16). Exactly one
+   * driver is active; `smtp` is populated only when the smtp driver is
+   * selected (the schema requires its credentials in that case).
+   */
+  readonly mail: {
+    readonly driver: 'mailpit' | 'smtp' | 'memory';
+    readonly fromEmail: string;
+    readonly fromName: string;
+    /** Socket timeout for one delivery attempt, in milliseconds. */
+    readonly timeoutMs: number;
+    /** Authenticated implicit-TLS SMTP endpoint; only set for the smtp driver. */
+    readonly smtp?: {
+      readonly host: string;
+      readonly port: number;
+      readonly username: string;
+      readonly password: string;
+    };
+  };
   readonly mailpit: {
     readonly host: string;
     readonly smtpPort: number;
@@ -37,6 +56,11 @@ export interface Config {
   /** Invitation behavior knobs (Sprint 9). */
   readonly invitations: {
     /** Raw invitation token lifetime in seconds. */
+    readonly ttlSeconds: number;
+  };
+  /** Email-verification behavior knobs (Sprint 16). */
+  readonly emailVerification: {
+    /** Raw verification token lifetime in seconds. */
     readonly ttlSeconds: number;
   };
   readonly auth: {
@@ -71,6 +95,17 @@ export interface Config {
       readonly registerPerIpMax: number;
       readonly refreshPerSessionMax: number;
       readonly refreshPerIpMax: number;
+    };
+    /**
+     * Email-verification buckets (Sprint 16). Shares the auth fixed window:
+     * verification is an auth surface and one window length keeps the policy
+     * legible.
+     */
+    readonly emailVerification: {
+      readonly windowSeconds: number;
+      readonly requestPerUserMax: number;
+      readonly requestPerIpMax: number;
+      readonly completePerIpMax: number;
     };
     /** External API rate limits (per key, per organization). */
     readonly external: {
@@ -115,6 +150,24 @@ function toConfig(env: Env): Config {
     redis: {
       url: env.REDIS_URL,
     },
+    mail: {
+      driver: env.MAIL_DRIVER,
+      fromEmail: env.MAIL_FROM_EMAIL,
+      fromName: env.MAIL_FROM_NAME,
+      timeoutMs: env.MAIL_TIMEOUT_MS,
+      // The completeness guard (mail-policy.ts) guarantees these fields exist
+      // whenever the smtp driver is selected; other drivers get no smtp block
+      // at all, so nothing can accidentally read half-configured credentials.
+      smtp:
+        env.MAIL_DRIVER === 'smtp'
+          ? {
+              host: env.SMTP_HOST as string,
+              port: env.SMTP_PORT,
+              username: env.SMTP_USERNAME as string,
+              password: env.SMTP_PASSWORD as string,
+            }
+          : undefined,
+    },
     mailpit: {
       host: env.MAILPIT_HOST,
       smtpPort: env.MAILPIT_SMTP_PORT,
@@ -122,6 +175,9 @@ function toConfig(env: Env): Config {
     },
     invitations: {
       ttlSeconds: env.INVITATION_TTL_SECONDS,
+    },
+    emailVerification: {
+      ttlSeconds: env.EMAIL_VERIFICATION_TTL_SECONDS,
     },
     auth: {
       jwtSecret: env.JWT_SECRET,
@@ -149,6 +205,12 @@ function toConfig(env: Env): Config {
         registerPerIpMax: env.RATE_LIMIT_REGISTER_PER_IP_MAX,
         refreshPerSessionMax: env.RATE_LIMIT_REFRESH_PER_SESSION_MAX,
         refreshPerIpMax: env.RATE_LIMIT_REFRESH_PER_IP_MAX,
+      },
+      emailVerification: {
+        windowSeconds: env.RATE_LIMIT_AUTH_WINDOW_SECONDS,
+        requestPerUserMax: env.RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_PER_USER_MAX,
+        requestPerIpMax: env.RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_PER_IP_MAX,
+        completePerIpMax: env.RATE_LIMIT_EMAIL_VERIFICATION_COMPLETE_PER_IP_MAX,
       },
       external: {
         windowSeconds: env.RATE_LIMIT_EXTERNAL_WINDOW_SECONDS,

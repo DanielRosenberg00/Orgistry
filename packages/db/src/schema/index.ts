@@ -20,6 +20,7 @@ export {
   type SessionInsert,
   type RefreshTokenRow,
   type EmailVerificationTokenRow,
+  type EmailVerificationTokenInsert,
   type SecurityEventRow,
   type SecurityEventInsert,
 } from './auth';

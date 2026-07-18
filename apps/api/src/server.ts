@@ -5,6 +5,8 @@ import Redis from 'ioredis';
 import { buildApp } from './app';
 import { createDbAuthRepository } from './modules/auth/auth.repo';
 import { createAuthService } from './modules/auth/auth.service';
+import { createDbEmailVerificationRepository } from './modules/auth/email-verification.repo';
+import { createEmailVerificationService } from './modules/auth/email-verification.service';
 import { createDbOrganizationRepository } from './modules/organization/organization.repo';
 import { createOrganizationService } from './modules/organization/organization.service';
 import { createMemberService } from './modules/organization/member.service';
@@ -22,7 +24,7 @@ import { createApiKeyAuthenticator } from './modules/api-keys/api-key.authentica
 import { createExternalProjectsService } from './modules/api-keys/external-projects.service';
 import { createDbInvitationRepository } from './modules/invitations/invitation.repo';
 import { createInvitationService } from './modules/invitations/invitation.service';
-import { createMailpitInvitationMailer } from './modules/invitations/invitation.mailpit-mailer';
+import { createAccountMailer } from './modules/mail/account-mailer-factory';
 import { createDbAuditRepository } from './modules/audit/audit.repo';
 import { createAuditService } from './modules/audit/audit.service';
 import { createRedisRateLimiter } from './lib/rate-limit';
@@ -82,20 +84,35 @@ async function main(): Promise<void> {
     entitlements: entitlementService,
   });
 
+  // Shared account mailer (Sprint 16). One explicitly selected driver
+  // (MAIL_DRIVER: mailpit locally, authenticated implicit-TLS SMTP in
+  // production — the config guard refuses anything else there) delivers every
+  // account email: invitations and email verification.
+  const accountMailer = createAccountMailer(config);
+
   // Invitations (Sprint 9). The service is constructed BEFORE the auth service
   // so it can be wired in as the registration-with-invitation collaborator AND
-  // back the invitation routes. Email is delivered over SMTP to the local
-  // Mailpit container; delivery is fail-closed (a send failure aborts creation).
+  // back the invitation routes. Delivery is fail-closed (a send failure aborts
+  // creation).
   const invitationService = createInvitationService({
     accessControl: organizationRepo,
     invitations: createDbInvitationRepository(dbClient.db),
     entitlements: entitlementService,
-    mailer: createMailpitInvitationMailer({
-      host: config.mailpit.host,
-      port: config.mailpit.smtpPort,
-    }),
+    mailer: accountMailer,
     ttlSeconds: config.invitations.ttlSeconds,
     webBaseUrl: config.web.url,
+  });
+
+  // Email verification (Sprint 16). Constructed BEFORE the auth service so it
+  // can be wired in as the best-effort post-registration email collaborator
+  // AND back the /v1/auth/email-verification routes.
+  const emailVerificationService = createEmailVerificationService({
+    repo: createDbEmailVerificationRepository(dbClient.db),
+    mailer: accountMailer,
+    webBaseUrl: config.web.url,
+    ttlSeconds: config.emailVerification.ttlSeconds,
+    rateLimiter: createRedisRateLimiter(redis),
+    rateLimits: config.rateLimit.emailVerification,
   });
 
   const authService = createAuthService({
@@ -110,6 +127,9 @@ async function main(): Promise<void> {
     rateLimits: config.rateLimit.auth,
     // Registration-with-invitation collaborator (same instance as the routes).
     invitations: invitationService,
+    // Best-effort post-registration verification email (same instance as the
+    // verification routes).
+    emailVerification: emailVerificationService,
   });
 
   // The organization repository satisfies the access-control surface
@@ -164,6 +184,7 @@ async function main(): Promise<void> {
     config,
     readinessProbes,
     authService,
+    emailVerificationService,
     organizationService,
     memberService,
     organizationRbacService,

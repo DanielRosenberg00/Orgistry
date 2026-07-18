@@ -41,6 +41,12 @@ export {
   type SessionListResponse,
   sessionRevocationResponseSchema,
   type SessionRevocationResponse,
+  emailVerificationRequestResponseSchema,
+  type EmailVerificationRequestResponse,
+  emailVerificationCompleteRequestSchema,
+  type EmailVerificationCompleteRequest,
+  emailVerificationCompleteResponseSchema,
+  type EmailVerificationCompleteResponse,
 } from './auth';
 export {
   MAX_ORGANIZATION_NAME_LENGTH,

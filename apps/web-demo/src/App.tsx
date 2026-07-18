@@ -3,6 +3,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { MembersPage } from './pages/MembersPage';
 import { InvitationsPage } from './pages/InvitationsPage';
@@ -16,6 +17,9 @@ import { NotFoundPage } from './pages/NotFoundPage';
  * Route table.
  *
  *   /auth/login, /auth/register   — public auth screens
+ *   /auth/verify-email            — public email-verification completion page
+ *                                   (target of the emailed link; works signed
+ *                                   in or out)
  *   /app/*                        — protected admin surfaces (ProtectedRoute +
  *                                   AppShell layout). Unauthenticated users are
  *                                   redirected to login by the guard.
@@ -29,6 +33,7 @@ export function App() {
       <Route path="/" element={<Navigate to="/app" replace />} />
       <Route path="/auth/login" element={<LoginPage />} />
       <Route path="/auth/register" element={<RegisterPage />} />
+      <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/app" element={<AppShell />}>

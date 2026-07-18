@@ -23,6 +23,13 @@ export interface AuthContextValue {
     displayName: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
+  /**
+   * Re-fetch `GET /v1/auth/me` and update `user` (no-op when signed out).
+   * Verification state (`user.emailVerified`) is ALWAYS backend-derived — the
+   * verification flow calls this after completion/resend instead of ever
+   * mutating the flag client-side.
+   */
+  refreshUser: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

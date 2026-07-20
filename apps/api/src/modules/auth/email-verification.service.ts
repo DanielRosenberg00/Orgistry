@@ -101,6 +101,17 @@ export interface EmailVerificationService {
     user: { id: string; email: string },
     ctx: RequestContext,
   ): Promise<void>;
+  /**
+   * BEST-EFFORT verification email after an authenticated email change
+   * (Sprint 17). Same never-throw contract as the registration email: the
+   * change is already committed (verification cleared, old tokens
+   * invalidated), so a delivery failure only means the user resends later.
+   * `user.email` is the NEW, committed address.
+   */
+  sendEmailChangeVerificationEmail(
+    user: { id: string; email: string },
+    ctx: RequestContext,
+  ): Promise<void>;
 }
 
 export function createEmailVerificationService(
@@ -212,6 +223,42 @@ export function createEmailVerificationService(
     });
   }
 
+  /**
+   * BEST-EFFORT issue + send for flows whose triggering operation has already
+   * committed (registration, email change). Never throws: the committed
+   * operation must stay usable through any email outage. A failed delivery is
+   * recorded (coarse, token-free) and the user can resend from the
+   * authenticated endpoint.
+   */
+  async function sendBestEffortVerificationEmail(
+    user: { id: string; email: string },
+    ctx: RequestContext,
+    trigger: 'registration' | 'email_change',
+  ): Promise<void> {
+    try {
+      await issueAndSendVerificationEmail(user);
+      await writeSecurityEvent({
+        userId: user.id,
+        actorType: 'user',
+        eventType: SECURITY_EVENT_TYPES.emailVerificationRequested,
+        metadata: { delivered: true, trigger },
+        ctx,
+      });
+    } catch {
+      try {
+        await writeSecurityEvent({
+          userId: user.id,
+          actorType: 'user',
+          eventType: SECURITY_EVENT_TYPES.emailVerificationRequested,
+          metadata: { delivered: false, trigger },
+          ctx,
+        });
+      } catch {
+        // Even the audit write failed; the committed operation still wins.
+      }
+    }
+  }
+
   return {
     async requestVerificationEmail(user, ctx) {
       await enforceRateLimit(
@@ -302,30 +349,11 @@ export function createEmailVerificationService(
     },
 
     async sendInitialVerificationEmail(user, ctx) {
-      try {
-        await issueAndSendVerificationEmail(user);
-        await writeSecurityEvent({
-          userId: user.id,
-          actorType: 'user',
-          eventType: SECURITY_EVENT_TYPES.emailVerificationRequested,
-          metadata: { delivered: true, trigger: 'registration' },
-          ctx,
-        });
-      } catch {
-        // BEST-EFFORT: registration already committed and must stay usable.
-        // Record the failure (coarse, token-free) and rely on resend.
-        try {
-          await writeSecurityEvent({
-            userId: user.id,
-            actorType: 'user',
-            eventType: SECURITY_EVENT_TYPES.emailVerificationRequested,
-            metadata: { delivered: false, trigger: 'registration' },
-            ctx,
-          });
-        } catch {
-          // Even the audit write failed; registration success still wins.
-        }
-      }
+      await sendBestEffortVerificationEmail(user, ctx, 'registration');
+    },
+
+    async sendEmailChangeVerificationEmail(user, ctx) {
+      await sendBestEffortVerificationEmail(user, ctx, 'email_change');
     },
   };
 }

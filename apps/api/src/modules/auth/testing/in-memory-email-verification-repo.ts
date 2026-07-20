@@ -30,9 +30,15 @@ export function createInMemoryEmailVerificationRepository(options: {
   users: UserRow[];
   /** Shared event sink; defaults to a private array. */
   securityEvents?: NewSecurityEvent[];
+  /**
+   * Shared token table; pass the same array to the auth repo so its
+   * `changeEmail` invalidation is visible here (as in the real database).
+   * Defaults to a private array.
+   */
+  tokens?: EmailVerificationTokenRow[];
 }): InMemoryEmailVerificationRepository {
   const { users } = options;
-  const tokens: EmailVerificationTokenRow[] = [];
+  const tokens = options.tokens ?? [];
   const securityEvents = options.securityEvents ?? [];
 
   return {

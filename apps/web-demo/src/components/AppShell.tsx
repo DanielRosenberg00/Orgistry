@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/app/plan', label: 'Plan & entitlements' },
   { to: '/app/api-keys', label: 'API keys' },
   { to: '/app/audit', label: 'Audit log' },
+  { to: '/app/account', label: 'Account security' },
 ];
 
 /**

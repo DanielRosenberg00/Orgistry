@@ -48,6 +48,10 @@ User → Organization → Membership → Role → Permission → Entitlement →
   with transactional race-safe completion, resend invalidation, and a
   driver-selected account mailer (Mailpit locally; authenticated implicit-TLS
   SMTP for production; advisory policy — nothing is gated yet).
+- **Credential management** — enumeration-safe password recovery (hash-only,
+  short-lived, single-use reset tokens; completion revokes every session and
+  refresh token), plus current-password-gated password change and email change
+  with re-verification of the new address.
 - **Audit log** — a permission- and entitlement-gated, filterable read over
   sanitized organization action events.
 - **Web demo** — a thin React admin UI that consumes these APIs (it holds no
@@ -163,7 +167,9 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   and launch checklist. Sprint 15 closed the production config-safety blocker
   (see [production config guard](docs/production-config-guard.md)); Sprint 16
   shipped the email-verification lifecycle and the production-shaped mailer
-  (see [email & verification](docs/email-and-verification.md)); the project
+  (see [email & verification](docs/email-and-verification.md)); Sprint 17
+  shipped password recovery and password/email change (see
+  [credential management](docs/credential-management.md)); the project
   remains not ready for staging or production.
 
 **Authoritative (current):**
@@ -178,6 +184,9 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
 - [Email & verification](docs/email-and-verification.md) — the account-mailer
   boundary, driver selection, and the email-verification lifecycle and
   invariants.
+- [Credential management](docs/credential-management.md) — password recovery,
+  password/email change, the shared password policy, and the registration
+  de-enumeration posture.
 - [API surface index](docs/api-surface.md) — every route by domain, with auth,
   permission, and entitlement.
 - [Validation matrix](docs/validation.md) — what to run, what it proves, how to

@@ -60,12 +60,17 @@ fails on errors; a small number of advisory rules (e.g. `no-explicit-any`,
 
 ### Schema drift check
 
-`pnpm db:check` runs `tooling/check-schema-drift.mjs`: it regenerates Drizzle
-migrations from the schema (offline — no database needed) and fails if that
-produced any change under `packages/db/migrations`. A clean result means the
-committed SQL matches `packages/db/src/schema`. If it fails, you edited the
-schema without regenerating: run `pnpm db:generate`, review the new migration,
-and commit it.
+`pnpm db:check` runs `tooling/check-schema-drift.mjs`: it snapshots the
+content of `packages/db/migrations`, regenerates Drizzle migrations from the
+schema (offline — no database needed), and fails if regeneration changed
+anything. The comparison is **content before-vs-after generation, not git
+status** — a correctly generated migration that is not yet committed is in
+sync and passes; anything generation adds, rewrites, or removes is drift. CI
+runs on a clean checkout, so a schema change committed without its migration
+still fails there. If it fails locally, you edited the schema without
+regenerating: run `pnpm db:generate`, review the new migration, and include
+it with the schema change. The snapshot/diff helpers are unit-tested
+(`tooling/check-schema-drift.test.ts`).
 
 ## Integration validation: `pnpm validate:integration`
 
@@ -98,6 +103,12 @@ pnpm validate:integration    # db:reset:test + test:integration
 - The auth, organization, member, projects, entitlements, and invitations
   routes behave correctly against a real database (transactional invariants,
   tenant isolation, quota enforcement).
+- The credential lifecycle (Sprint 17) holds at the SQL layer: hash-only reset
+  tokens, `FOR UPDATE`-serialized reset completion (two concurrent completions
+  can never both succeed), session + refresh-token revocation in the same
+  transaction as the password swap, the keep-current-session password-change
+  policy, and the email-change verification reset
+  (`password-recovery.integration.test.ts`).
 
 ### Integration tests skip safely
 

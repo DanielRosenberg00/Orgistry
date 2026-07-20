@@ -134,10 +134,13 @@ explicitly in the workflow `env` block.
 
 ## Stale generated Drizzle artifacts
 
-If `pnpm db:check` fails after you changed the schema, the committed migrations
-no longer match `packages/db/src/schema`. Run `pnpm db:generate`, review the new
-SQL under `packages/db/migrations`, and commit it. Never hand-edit generated
-migration files — regenerate instead.
+If `pnpm db:check` fails after you changed the schema, regenerating produced
+new or changed files under `packages/db/migrations` — the migrations no longer
+match `packages/db/src/schema`. Run `pnpm db:generate`, review the new SQL,
+and include it with the schema change. The check compares directory content
+before and after generation, so an already-generated migration that is merely
+uncommitted does **not** fail it. Never hand-edit generated migration files —
+regenerate instead.
 
 ## Schema drift check failures in CI
 

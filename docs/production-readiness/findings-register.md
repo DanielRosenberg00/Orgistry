@@ -41,6 +41,23 @@ ORG-PR-004, ORG-PR-005, ORG-PR-006.** The repository remains not ready for
 staging or production. See
 [email-and-verification.md](../email-and-verification.md).
 
+**Status update (Sprint 17, 2026-07-20):** [ORG-PR-004](#org-pr-004) (P1) and
+[ORG-PR-039](#org-pr-039) (P3) are **Closed** — the full credential lifecycle
+(enumeration-safe password recovery over a dedicated hash-only
+`password_reset_tokens` table with `FOR UPDATE` race-safe completion and full
+session/refresh revocation; current-password-gated password change and email
+change) is implemented, lifecycle-tested (unit + DB-backed integration,
+including the concurrent-completion race), and documented — see the
+*Resolution* line on each entry and
+[credential-management.md](../credential-management.md).
+[ORG-PR-030](#org-pr-030) (P3) **remains Open, materially advanced**: the
+registration duplicate-email 409 is now bounded by a per-email-digest rate
+limit and recorded as a durable probe event, but the conflict itself is still
+distinguishable; full response uniformity requires a verification-first
+registration redesign. **Open P1 production blockers: ORG-PR-001, ORG-PR-002,
+ORG-PR-005, ORG-PR-006.** The repository remains not ready for staging or
+production.
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
@@ -48,7 +65,7 @@ staging or production. See
 | [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) | Infrastructure | Production blocker | P1 | High |
 | [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16): adapter + guard exist, external delivery unvalidated** | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
-| [ORG-PR-004](#org-pr-004) | No password recovery flow | Account lifecycle | Product completeness gap | P1 | High |
+| [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
 | [ORG-PR-005](#org-pr-005) | No database backup / PITR / tested restore | Backup & DR | Production blocker | P1 | High |
 | [ORG-PR-006](#org-pr-006) | No secrets management or rotation procedure | Secrets/Ops | Production blocker | P1 | High |
 | [ORG-PR-007](#org-pr-007) | No observability (metrics/tracing/dashboards/alerts) | Observability | Operational gap | P2 | High |
@@ -74,7 +91,7 @@ staging or production. See
 | [ORG-PR-027](#org-pr-027) | No production operations documentation | Documentation | Operational gap | P2 | High |
 | [ORG-PR-028](#org-pr-028) | No migration rollback / recovery strategy | Database | Operational gap | P2 | High |
 | [ORG-PR-029](#org-pr-029) | Quota ceilings are TOCTOU-racy under concurrency | Concurrency | Data-integrity risk | P3 | High |
-| [ORG-PR-030](#org-pr-030) | User enumeration on registration | Auth | Security risk | P3 | High |
+| [ORG-PR-030](#org-pr-030) | User enumeration on registration — **Open; materially advanced (Sprint 17): per-email throttle + probe events; 409 still distinguishable** | Auth | Security risk | P3 | High |
 | [ORG-PR-031](#org-pr-031) | No idempotency keys on create operations | API | Reliability risk | P3 | Medium |
 | [ORG-PR-032](#org-pr-032) | Spammable authenticated mutations lack rate limits | App security | Security risk | P3 | High |
 | [ORG-PR-033](#org-pr-033) | No structured-logger redaction backstop | Observability/Security | Maintainability issue | P3 | Medium |
@@ -83,7 +100,7 @@ staging or production. See
 | [ORG-PR-036](#org-pr-036) | Frontend UX/robustness gaps (revoke confirm, deep-link, expiry UX, a11y) | Frontend | Developer-experience issue | P3 | High |
 | [ORG-PR-037](#org-pr-037) | `reset-test` destructive guard weaker than documented | Database/DX | Maintainability issue | P3 | High |
 | [ORG-PR-038](#org-pr-038) | "One personal workspace per user" invariant unenforced | Database | Data-integrity risk | P3 | Medium |
-| [ORG-PR-039](#org-pr-039) | No password-change / email-change flows | Account lifecycle | Product completeness gap | P3 | High |
+| [ORG-PR-039](#org-pr-039) | No password-change / email-change flows — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P3 | High |
 | [ORG-PR-040](#org-pr-040) | `noUncheckedIndexedAccess` disabled | Type safety/DX | Maintainability issue | P3 | High |
 | [ORG-PR-041](#org-pr-041) | Mailpit / live SMTP path never exercised in CI | Testing | Operational gap | P3 | High |
 | [ORG-PR-042](#org-pr-042) | Docker infra images pinned by floating tags | Supply chain | Maintainability issue | P3 | High |
@@ -194,6 +211,7 @@ Standards · Threats.
 - **Remediation:** Build the reset flow on the existing opaque-token + mailer primitives. **Depends on ORG-PR-002.**
 - **Dependencies:** ORG-PR-002 (email), ORG-PR-016 (token expiry cleanup). **Effort:** M. **Validation:** integration tests for request/redeem/expiry/reuse/enumeration.
 - **Roadmap:** Phase 2. **Standards:** ASVS V2.5 (credential recovery). **Threats:** T-ENUM, T-CRED.
+- **Resolution (Sprint 17, 2026-07-20): CLOSED.** Full recovery flow implemented on the existing opaque-token + mailer primitives, exactly as the remediation specified: public `POST /v1/auth/password-recovery/request` (enumeration-safe — identical `{ accepted: true }` for existing/unknown/disabled/soft-deleted accounts and on ANY internal failure incl. account lookup, persistence, mail delivery, and the best-effort security-event write; request events are always anonymous and never account-linked; rate-limited per IP + per normalized-email digest) and public `POST /v1/auth/password-recovery/complete` (raw token + new password in the body only). Dedicated `password_reset_tokens` table (migration `0009`): hash-only 32-byte CSPRNG tokens, short expiry (`PASSWORD_RESET_TTL_SECONDS`, default 1 h), single-use `used_at` + retired-unused `invalidated_at` lifecycle, sibling invalidation on every new generation under a per-user issuance lock (persist-and-commit before send — every emailed token was persisted first, though a later request may supersede a sent link; exactly one generation survives issuance). Completion is ONE transaction under `SELECT … FOR UPDATE` (`password-recovery.repo.ts — completeReset`): password swap + token consumption + sibling invalidation + revocation of EVERY session and refresh token; no session is issued (fresh login required). Reset link uses fragment-only transport (`/auth/reset-password#token=…`) with the Sprint 16 frontend token-hygiene pattern. Evidence: `password-recovery.routes.test.ts` (28 route tests incl. concurrent completion, an eight-scenario enumeration-uniformity matrix under injected lookup/persistence/mail/event-store failures and disabled/soft-deleted states, attribution, and secret-hygiene sweeps), `password-recovery.integration.test.ts` (live PostgreSQL, independently runnable concurrent-generation and concurrent-completion races, durable revocation), web-demo `password-recovery.test.tsx` (15 tests incl. storage/DOM/query-string hygiene). Docs: [credential-management.md](../credential-management.md). Residual (documented, accepted): request-path timing is not fully equalized (existing accounts trigger a synchronous send), bounded by the rate limits.
 
 <a id="org-pr-005"></a>
 ### ORG-PR-005 — No database backup / PITR / tested restore
@@ -467,6 +485,7 @@ Standards · Threats.
 - **Risk:** Account enumeration feeding targeted credential-stuffing/phishing.
 - **Remediation:** Return a generic response and signal existence only via the (to-be-built) verification email (ORG-PR-024).
 - **Dependencies:** ORG-PR-024. **Effort:** S. **Validation:** test that register does not distinguish existing vs. new. **Roadmap:** Phase 3. **Standards:** ASVS V2.1/V3. **Threats:** T-ENUM.
+- **Status (Sprint 17, 2026-07-20): OPEN — materially advanced, NOT closed.** The oracle is now bounded and observed, not removed: a per-normalized-email-digest rate limit (`RATE_LIMIT_REGISTER_PER_EMAIL_MAX`, counted before the lookup and identically for known/unknown addresses) throttles probing independent of the attacker's IP pool, and each duplicate attempt writes a durable `auth.registration_duplicate_email` security event (ANONYMOUS actor, null user id, coarse `reason` metadata — the unproven caller is never represented as the account owner, and no email or email digest is stored; request context rides on the event row's sanitized IP/UA/request-id fields). The `409 EMAIL_ALREADY_REGISTERED` response itself is unchanged and still distinguishable: registration synchronously returns a live session (`201 { user, tokens }` + cookie), so a duplicate cannot be answered uniformly without fabricating credentials or converting to the verification-required, email-first registration this remediation envisions — a product redesign out of Sprint 17 scope. The public password-recovery flow (Sprint 17) is fully enumeration-safe; login hardening is unchanged. Follow-up: full closure requires the generic-response registration redesign (signal existence only via email). Evidence: `credential-change.routes.test.ts — registration duplicate-email behavior` (conflict contract, probe event, per-email throttle, no-oracle bucket counting). Design note: [credential-management.md](../credential-management.md#registration-de-enumeration-org-pr-030--design-note).
 
 <a id="org-pr-031"></a>
 ### ORG-PR-031 — No idempotency keys on create operations
@@ -557,6 +576,7 @@ Standards · Threats.
 - **Risk:** No way to rotate a compromised password or fix an email without admin/DB intervention.
 - **Remediation:** Build both flows on existing auth primitives (+ verification for email change).
 - **Dependencies:** ORG-PR-024 (email change), ORG-PR-002. **Effort:** M. **Validation:** integration tests. **Roadmap:** Phase 2. **Standards:** ASVS V2.1. **Threats:** T-CRED.
+- **Resolution (Sprint 17, 2026-07-20): CLOSED.** Both flows implemented on the existing auth primitives, as the remediation specified. `POST /v1/auth/change-password` (Bearer): mandatory current-password re-auth against the stored Argon2id hash, shared password policy (`newPasswordSchema` — the same schema registration and reset completion parse), current-password-reuse rejection, and one transaction (`auth.repo.ts — changePasswordKeepingCurrentSession`) that swaps the hash, keeps ONLY the caller's server-resolved session, and revokes every other session + its refresh tokens. `POST /v1/auth/change-email` (Bearer): mandatory current-password re-auth, shared normalization, duplicate → the registration 409, and one transaction that swaps the address, clears `email_verified_at`, and invalidates all outstanding verification tokens, followed by a best-effort verification email to the NEW address (Sprint 16 mail-failure semantics; account stays usable under the advisory policy). Wrong current password → `INVALID_CREDENTIALS` at 400 (session-valid, so 401 would mimic expiry). Per-user rate limits on both. Evidence: `credential-change.routes.test.ts` (23 route tests), `password-recovery.integration.test.ts` (SQL-layer keep-current-session policy + email-change verification reset), web-demo `account-security.test.tsx` (10 tests). Web surface: `/app/account`. Docs: [credential-management.md](../credential-management.md).
 
 <a id="org-pr-040"></a>
 ### ORG-PR-040 — `noUncheckedIndexedAccess` disabled

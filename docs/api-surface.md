@@ -38,6 +38,10 @@ defined under `apps/api/src/routes` and `apps/api/src/modules/*`.
 | DELETE | `/v1/auth/sessions/:sessionId` | Bearer | `sessions.revoke` | Revoke a session; clears the cookie if it is the current one. |
 | POST | `/v1/auth/email-verification/request` | Bearer | — | Issue/resend a verification email for the CURRENT user's stored address (no body; enumeration-safe). Safe success when already verified. Returns `{ sent, alreadyVerified }`. |
 | POST | `/v1/auth/email-verification/complete` | none | — | Complete verification by raw token possession. Body `{ token }` (never a URL path). Returns `{ verified: true }`; errors: `EMAIL_VERIFICATION_TOKEN_INVALID` 404, `…_EXPIRED` 410, `…_USED` 409. |
+| POST | `/v1/auth/password-recovery/request` | none | — | Request a password-reset email. Body `{ email }`. **Enumeration-safe**: identical `{ accepted: true }` for existing, unknown, and inactive accounts (and on internal mail failure). Rate-limited per IP + per email digest. |
+| POST | `/v1/auth/password-recovery/complete` | none | — | Complete a reset by raw token possession. Body `{ token, newPassword }` (shared password policy). Revokes ALL of the user's sessions and refresh tokens; issues no session (sign in again). Returns `{ reset: true }`; errors: `PASSWORD_RESET_TOKEN_INVALID` 404, `…_EXPIRED` 410, `…_USED` 409. |
+| POST | `/v1/auth/change-password` | Bearer | — | Change password with mandatory current-password re-auth. Keeps the caller's session; revokes every other session + its refresh tokens. Wrong current password → `INVALID_CREDENTIALS` **400** (not 401). Returns `{ success: true }`. |
+| POST | `/v1/auth/change-email` | Bearer | — | Change email with mandatory current-password re-auth (direct-change policy). Clears verification, invalidates old verification tokens, best-effort sends a new verification email to the NEW address. Duplicate → `EMAIL_ALREADY_REGISTERED` 409. Returns `{ user }`. |
 
 ## Organizations
 

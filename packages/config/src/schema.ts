@@ -104,6 +104,15 @@ const rawEnvSchema = z.object({
     .positive()
     .default(86_400),
 
+  // Password-reset token lifetime (Sprint 17). Deliberately SHORT — the link
+  // authorizes replacing the account password, so it is far shorter-lived than
+  // the 24h verification link. Default: 1 hour.
+  PASSWORD_RESET_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3_600),
+
   // Invitation token lifetime (Sprint 9). Bounds how long a raw invitation token
   // remains acceptable; expiry is enforced at inspect/accept/list time. Default:
   // 7 days.
@@ -181,6 +190,14 @@ const rawEnvSchema = z.object({
     .int()
     .positive()
     .default(5),
+  // Registration per-email bucket (Sprint 17): bounds how fast one address can
+  // be probed for existence through the registration conflict, independent of
+  // the caller's IP pool. Keyed on a digest of the normalized email.
+  RATE_LIMIT_REGISTER_PER_EMAIL_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3),
   RATE_LIMIT_REFRESH_PER_SESSION_MAX: z.coerce
     .number()
     .int()
@@ -211,6 +228,48 @@ const rawEnvSchema = z.object({
     .int()
     .positive()
     .default(10),
+
+  // Credential-mutation buckets (Sprint 17): authenticated per-user limits on
+  // password change and email change. Low ceilings — a legitimate user rotates
+  // credentials rarely; a runaway client or scripted abuse should hit the wall
+  // quickly. Same fixed window as the other auth buckets.
+  RATE_LIMIT_CHANGE_PASSWORD_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5),
+  RATE_LIMIT_CHANGE_EMAIL_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3),
+
+  // Password-recovery buckets (Sprint 17). The public request endpoint is
+  // limited per IP AND per normalized-email digest (the email limit bounds
+  // mailbox flooding for one victim across an attacker's IP pool). Completion
+  // is limited per IP and per token-derived internal key (brute-force retries
+  // against one specific token). No raw email or token material ever enters a
+  // limiter key.
+  RATE_LIMIT_PASSWORD_RECOVERY_REQUEST_PER_IP_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5),
+  RATE_LIMIT_PASSWORD_RECOVERY_REQUEST_PER_EMAIL_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3),
+  RATE_LIMIT_PASSWORD_RECOVERY_COMPLETE_PER_IP_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
+  RATE_LIMIT_PASSWORD_RECOVERY_COMPLETE_PER_TOKEN_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5),
 
   // External API rate-limit buckets (Sprint 8, Redis-backed, fixed-window). These
   // are SEPARATE from the auth buckets: external traffic is API-key authenticated,

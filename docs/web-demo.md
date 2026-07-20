@@ -45,6 +45,9 @@ Concretely, the sprint added:
   completion page (`src/pages/`);
 - an advisory unverified-email banner with resend
   (`src/components/EmailVerificationBanner.tsx`; Sprint 16);
+- password-recovery pages and an authenticated account-security surface
+  (`ForgotPasswordPage`, `ResetPasswordPage`, `AccountSecurityPage`;
+  Sprint 17 — see [credential-management.md](credential-management.md));
 - jsdom component/route smoke tests (`src/**/*.test.tsx`, `src/test/`).
 
 ### Where the frontend pieces live
@@ -80,8 +83,9 @@ apps/web-demo/src
 │   ├── QueryStates.tsx       LoadingState / EmptyState / QueryBoundary / LoadMore
 │   └── PermissionNote.tsx    UX-only "you can't do this" hint
 ├── pages/                    Login, Register, VerifyEmail (public completion),
+│                             ForgotPassword, ResetPassword (public; Sprint 17),
 │                             Overview, Members, Invitations, Projects, Plan,
-│                             ApiKeys, Audit, NotFound
+│                             ApiKeys, Audit, AccountSecurity, NotFound
 ├── lib/format.ts             date formatting
 └── test/                     fixtures + mock-API harness + setup
 ```
@@ -292,6 +296,16 @@ boundary; changing one is a reviewed decision.
     is centralized in the API client.
 11. **Selected organization id is client context, not tenant authority.** The
     backend re-resolves membership for the route org on every request.
+12. **Emailed tokens (verification + password reset) are transient.** Captured
+    once from the URL fragment, scrubbed from history immediately, held only in
+    component memory, submitted only in a POST body, never placed in a query
+    string, browser storage, or the DOM (Sprint 16/17).
+13. **The forgot-password flow is enumeration-neutral.** One generic
+    confirmation regardless of account existence; the UI never adds copy that
+    would distinguish the two.
+14. **Passwords never persist in the client.** Password fields are cleared
+    after every submission; no password ever reaches storage, context, or a
+    query key.
 
 ---
 
@@ -339,6 +353,8 @@ internals beyond the envelope fields are surfaced.
 | Page | Endpoint(s) |
 | --- | --- |
 | Login / Register | `POST /v1/auth/login`, `POST /v1/auth/register`, `POST /v1/auth/refresh`, `GET /v1/auth/me`, `POST /v1/auth/logout` |
+| Forgot / Reset password | `POST /v1/auth/password-recovery/request`, `POST /v1/auth/password-recovery/complete` |
+| Account security | `POST /v1/auth/change-password`, `POST /v1/auth/change-email`, `POST /v1/auth/email-verification/request`, `GET /v1/auth/me` (refresh after email change) |
 | Organization switcher | `GET /v1/organizations`, `POST /v1/organizations` |
 | Overview | `GET /v1/organizations` (selected), `…/permissions/effective`, `…/plan` |
 | Members | `GET …/members`, `PATCH …/members/:id/role`, `DELETE …/members/:id` |

@@ -1,4 +1,5 @@
 import {
+  type EmailVerificationTokenRow,
   type MembershipRow,
   type OrganizationRow,
   type RefreshTokenRow,
@@ -19,6 +20,8 @@ import {
 import { emailAlreadyRegisteredError } from '../auth.errors';
 import type {
   AuthRepository,
+  ChangeEmailParams,
+  ChangePasswordParams,
   ListSessionsParams,
   NewRefreshToken,
   NewSecurityEvent,
@@ -59,10 +62,17 @@ export function createInMemoryAuthRepository(options?: {
    * private store for auth-only suites that don't inspect organizations.
    */
   orgStore?: InMemoryOrgStore;
+  /**
+   * Shared email-verification token table (the verification repo's `tokens`).
+   * `changeEmail` invalidates outstanding tokens here, mirroring the DB
+   * transaction. Defaults to a private array for suites that don't verify.
+   */
+  emailVerificationTokens?: EmailVerificationTokenRow[];
 }): InMemoryAuthRepository {
   const sessions: SessionRow[] = [];
   const refreshTokens: RefreshTokenRow[] = [];
   const securityEvents: NewSecurityEvent[] = [];
+  const emailVerificationTokens = options?.emailVerificationTokens ?? [];
   const orgStore = options?.orgStore ?? createInMemoryOrgStore();
   // One shared user table, exactly like the database: registration writes users
   // here and the organization repo joins them for member listings.
@@ -397,6 +407,70 @@ export function createInMemoryAuthRepository(options?: {
         : ordered;
 
       return afterCursor.slice(0, params.limit + 1);
+    },
+
+    // Synchronous body (no await) -> atomic under the single-threaded loop,
+    // mirroring the DB repo's single transaction.
+    async changePasswordKeepingCurrentSession(params: ChangePasswordParams) {
+      const user = users.find((candidate) => candidate.id === params.userId);
+      if (!user) {
+        return;
+      }
+      user.passwordHash = params.newPasswordHash;
+      user.updatedAt = params.now;
+
+      const otherSessionIds = new Set<string>();
+      for (const session of sessions) {
+        if (
+          session.userId === params.userId &&
+          session.id !== params.currentSessionId
+        ) {
+          otherSessionIds.add(session.id);
+          if (session.revokedAt === null) {
+            session.revokedAt = params.now;
+            session.revokedReason = params.revokeReason;
+            session.updatedAt = params.now;
+          }
+        }
+      }
+      for (const token of refreshTokens) {
+        if (otherSessionIds.has(token.sessionId) && token.revokedAt === null) {
+          token.revokedAt = params.now;
+          token.revokedReason = params.revokeReason;
+        }
+      }
+    },
+
+    // Mirrors the DB transaction: email swap + verification reset + token
+    // invalidation applied together, with the uniqueness check first.
+    async changeEmail(params: ChangeEmailParams) {
+      const duplicate = users.some(
+        (candidate) =>
+          candidate.normalizedEmail === params.normalizedEmail &&
+          candidate.id !== params.userId,
+      );
+      if (duplicate) {
+        throw emailAlreadyRegisteredError();
+      }
+      const user = users.find((candidate) => candidate.id === params.userId);
+      if (!user) {
+        throw new Error(`changeEmail: unknown user ${params.userId}`);
+      }
+      user.email = params.email;
+      user.normalizedEmail = params.normalizedEmail;
+      user.emailVerifiedAt = null;
+      user.updatedAt = params.now;
+
+      for (const token of emailVerificationTokens) {
+        if (
+          token.userId === params.userId &&
+          token.usedAt === null &&
+          token.invalidatedAt === null
+        ) {
+          token.invalidatedAt = params.now;
+        }
+      }
+      return user;
     },
 
     async insertSecurityEvent(values: NewSecurityEvent) {

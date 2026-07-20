@@ -81,6 +81,40 @@ export function rateLimitedError(): AppError {
 }
 
 /**
+ * Current-password re-authentication failed on an authenticated credential
+ * mutation (change password / change email). Same generic INVALID_CREDENTIALS
+ * code as login (the credential-error convention), but status 400 — NOT 401:
+ * the caller's session is perfectly valid, and a 401 would make API clients
+ * treat it as an expired session (the web client would silently refresh and
+ * then drop the user to the login screen over a typo).
+ */
+export function currentPasswordIncorrectError(): AppError {
+  return new AppError(
+    ERROR_CODES.INVALID_CREDENTIALS,
+    400,
+    'The current password is incorrect.',
+  );
+}
+
+/** The new password must actually change the credential (reuse rejection). */
+export function passwordUnchangedError(): AppError {
+  return new AppError(
+    ERROR_CODES.VALIDATION_ERROR,
+    400,
+    'The new password must be different from the current password.',
+  );
+}
+
+/** The new email is the same (after normalization) as the current one. */
+export function emailUnchangedError(): AppError {
+  return new AppError(
+    ERROR_CODES.VALIDATION_ERROR,
+    400,
+    'The new email address must be different from the current one.',
+  );
+}
+
+/**
  * A session was not found OR is not owned by the caller. The two are
  * intentionally indistinguishable so a caller cannot probe for other users'
  * session ids.

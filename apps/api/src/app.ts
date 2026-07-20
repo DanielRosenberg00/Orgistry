@@ -12,6 +12,8 @@ import { registerAuthRoutes } from './modules/auth/auth.routes';
 import type { AuthService } from './modules/auth/auth.service';
 import { registerEmailVerificationRoutes } from './modules/auth/email-verification.routes';
 import type { EmailVerificationService } from './modules/auth/email-verification.service';
+import { registerPasswordRecoveryRoutes } from './modules/auth/password-recovery.routes';
+import type { PasswordRecoveryService } from './modules/auth/password-recovery.service';
 import { registerOrganizationRoutes } from './modules/organization/organization.routes';
 import type { OrganizationService } from './modules/organization/organization.service';
 import { registerMemberRoutes } from './modules/organization/member.routes';
@@ -51,6 +53,13 @@ export interface BuildAppOptions {
    * registered alongside it. Registered only when both are provided.
    */
   emailVerificationService?: EmailVerificationService;
+  /**
+   * Password-recovery service backing `/v1/auth/password-recovery/*`
+   * (Sprint 17). Both routes are PUBLIC (the request endpoint is
+   * enumeration-safe; completion is authorized by raw-token possession), so
+   * registration does not depend on `authService`.
+   */
+  passwordRecoveryService?: PasswordRecoveryService;
   /**
    * Organization service backing the `/v1/organizations` routes. Requires
    * `authService` (the routes are Bearer-authenticated through it); registered
@@ -161,6 +170,13 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerErrorHandler(app);
   registerHealthRoute(app);
   registerReadinessRoute(app, readinessProbes);
+  // Password-recovery routes (Sprint 17). Deliberately independent of
+  // `authService`: both routes are public (see the option doc above).
+  if (options.passwordRecoveryService) {
+    registerPasswordRecoveryRoutes(app, {
+      service: options.passwordRecoveryService,
+    });
+  }
   if (options.authService) {
     registerAuthRoutes(app, {
       service: options.authService,

@@ -31,8 +31,11 @@ function build(overrides: Partial<AuthRateLimits>): Promise<AuthTestContext> {
     loginPerIpMax: HUGE,
     loginPerEmailMax: HUGE,
     registerPerIpMax: HUGE,
+    registerPerEmailMax: HUGE,
     refreshPerSessionMax: HUGE,
     refreshPerIpMax: HUGE,
+    changePasswordPerUserMax: HUGE,
+    changeEmailPerUserMax: HUGE,
     ...overrides,
   };
   return buildAuthTestApp({

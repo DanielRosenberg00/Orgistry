@@ -64,6 +64,13 @@
       "when": 1784375937750,
       "tag": "0008_many_molly_hayes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784553677242,
+      "tag": "0009_lovely_karnak",
+      "breakpoints": true
     }
   ]
 }

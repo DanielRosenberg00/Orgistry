@@ -28,6 +28,9 @@ export const ID_PREFIXES = {
   sess: 'sess',
   rtok: 'rtok',
   evtok: 'evtok',
+  // Password-reset tokens (Sprint 17). Distinct from `evtok` so a leaked id in
+  // a log line is self-describing about which token family it belongs to.
+  prtok: 'prtok',
   evt: 'evt',
   sevt: 'sevt',
 } as const;

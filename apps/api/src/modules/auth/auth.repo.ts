@@ -1,6 +1,6 @@
 import type { Database } from '@orgistry/db';
 import { schema } from '@orgistry/db';
-import { and, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, ne, or } from 'drizzle-orm';
 import {
   insertOrganizationWithOwnerMembership,
   resolveUniqueSlug,
@@ -9,6 +9,8 @@ import { acceptInvitationWithinTransaction } from '../invitations/invitation.acc
 import { emailAlreadyRegisteredError } from './auth.errors';
 import type {
   AuthRepository,
+  ChangeEmailParams,
+  ChangePasswordParams,
   ListSessionsParams,
   NewRefreshToken,
   NewSecurityEvent,
@@ -362,6 +364,99 @@ export function createDbAuthRepository(db: Database): AuthRepository {
         )
         .orderBy(desc(schema.sessions.createdAt), desc(schema.sessions.id))
         .limit(params.limit + 1);
+    },
+
+    // Sprint 17: password change keeping ONLY the caller's session. One
+    // transaction swaps the hash and revokes everything else, so a partial
+    // failure can never leave a new password with foreign sessions alive.
+    async changePasswordKeepingCurrentSession(params: ChangePasswordParams) {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(schema.users)
+          .set({ passwordHash: params.newPasswordHash, updatedAt: params.now })
+          .where(eq(schema.users.id, params.userId));
+
+        // Every OTHER active session dies…
+        await tx
+          .update(schema.sessions)
+          .set({
+            revokedAt: params.now,
+            revokedReason: params.revokeReason,
+            updatedAt: params.now,
+          })
+          .where(
+            and(
+              eq(schema.sessions.userId, params.userId),
+              ne(schema.sessions.id, params.currentSessionId),
+              isNull(schema.sessions.revokedAt),
+            ),
+          );
+
+        // …together with every refresh token NOT belonging to the surviving
+        // session (including tokens of sessions revoked earlier for other
+        // reasons — nothing pre-change may refresh except the caller's own
+        // still-valid chain).
+        const otherSessionIds = tx
+          .select({ id: schema.sessions.id })
+          .from(schema.sessions)
+          .where(
+            and(
+              eq(schema.sessions.userId, params.userId),
+              ne(schema.sessions.id, params.currentSessionId),
+            ),
+          );
+        await tx
+          .update(schema.refreshTokens)
+          .set({ revokedAt: params.now, revokedReason: params.revokeReason })
+          .where(
+            and(
+              inArray(schema.refreshTokens.sessionId, otherSessionIds),
+              isNull(schema.refreshTokens.revokedAt),
+            ),
+          );
+      });
+    },
+
+    // Sprint 17: direct email change. The same transaction clears the
+    // verification state and retires every outstanding verification token, so
+    // a committed change can never leave the old address verified or
+    // verifiable.
+    async changeEmail(params: ChangeEmailParams) {
+      return db.transaction(async (tx) => {
+        let updated;
+        try {
+          [updated] = await tx
+            .update(schema.users)
+            .set({
+              email: params.email,
+              normalizedEmail: params.normalizedEmail,
+              emailVerifiedAt: null,
+              updatedAt: params.now,
+            })
+            .where(eq(schema.users.id, params.userId))
+            .returning();
+        } catch (error) {
+          // The unique index on normalized_email is the authoritative guard;
+          // surface the same public conflict as registration.
+          if (isUniqueViolation(error)) {
+            throw emailAlreadyRegisteredError();
+          }
+          throw error;
+        }
+
+        await tx
+          .update(schema.emailVerificationTokens)
+          .set({ invalidatedAt: params.now })
+          .where(
+            and(
+              eq(schema.emailVerificationTokens.userId, params.userId),
+              isNull(schema.emailVerificationTokens.usedAt),
+              isNull(schema.emailVerificationTokens.invalidatedAt),
+            ),
+          );
+
+        return updated;
+      });
     },
 
     async insertSecurityEvent(values: NewSecurityEvent) {

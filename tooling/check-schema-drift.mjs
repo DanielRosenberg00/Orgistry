@@ -5,32 +5,36 @@
 // `pnpm db:generate`, the committed SQL migrations no longer match the schema —
 // a silent drift that only surfaces on the next deploy.
 //
-// This guard regenerates migrations (offline, no database needed) and fails if
-// that produced any change under `packages/db/migrations`. A clean tree means
-// the committed migrations are in sync with the schema.
+// This guard snapshots the migrations directory, regenerates migrations
+// (offline, no database needed), and fails if regeneration changed anything.
+// The comparison is CONTENT before-vs-after generation, not git status: a
+// correctly generated migration that is not yet committed is in sync and must
+// pass, while any file generation adds, rewrites, or removes is drift. CI runs
+// this on a clean checkout, so a schema change committed without its migration
+// still fails there (generation produces the missing files).
 //
 // Exit 0 = in sync. Exit 1 = drift detected (or the check itself errored).
 
 import { execFileSync } from 'node:child_process';
+import { diffSnapshots, snapshotDirectory } from './lib/migrations-snapshot.mjs';
 
 const MIGRATIONS_PATH = 'packages/db/migrations';
 
-function run(command, args) {
-  return execFileSync(command, args, { encoding: 'utf8' }).trim();
-}
-
 try {
+  const before = snapshotDirectory(MIGRATIONS_PATH);
+
   // Regenerate from the current schema. Idempotent when already in sync.
-  run('pnpm', ['--filter', '@orgistry/db', 'run', 'generate']);
+  execFileSync('pnpm', ['--filter', '@orgistry/db', 'run', 'generate'], {
+    encoding: 'utf8',
+  });
 
-  // `git status --porcelain` lists any added/modified/untracked migration files.
-  const status = run('git', ['status', '--porcelain', '--', MIGRATIONS_PATH]);
+  const differences = diffSnapshots(before, snapshotDirectory(MIGRATIONS_PATH));
 
-  if (status.length > 0) {
-    console.error('Schema drift detected: committed migrations are out of sync with the schema.');
-    console.error('Run `pnpm db:generate`, review the new migration, and commit it.\n');
-    console.error('Pending changes under ' + MIGRATIONS_PATH + ':');
-    console.error(status);
+  if (differences.length > 0) {
+    console.error('Schema drift detected: regenerating migrations changed the migrations directory.');
+    console.error('The schema was edited without `pnpm db:generate`. Review the generated migration and include it with the schema change.\n');
+    console.error('Changes under ' + MIGRATIONS_PATH + ':');
+    console.error(differences.join('\n'));
     process.exit(1);
   }
 

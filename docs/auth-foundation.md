@@ -20,6 +20,14 @@ normalization, or security-event persistence.
 > first refresh token. The current behavior and design live in
 > [`organization-foundation.md`](organization-foundation.md).
 
+> **Sprint 17 update.** The credential lifecycle is now complete: password
+> recovery (public request + reset completion over a dedicated hash-only
+> `password_reset_tokens` table), authenticated password change and email
+> change (both requiring the current password), registration duplicate-email
+> throttling + probe events, and the shared `newPasswordSchema` password
+> policy used by every password-setting surface. See
+> [`credential-management.md`](credential-management.md).
+
 This document is the **historical Sprint 2 reference**. It describes the auth
 foundation as it was first shipped: register/login/current-user with no refresh
 endpoint, logout, session listing/revocation, or email-verification flow, and
@@ -256,10 +264,14 @@ state see [`session-lifecycle.md`](session-lifecycle.md) (Sprint 3) and
 **Still out of scope after Sprint 4:**
 
 - Email verification (the token table is scaffolding; `users.email_verified_at`
-  is always null on registration).
+  is always null on registration) — **resolved in Sprint 16**; see
+  [`email-and-verification.md`](email-and-verification.md).
+- Password recovery and password/email change — **resolved in Sprint 17**; see
+  [`credential-management.md`](credential-management.md).
 - Permissions, member management, invitations, entitlements, quotas, projects,
-  API keys, organization audit logs, and any auth/organization web UI.
-- The system is **not** production-certified.
+  API keys, organization audit logs, and any auth/organization web UI —
+  resolved by Sprints 5–11.
+- The system is **not** production-certified (still true).
 
 ## F. Sprint Changelog
 

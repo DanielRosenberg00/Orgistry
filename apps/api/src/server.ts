@@ -7,6 +7,8 @@ import { createDbAuthRepository } from './modules/auth/auth.repo';
 import { createAuthService } from './modules/auth/auth.service';
 import { createDbEmailVerificationRepository } from './modules/auth/email-verification.repo';
 import { createEmailVerificationService } from './modules/auth/email-verification.service';
+import { createDbPasswordRecoveryRepository } from './modules/auth/password-recovery.repo';
+import { createPasswordRecoveryService } from './modules/auth/password-recovery.service';
 import { createDbOrganizationRepository } from './modules/organization/organization.repo';
 import { createOrganizationService } from './modules/organization/organization.service';
 import { createMemberService } from './modules/organization/member.service';
@@ -115,6 +117,18 @@ async function main(): Promise<void> {
     rateLimits: config.rateLimit.emailVerification,
   });
 
+  // Password recovery (Sprint 17). Public request + completion; shares the
+  // account mailer and the Redis limiter. Completion revokes every session and
+  // refresh token of the user inside its repository transaction.
+  const passwordRecoveryService = createPasswordRecoveryService({
+    repo: createDbPasswordRecoveryRepository(dbClient.db),
+    mailer: accountMailer,
+    webBaseUrl: config.web.url,
+    ttlSeconds: config.passwordRecovery.ttlSeconds,
+    rateLimiter: createRedisRateLimiter(redis),
+    rateLimits: config.rateLimit.passwordRecovery,
+  });
+
   const authService = createAuthService({
     repo: createDbAuthRepository(dbClient.db),
     jwtSecret: config.auth.jwtSecret,
@@ -185,6 +199,7 @@ async function main(): Promise<void> {
     readinessProbes,
     authService,
     emailVerificationService,
+    passwordRecoveryService,
     organizationService,
     memberService,
     organizationRbacService,

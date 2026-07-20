@@ -74,3 +74,14 @@ the P1/P2 work and the launch gate (see
 > production-ready*, and the current state is
 > **C — Ready to continue production implementation** (not ready for staging,
 > not ready for production).
+
+> **Status update (Sprint 17, 2026-07-20).** ORG-PR-004 (P1) and ORG-PR-039
+> (P3) closed — the account-recovery/credential-lifecycle gap named as the
+> "Product completeness" and "Authentication" largest-gap driver above is now
+> implemented and lifecycle-tested. ORG-PR-030 (P3) is materially advanced
+> (throttled + evented, still distinguishable). **4 P1 blockers remain open
+> (ORG-PR-001, 002, 005, 006)** — all in the production envelope (deployment,
+> external email evidence, backup/restore, secrets management), none in
+> product code. The overriding rule still yields *not production-ready*; the
+> state remains **C — Ready to continue production implementation** (not
+> ready for staging, not ready for production).

@@ -80,8 +80,9 @@ the categories a reviewer would expect.
 
 ### Authentication extensions
 
-- **Password reset** — email-driven reset flow (the Sprint 16 account-mailer
-  boundary and token conventions are its intended foundation; Sprint 17).
+- **Password reset** — ✅ shipped in Sprint 17 on the Sprint 16 account-mailer
+  boundary and token conventions, together with password change and email
+  change. See [credential-management.md](./credential-management.md).
 - **Email verification enforcement** — the full verification lifecycle
   (issue/resend/complete, hash-only single-use tokens, web flow) shipped in
   Sprint 16 as an **advisory** feature; enforcement (gating sensitive actions

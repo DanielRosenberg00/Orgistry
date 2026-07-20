@@ -43,10 +43,14 @@ omits production concerns (see [known limitations](./known-limitations.md)).
   origin allow-list denies. The CSRF defense is never on the auth-correctness
   path.
 - **Rate limits.** Redis-backed fixed-window limiters protect auth surfaces
-  (login per-IP/per-email, register per-IP, refresh per-session/per-IP,
-  email-verification request per-user/per-IP and completion per-IP) and the
-  external API (per-key, per-org). They **fail open**: if Redis is down, requests
-  are allowed rather than blocked, so an outage never breaks authentication.
+  (login per-IP/per-email, register per-IP/per-email-digest, refresh
+  per-session/per-IP, email-verification request per-user/per-IP and
+  completion per-IP, password-recovery request per-IP/per-email-digest and
+  completion per-IP/per-token-digest, password/email change per-user) and the
+  external API (per-key, per-org). No raw email or token material enters a
+  limiter key — emails and tokens are digested first. They **fail open**: if
+  Redis is down, requests are allowed rather than blocked, so an outage never
+  breaks authentication.
 - **Session revocation.** Sessions can be listed and individually revoked;
   revoking the current session clears the refresh cookie. Reuse detection revokes
   sessions automatically.
@@ -124,6 +128,54 @@ omits production concerns (see [known limitations](./known-limitations.md)).
   config refuses the local Mailpit and in-memory drivers, placeholder SMTP
   credentials, non-routable senders, and non-HTTPS/localhost public web URLs
   — see [email-and-verification.md](./email-and-verification.md).
+
+## Credential management (Sprint 17)
+
+- **Password recovery.** A dedicated `password_reset_tokens` table (hash-only,
+  1 h default TTL, single-use, sibling-invalidated) backs the public
+  request/complete pair. Issuance serializes per user (user-row
+  `SELECT … FOR UPDATE`), so concurrent requests leave exactly one usable
+  generation (older emails then carry a superseded token by design), and
+  follows **persist-and-commit before send**: every emailed token was
+  durably committed before the mailer saw it — a persistence failure sends
+  no email; an undelivered or superseded persisted token is harmless and
+  retired by the next generation. The request endpoint is
+  **enumeration-safe by contract**: identical `{ accepted: true }` for
+  existing, unknown, disabled, and soft-deleted accounts — even when the
+  account lookup, token persistence, the mail send, or the security-event
+  write fails internally. Request events
+  are always **anonymous** (null user/session, coarse outcomes, no email or
+  account reference — submitting an email authenticates nobody); a
+  successful completion is attributed to the resolved user by token proof
+  (the verification-completion convention), and rejections are anonymous.
+  Reset links use the same fragment-only transport as verification
+  (`/auth/reset-password#token=…`).
+- **Reset completion revokes everything.** One `FOR UPDATE` transaction
+  replaces the password hash, consumes the token, invalidates siblings, and
+  revokes EVERY session and refresh token of the user. No session is issued —
+  the user signs in again; old access tokens die at session revalidation and
+  old refresh cookies classify as reuse.
+- **Password change.** Requires the current password; the session that proved
+  it survives, every other session and its refresh tokens are revoked in the
+  same transaction as the hash swap. A wrong current password returns
+  `INVALID_CREDENTIALS` at 400 (the session is valid; 401 would mimic expiry).
+  Reusing the current password as the new one is rejected.
+- **Email change.** Requires the current password (direct-change policy). The
+  transaction swaps the address, clears `email_verified_at`, and invalidates
+  all outstanding verification tokens; a fresh verification email goes to the
+  new address best-effort. Duplicate emails surface the registration 409 —
+  an accepted disclosure on this password-re-proved authenticated surface.
+- **Shared password policy.** One `newPasswordSchema` (contracts) is parsed by
+  registration, reset completion, and password change; the policy cannot
+  drift between routes.
+- **Registration de-enumeration (partial).** Public registration still returns
+  `409 EMAIL_ALREADY_REGISTERED`, now behind a per-email-digest rate limit and
+  a durable `auth.registration_duplicate_email` probe event (anonymous actor,
+  null user id, coarse reason only — no email, digest, or victim reference in
+  the event). Full response uniformity requires a verification-first
+  registration redesign and is deliberately deferred — see
+  [credential-management.md](credential-management.md) (ORG-PR-030 remains
+  open, materially advanced).
 
 ## Invitations
 

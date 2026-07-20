@@ -32,6 +32,13 @@ export function startFakeSmtp(options: FakeSmtpOptions = {}): Promise<FakeSmtp> 
   const authAttempts: string[] = [];
 
   const handleConnection = (socket: net.Socket): void => {
+    // Clients abort mid-session by design in failure-path tests (e.g. a TLS
+    // client refusing this plaintext server). Without a listener, the
+    // resulting ECONNRESET is an uncaught exception that can fail an entire
+    // unrelated vitest run; the abort itself is expected and uninteresting.
+    socket.on('error', () => {
+      socket.destroy();
+    });
     socket.setEncoding('utf8');
     let buffer = '';
     let inData = false;

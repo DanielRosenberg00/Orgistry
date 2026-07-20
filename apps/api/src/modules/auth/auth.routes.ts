@@ -1,4 +1,6 @@
 import {
+  changeEmailRequestSchema,
+  changePasswordRequestSchema,
   cursorPageParamsSchema,
   loginRequestSchema,
   registerRequestSchema,
@@ -116,6 +118,32 @@ export function registerAuthRoutes(
     // Always clear, even on a repeat logout with no cookie (idempotent).
     clearRefreshCookie(reply, refreshCookie);
     return sendSuccess(reply, { success: true });
+  });
+
+  // Credential mutations (Sprint 17). Bearer-authenticated and re-authenticated
+  // by current password inside the service. The request bodies carry passwords,
+  // so they are parsed by contract schemas and NEVER logged; responses carry no
+  // credential material.
+  app.post('/v1/auth/change-password', async (request, reply) => {
+    const token = requireBearerToken(request);
+    const input = changePasswordRequestSchema.parse(request.body);
+    const response = await service.changePassword(
+      token,
+      input,
+      requestContext(request),
+    );
+    return sendSuccess(reply, response);
+  });
+
+  app.post('/v1/auth/change-email', async (request, reply) => {
+    const token = requireBearerToken(request);
+    const input = changeEmailRequestSchema.parse(request.body);
+    const response = await service.changeEmail(
+      token,
+      input,
+      requestContext(request),
+    );
+    return sendSuccess(reply, response);
   });
 
   app.get('/v1/auth/sessions', async (request, reply) => {

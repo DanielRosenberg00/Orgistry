@@ -79,6 +79,19 @@ resend/sibling completion; reuse never verifies twice). All three describe
 token validity only. See
 [`email-and-verification.md`](email-and-verification.md).
 
+Password-recovery codes (Sprint 17): `PASSWORD_RESET_TOKEN_INVALID` (404 —
+unknown token, or a token whose account cannot complete a reset;
+indistinguishable so account state never leaks),
+`PASSWORD_RESET_TOKEN_EXPIRED` (410), and `PASSWORD_RESET_TOKEN_USED` (409 —
+consumed earlier or invalidated by a newer request/sibling completion; a token
+never resets twice). The recovery **request** endpoint returns none of these —
+it succeeds identically for every email. Two existing codes gained new
+Sprint 17 uses: `INVALID_CREDENTIALS` at status **400** (not 401) rejects a
+wrong current password on `change-password` / `change-email` (the caller's
+session is valid, so 401 would falsely signal an expired session), and
+`EMAIL_ALREADY_REGISTERED` (409) rejects a duplicate email on `change-email`.
+See [`credential-management.md`](credential-management.md).
+
 ## Auth endpoints
 
 See [`auth-foundation.md`](auth-foundation.md) (register/login/me) and
@@ -102,6 +115,11 @@ full design.
   The caller's active sessions only; each item is a `SessionSummary`.
 - `DELETE /v1/auth/sessions/:sessionId` — `200 { success: true }`; requires Bearer.
   Owner-scoped (cross-user → `404`); idempotent.
+- `POST /v1/auth/password-recovery/request` — `200 { accepted: true }`, always
+  (enumeration-safe). `POST /v1/auth/password-recovery/complete` —
+  `200 { reset: true }`; no session issued. `POST /v1/auth/change-password` —
+  `200 { success: true }`. `POST /v1/auth/change-email` — `200 { user }`. See
+  [`credential-management.md`](credential-management.md) for the full design.
 
 `tokens` is `{ accessToken, tokenType: 'Bearer', expiresIn }`. `user` is the
 public `AuthUser` (`id`, `email`, `displayName`, `emailVerified`, `createdAt`) —
@@ -142,9 +160,13 @@ permissions).
   `SameSite=Lax` + the strict CORS allow-list + the required header. Missing →
   `403 CSRF_REQUIRED` with a request id.
 - **Rate limits.** Redis-backed fixed-window buckets (login-per-IP/email,
-  register-per-IP, refresh-per-session/IP) from typed config; exceeding →
-  `429 RATE_LIMITED` with a request id. The limiter fails open — a Redis outage
-  never affects auth correctness.
+  register-per-IP/email, refresh-per-session/IP, change-password/change-email
+  per user, password-recovery request per IP/email-digest, password-recovery
+  completion per IP/token-digest, email-verification request/complete) from
+  typed config; exceeding → `429 RATE_LIMITED` with a request id. The limiter
+  fails open — a Redis outage never affects auth correctness. No raw email or
+  token material ever enters a limiter key (emails and tokens are digested
+  first).
 
 ## Request IDs
 

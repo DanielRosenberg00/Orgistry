@@ -188,6 +188,28 @@ export const ERROR_CODES = {
    * completed. Single-use invariant: reuse never verifies twice. 409.
    */
   EMAIL_VERIFICATION_TOKEN_USED: 'EMAIL_VERIFICATION_TOKEN_USED',
+
+  // ----- Password recovery (Sprint 17) -----
+  // These three codes describe RESET-TOKEN validity only — never account
+  // existence or user state. A token whose user is missing or not recoverable
+  // reports PASSWORD_RESET_TOKEN_INVALID, indistinguishable from an unknown
+  // token. Status mapping mirrors the email-verification token family:
+  // unknown 404, expired 410, consumed/invalidated 409.
+  /**
+   * The presented reset token does not resolve to a usable row. Returned (404)
+   * when the token is unknown, malformed, or its account cannot complete a
+   * reset — the token is a high-entropy secret, so an attacker without one
+   * learns nothing.
+   */
+  PASSWORD_RESET_TOKEN_INVALID: 'PASSWORD_RESET_TOKEN_INVALID',
+  /** The reset token has passed its `expires_at`. 410. */
+  PASSWORD_RESET_TOKEN_EXPIRED: 'PASSWORD_RESET_TOKEN_EXPIRED',
+  /**
+   * The reset token was already consumed by a successful reset, or was
+   * invalidated when a newer token was issued or a sibling completed.
+   * Single-use invariant: a token never resets a password twice. 409.
+   */
+  PASSWORD_RESET_TOKEN_USED: 'PASSWORD_RESET_TOKEN_USED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

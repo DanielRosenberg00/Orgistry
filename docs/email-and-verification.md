@@ -96,6 +96,29 @@ multiple providers (all out of scope).
   have already committed; a delivery failure is recorded as a sanitized
   `auth.email_verification_requested` event with `delivered: false` and the
   user resends later. Email problems can never roll back a registration.
+- **Post-email-change verification email (Sprint 17)** — **best-effort**, same
+  contract as the post-registration send (`trigger: 'email_change'`): the
+  email change has already committed (verification cleared, old tokens
+  invalidated inside that transaction), so a failed send only means the user
+  resends later. See [credential-management.md](credential-management.md).
+- **Password-recovery request email (Sprint 17)** — the OPPOSITE ordering:
+  **persist-and-commit before send**. Every emailed reset token was durably
+  committed (sibling invalidation + insert, under the per-user issuance
+  lock) before the mailer saw the message; if persistence fails, no email is
+  sent. This does NOT mean a sent link stays usable: a concurrent or later
+  recovery request supersedes it (exactly one generation survives issuance;
+  older emails then carry an invalidated token — expected single-generation
+  behavior). Internal failures — persistence, delivery, even the
+  security-event write — are **swallowed** behind the generic
+  `{ accepted: true }` (recorded best-effort as
+  `auth.password_reset_requested` with
+  `outcome: persist_failed | send_failed`, `delivered: false`) — surfacing an
+  error on an unauthenticated, email-keyed endpoint would disclose account
+  existence. An undelivered persisted token is harmless: unknown to anyone,
+  expiring, retired by the next successful generation. The orderings differ
+  because verification issue/resend is authenticated and surfaces failures
+  (a dead emailed link would strand nobody), while the public recovery
+  endpoint cannot surface anything.
 
 ## Email verification lifecycle
 
@@ -232,6 +255,11 @@ Lookup is by the unique `token_hash` index; TTL comes from
 - **Seeded demo users** — the demo seed drives the real registration API, so
   demo users also start unverified (the banner simply shows in the demo; the
   advisory policy means nothing is blocked).
+- **Email change (Sprint 17)** — an authenticated email change clears
+  `email_verified_at` and invalidates all outstanding verification tokens in
+  the SAME transaction that swaps the address, then best-effort issues a fresh
+  generation to the NEW address. The previous address's verification can never
+  survive an address change.
 
 ### Rate limiting
 

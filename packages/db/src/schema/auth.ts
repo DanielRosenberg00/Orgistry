@@ -164,6 +164,50 @@ export const emailVerificationTokens = pgTable(
   ],
 );
 
+/**
+ * Password-reset tokens (Sprint 17).
+ *
+ * DELIBERATELY a separate table from `email_verification_tokens`: the two
+ * token families answer different questions ("may this address be marked
+ * verified?" vs "may this caller replace the account password?"), carry
+ * different blast radii, and will have different retention/cleanup policies.
+ * Overloading one table would make token meaning ambiguous.
+ *
+ * Lifecycle mirrors the verification-token model — the two terminal
+ * timestamps have DISTINCT meanings and are never overloaded:
+ *  - `used_at`        — the token was CONSUMED by a successful password reset;
+ *  - `invalidated_at` — the token was RETIRED unused (superseded by a newer
+ *    recovery request, or retired as a sibling when another token completed).
+ *
+ * A token is usable only while `used_at IS NULL AND invalidated_at IS NULL
+ * AND expires_at > now()`. At most one usable token exists per user after any
+ * recovery request. The row stores NO request metadata (no IP, no user agent,
+ * no link) — the security-events seam owns sanitized request context.
+ */
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId('prtok')),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    // SHA-256 of the raw reset token; the raw value is emailed, never stored.
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    invalidatedAt: timestamp('invalidated_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // Lookup of a presented token by hash; uniqueness also guards insert races.
+    uniqueIndex('uq_password_reset_tokens_token_hash').on(table.tokenHash),
+    // Active-token invalidation and future retention sweeps scan by user.
+    index('ix_password_reset_tokens_user_id').on(table.userId),
+  ],
+);
+
 export const securityEvents = pgTable(
   'security_events',
   {
@@ -203,5 +247,7 @@ export type EmailVerificationTokenRow =
   typeof emailVerificationTokens.$inferSelect;
 export type EmailVerificationTokenInsert =
   typeof emailVerificationTokens.$inferInsert;
+export type PasswordResetTokenRow = typeof passwordResetTokens.$inferSelect;
+export type PasswordResetTokenInsert = typeof passwordResetTokens.$inferInsert;
 export type SecurityEventRow = typeof securityEvents.$inferSelect;
 export type SecurityEventInsert = typeof securityEvents.$inferInsert;

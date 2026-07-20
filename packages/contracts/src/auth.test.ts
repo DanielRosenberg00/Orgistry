@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   MIN_PASSWORD_LENGTH,
   authUserSchema,
+  changeEmailRequestSchema,
+  changeEmailResponseSchema,
+  changePasswordRequestSchema,
   emailVerificationCompleteRequestSchema,
   emailVerificationCompleteResponseSchema,
   emailVerificationRequestResponseSchema,
   loginRequestSchema,
+  passwordRecoveryCompleteRequestSchema,
+  passwordRecoveryRequestResponseSchema,
+  passwordRecoveryRequestSchema,
   refreshResponseSchema,
   registerRequestSchema,
   sessionListResponseSchema,
@@ -150,5 +156,114 @@ describe('email verification contracts (Sprint 16)', () => {
       emailVerificationCompleteResponseSchema.safeParse({ verified: true })
         .success,
     ).toBe(true);
+  });
+});
+
+describe('password recovery contracts (Sprint 17)', () => {
+  it('request takes only an email; response reports only the generic acceptance', () => {
+    expect(
+      passwordRecoveryRequestSchema.safeParse({ email: 'user@example.com' })
+        .success,
+    ).toBe(true);
+    expect(
+      passwordRecoveryRequestSchema.safeParse({ email: 'not-an-email' })
+        .success,
+    ).toBe(false);
+    const keys = Object.keys(passwordRecoveryRequestResponseSchema.shape);
+    expect(keys).toEqual(['accepted']);
+    expect(JSON.stringify(keys)).not.toMatch(/token|sent|exists|user/i);
+  });
+
+  it('complete takes the raw token + new password in the body', () => {
+    expect(
+      passwordRecoveryCompleteRequestSchema.safeParse({
+        token: 'raw-token',
+        newPassword: 'a-strong-password',
+      }).success,
+    ).toBe(true);
+    expect(
+      passwordRecoveryCompleteRequestSchema.safeParse({
+        token: '',
+        newPassword: 'a-strong-password',
+      }).success,
+    ).toBe(false);
+    expect(
+      passwordRecoveryCompleteRequestSchema.safeParse({
+        token: 'x'.repeat(513),
+        newPassword: 'a-strong-password',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('enforces the SAME shared password policy as registration', () => {
+    // A password registration would reject must also be rejected here (and by
+    // change-password below) — the policy is one shared schema by design.
+    const weak = 'short';
+    expect(
+      registerRequestSchema.safeParse({
+        email: 'a@example.com',
+        password: weak,
+        displayName: 'A',
+      }).success,
+    ).toBe(false);
+    expect(
+      passwordRecoveryCompleteRequestSchema.safeParse({
+        token: 'raw-token',
+        newPassword: weak,
+      }).success,
+    ).toBe(false);
+    expect(
+      changePasswordRequestSchema.safeParse({
+        currentPassword: 'whatever-current',
+        newPassword: weak,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('credential change contracts (Sprint 17)', () => {
+  it('change password requires the current password and a policy-valid new one', () => {
+    expect(
+      changePasswordRequestSchema.safeParse({
+        currentPassword: 'old-password',
+        newPassword: 'a-strong-password',
+      }).success,
+    ).toBe(true);
+    expect(
+      changePasswordRequestSchema.safeParse({
+        newPassword: 'a-strong-password',
+      }).success,
+    ).toBe(false);
+    // The CURRENT password is only shape-checked (it may pre-date the policy).
+    expect(
+      changePasswordRequestSchema.safeParse({
+        currentPassword: 'short',
+        newPassword: 'a-strong-password',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('change email requires the current password and a valid new email', () => {
+    expect(
+      changeEmailRequestSchema.safeParse({
+        currentPassword: 'old-password',
+        newEmail: 'new@example.com',
+      }).success,
+    ).toBe(true);
+    expect(
+      changeEmailRequestSchema.safeParse({ newEmail: 'new@example.com' })
+        .success,
+    ).toBe(false);
+    expect(
+      changeEmailRequestSchema.safeParse({
+        currentPassword: 'old-password',
+        newEmail: 'not-an-email',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('change email response is the public user shape (no credential material)', () => {
+    const keys = Object.keys(changeEmailResponseSchema.shape);
+    expect(keys).toEqual(['user']);
   });
 });

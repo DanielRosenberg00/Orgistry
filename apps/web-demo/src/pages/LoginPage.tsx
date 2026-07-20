@@ -69,6 +69,9 @@ export function LoginPage() {
           </button>
         </form>
         <p className="muted" style={{ marginTop: '1rem' }}>
+          <Link to="/auth/forgot-password">Forgot your password?</Link>
+        </p>
+        <p className="muted" style={{ marginTop: '0.5rem' }}>
           No account? <Link to="/auth/register">Create one</Link>.
         </p>
       </div>

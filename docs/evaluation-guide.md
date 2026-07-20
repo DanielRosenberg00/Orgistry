@@ -170,7 +170,7 @@ the audit log → observe permission-aware UX with backend-authoritative errors.
 ## What limitations to keep in mind
 
 Judge against the stated scope, not an imagined production target. Orgistry
-explicitly does **not** implement billing, OAuth, MFA, password reset,
+explicitly does **not** implement billing, OAuth, MFA,
 externally validated production email delivery (verification is advisory),
 PostgreSQL RLS, custom roles, resource-level/ABAC permissions, audit
 export/retention enforcement, webhooks, SDKs, or full browser E2E; and it accepts

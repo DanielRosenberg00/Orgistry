@@ -11,6 +11,7 @@ export {
   sessions,
   refreshTokens,
   emailVerificationTokens,
+  passwordResetTokens,
   securityEvents,
   type UserStatus,
   type SecurityActorType,
@@ -21,6 +22,8 @@ export {
   type RefreshTokenRow,
   type EmailVerificationTokenRow,
   type EmailVerificationTokenInsert,
+  type PasswordResetTokenRow,
+  type PasswordResetTokenInsert,
   type SecurityEventRow,
   type SecurityEventInsert,
 } from './auth';

@@ -30,6 +30,24 @@ const emailSchema = z
 
 const displayNameSchema = z.string().trim().min(1).max(100);
 
+/**
+ * The ONE shared password policy for every surface that sets a password:
+ * registration, password-reset completion, and authenticated password change
+ * (Sprint 17). All three parse through this exact schema, so the policy can
+ * never drift between routes. Change it here or nowhere.
+ */
+export const newPasswordSchema = z
+  .string()
+  .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+  .max(MAX_PASSWORD_LENGTH);
+
+/**
+ * A password submitted for VERIFICATION (login, current-password confirmation).
+ * Only shape-checked — never re-validated against the policy, so accounts
+ * created under an older policy can still authenticate.
+ */
+const submittedPasswordSchema = z.string().min(1).max(MAX_PASSWORD_LENGTH);
+
 /** POST /v1/auth/register request body.
  *
  * `invitationToken` is OPTIONAL (Sprint 9): when present, the new account also
@@ -41,10 +59,7 @@ const displayNameSchema = z.string().trim().min(1).max(100);
  */
 export const registerRequestSchema = z.object({
   email: emailSchema,
-  password: z
-    .string()
-    .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
-    .max(MAX_PASSWORD_LENGTH),
+  password: newPasswordSchema,
   displayName: displayNameSchema,
   /** Optional raw invitation token to accept during registration. */
   invitationToken: z.string().min(1).optional(),
@@ -54,7 +69,7 @@ export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 /** POST /v1/auth/login request body. Password length is not re-validated here. */
 export const loginRequestSchema = z.object({
   email: emailSchema,
-  password: z.string().min(1).max(MAX_PASSWORD_LENGTH),
+  password: submittedPasswordSchema,
 });
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
@@ -206,3 +221,102 @@ export const emailVerificationCompleteResponseSchema = z.object({
 export type EmailVerificationCompleteResponse = z.infer<
   typeof emailVerificationCompleteResponseSchema
 >;
+
+/* -------------------------------------------------------------------------- */
+/* Password recovery & credential management (Sprint 17)                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * POST /v1/auth/password-recovery/request request body (public). Takes only an
+ * email; the endpoint is enumeration-safe by contract — the response below is
+ * IDENTICAL whether or not an account exists for the address.
+ */
+export const passwordRecoveryRequestSchema = z.object({
+  email: emailSchema,
+});
+export type PasswordRecoveryRequest = z.infer<
+  typeof passwordRecoveryRequestSchema
+>;
+
+/**
+ * POST /v1/auth/password-recovery/request response body. Deliberately carries
+ * NO information: `accepted` is always true, for known and unknown emails
+ * alike. It never reveals whether a user exists, whether an email was sent, or
+ * whether a token row was created. The raw reset token and its hash are never
+ * part of any response — the token travels only in the emailed link.
+ */
+export const passwordRecoveryRequestResponseSchema = z.object({
+  accepted: z.literal(true),
+});
+export type PasswordRecoveryRequestResponse = z.infer<
+  typeof passwordRecoveryRequestResponseSchema
+>;
+
+/**
+ * POST /v1/auth/password-recovery/complete request body (public; possession of
+ * the emailed raw token IS the proof). The token travels in the body — never a
+ * backend URL path or query string — so it cannot reach API access logs. The
+ * new password parses through the SAME shared policy as registration.
+ */
+export const passwordRecoveryCompleteRequestSchema = z.object({
+  token: z.string().min(1).max(512),
+  newPassword: newPasswordSchema,
+});
+export type PasswordRecoveryCompleteRequest = z.infer<
+  typeof passwordRecoveryCompleteRequestSchema
+>;
+
+/**
+ * POST /v1/auth/password-recovery/complete response body. A completed reset
+ * NEVER signs the user in: no tokens, no session, no cookie. The client is
+ * expected to direct the user to the login form.
+ */
+export const passwordRecoveryCompleteResponseSchema = z.object({
+  reset: z.literal(true),
+});
+export type PasswordRecoveryCompleteResponse = z.infer<
+  typeof passwordRecoveryCompleteResponseSchema
+>;
+
+/**
+ * POST /v1/auth/change-password request body (Bearer-authenticated). The
+ * current password is MANDATORY re-authentication; the new password parses
+ * through the shared policy.
+ */
+export const changePasswordRequestSchema = z.object({
+  currentPassword: submittedPasswordSchema,
+  newPassword: newPasswordSchema,
+});
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
+
+/**
+ * POST /v1/auth/change-password response body. The caller's own session stays
+ * active (their bearer token keeps working); every OTHER session and its
+ * refresh tokens are revoked server-side.
+ */
+export const changePasswordResponseSchema = z.object({
+  success: z.literal(true),
+});
+export type ChangePasswordResponse = z.infer<typeof changePasswordResponseSchema>;
+
+/**
+ * POST /v1/auth/change-email request body (Bearer-authenticated). The current
+ * password is MANDATORY re-authentication. The new email is normalized
+ * server-side; a duplicate normalized email is rejected with the same 409 as
+ * registration (an intentionally allowed disclosure for the authenticated flow).
+ */
+export const changeEmailRequestSchema = z.object({
+  currentPassword: submittedPasswordSchema,
+  newEmail: emailSchema,
+});
+export type ChangeEmailRequest = z.infer<typeof changeEmailRequestSchema>;
+
+/**
+ * POST /v1/auth/change-email response body: the updated current user. After a
+ * change, `emailVerified` is always false — the previous verification does not
+ * carry over; a fresh verification email is sent to the NEW address.
+ */
+export const changeEmailResponseSchema = z.object({
+  user: authUserSchema,
+});
+export type ChangeEmailResponse = z.infer<typeof changeEmailResponseSchema>;

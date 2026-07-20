@@ -15,12 +15,28 @@ These are intentional non-goals, not bugs:
 - **No billing.** No Stripe, checkout, billing portal, subscription, invoice, or
   payment. Plans (Free/Pro/Business) are fixed internal **demo** plans changed
   only via the demo endpoint.
-- **No extended auth.** No OAuth/social login, MFA/passkeys, or password
-  reset/recovery. Email verification EXISTS (Sprint 16) but is **advisory
-  only**: nothing gates login, organization access, invitations, projects, or
-  API keys on the verified flag. Enforcement is a future, deliberate change
-  (the extension point is the `emailVerified` field on the current-user
-  contract plus `users.email_verified_at`).
+- **No extended auth.** No OAuth/social login, MFA/passkeys, device-management
+  UI, account deletion, data export, or support-admin recovery. Password
+  recovery and authenticated password/email change EXIST (Sprint 17; see
+  [credential-management.md](credential-management.md)). Email verification
+  EXISTS (Sprint 16) but is **advisory only**: nothing gates login,
+  organization access, invitations, projects, or API keys on the verified flag.
+  Enforcement is a future, deliberate change (the extension point is the
+  `emailVerified` field on the current-user contract plus
+  `users.email_verified_at`).
+- **Registration de-enumeration is partial.** Public registration still
+  returns a distinguishable `409` for an existing email; Sprint 17 bounded it
+  with a per-email-digest rate limit and a durable probe event. Full response
+  uniformity requires a verification-first registration redesign (ORG-PR-030
+  remains open, materially advanced). The password-recovery request endpoint,
+  by contrast, is fully enumeration-safe — including under internal account
+  lookup, persistence, mail, and security-event failures. Two accepted consequences
+  of that design: recovery-request security events are anonymous and not
+  account-linked (the event schema has no subject field, and actor
+  attribution is never overloaded), and the request path has a documented
+  residual **timing** difference (existing accounts trigger a synchronous
+  email send) bounded by rate limits — see
+  [credential-management.md](credential-management.md).
 - **Production email delivery is unproven.** Sprint 16 added a production
   SMTP adapter (nodemailer transport; fail-closed config; see
   [email-and-verification.md](email-and-verification.md)), and production can
@@ -69,8 +85,8 @@ These are intentional non-goals, not bugs:
   refuses known-bad and obviously weak secrets under `NODE_ENV=production`,
   but **config validation does not prove real entropy** — a determined operator
   can still supply a weak-but-passing value. External email delivery is
-  unvalidated, and no password recovery or backup/PITR/restore system exists.
-  The project remains **not ready for staging or production** (see the
+  unvalidated, and no backup/PITR/restore system exists. The project remains
+  **not ready for staging or production** (see the
   [production-readiness audit](production-readiness/README.md)).
 
 ## Testing and validation limitations

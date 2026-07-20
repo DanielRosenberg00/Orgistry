@@ -73,7 +73,26 @@ Phase 6: End-to-End Verification & Security Review
   email verification, resend. Closes ORG-PR-002, 024, 048; unblocks 004. Deps:
   DG-1. Non-goals: MFA, OAuth. Exit: live send to external inbox in staging;
   verification integration tests.
-- **Sprint 17 — Recovery & credential management.** Password reset, password/email
+- **Sprint 17 — Recovery & credential management.** ✅ **Repository scope
+  COMPLETE (2026-07-20)** — see
+  [sprint-17-artifact-package.md](sprint-17-artifact-package.md). Delivered:
+  enumeration-safe password recovery (dedicated hash-only
+  `password_reset_tokens` table, `FOR UPDATE` race-safe single-use completion,
+  full session/refresh revocation, fragment-transported reset links),
+  current-password-gated password change (keep-current-session policy) and
+  email change (verification reset + re-issue), the shared password policy,
+  registration per-email throttling + probe events, and the web-demo
+  forgot/reset/account-security flows. **Closed: ORG-PR-004, ORG-PR-039.
+  ORG-PR-030 remains OPEN (materially advanced):** the duplicate-email 409 is
+  throttled and observed but still distinguishable; full closure requires a
+  verification-first registration redesign. Exit criterion met:
+  reset/change integration tests incl. expiry/reuse/enumeration
+  (`password-recovery.integration.test.ts` + route suites). **Sequencing
+  note:** because ORG-PR-030 is still open, a focused account-lifecycle
+  follow-up sprint that closes it (the verification-first registration
+  redesign) precedes Sprint 18 — the Sprint 17 spec requires the
+  account-lifecycle delta to be closed before broad edge hardening.
+- *(original Sprint 17 plan)* Password reset, password/email
   change, register de-enumeration. Closes ORG-PR-004, 039, 030. Deps: Sprint 16.
   Exit: reset/change integration tests incl. expiry/reuse/enumeration.
 

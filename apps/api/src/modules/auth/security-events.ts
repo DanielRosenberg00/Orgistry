@@ -29,6 +29,24 @@ export const SECURITY_EVENT_TYPES = {
   emailVerificationRequested: 'auth.email_verification_requested',
   emailVerificationSucceeded: 'auth.email_verification_succeeded',
   emailVerificationFailed: 'auth.email_verification_failed',
+  // ----- Credential lifecycle (Sprint 17) -----
+  // Metadata is minimal and sanitized: NEVER a password, hash, raw token,
+  // token hash, or reset URL. Requested/completed attribute to the resolved
+  // user; rejected completions attribute to no user (the token is unproven),
+  // recording only a coarse `reason`.
+  passwordResetRequested: 'auth.password_reset_requested',
+  passwordResetCompleted: 'auth.password_reset_completed',
+  passwordResetRejected: 'auth.password_reset_rejected',
+  passwordChanged: 'auth.password_changed',
+  passwordChangeRejected: 'auth.password_change_rejected',
+  emailChanged: 'auth.email_changed',
+  emailChangeRejected: 'auth.email_change_rejected',
+  // Public registration hit an existing normalized email. Attributed to an
+  // ANONYMOUS actor with a null user id — the caller is unproven, and the
+  // event must never read as an action by (or a reference to) the existing
+  // account. Metadata is a coarse reason only: no email, no email digest.
+  // Named for what HAPPENED, not for a suppression that does not occur.
+  registrationDuplicateEmail: 'auth.registration_duplicate_email',
 } as const;
 
 export type SecurityEventType =

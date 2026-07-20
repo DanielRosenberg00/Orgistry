@@ -46,17 +46,24 @@ export interface RegistrationInvitations {
 }
 
 /**
- * Narrow port for the automatic post-registration verification email
- * (Sprint 16). BEST-EFFORT BY CONTRACT: implementations must never throw —
- * registration, personal-workspace creation, session issuance, and invitation
- * acceptance have already committed by the time this runs, and an email
- * outage must not undo any of it. A failed delivery is recorded by the
- * implementation and the user can resend from the authenticated endpoint.
- * OPTIONAL on the auth service: when absent, registration behaves exactly as
- * before Sprint 16 (used by suites that don't exercise email).
+ * Narrow port for verification emails the auth service triggers after its own
+ * transactions commit: the automatic post-registration email (Sprint 16) and
+ * the post-email-change email to the NEW address (Sprint 17). BEST-EFFORT BY
+ * CONTRACT: implementations must never throw — the triggering operation has
+ * already committed by the time either method runs, and an email outage must
+ * not undo it. A failed delivery is recorded by the implementation and the
+ * user can resend from the authenticated endpoint. OPTIONAL on the auth
+ * service: when absent, registration and email change behave identically
+ * except that no verification email goes out (used by suites that don't
+ * exercise email).
  */
 export interface RegistrationEmailVerification {
   sendInitialVerificationEmail(
+    user: { id: string; email: string },
+    ctx: RequestContext,
+  ): Promise<void>;
+  /** Same never-throw contract; `user.email` is the already-committed NEW address. */
+  sendEmailChangeVerificationEmail(
     user: { id: string; email: string },
     ctx: RequestContext,
   ): Promise<void>;
@@ -201,6 +208,37 @@ export interface ListSessionsParams {
   cursor: { createdAtMs: number; id: string } | null;
 }
 
+/**
+ * Inputs for the transactional authenticated password change (Sprint 17).
+ * `currentSessionId` comes from the server-side authentication context (the
+ * session the presented access token is bound to) — NEVER from client input.
+ */
+export interface ChangePasswordParams {
+  userId: string;
+  /** Argon2id hash of the new password. The raw password is never persisted. */
+  newPasswordHash: string;
+  /** The caller's session — the ONLY session that survives the change. */
+  currentSessionId: string;
+  /** Internal revocation reason stamped on the revoked rows. */
+  revokeReason: string;
+  now: Date;
+}
+
+/**
+ * Inputs for the transactional authenticated email change (Sprint 17). The
+ * update clears `email_verified_at` and invalidates outstanding verification
+ * tokens in the SAME transaction, so a committed change can never leave the
+ * old address's verification (or its tokens) usable.
+ */
+export interface ChangeEmailParams {
+  userId: string;
+  /** The new email as the user typed it (display/contact form). */
+  email: string;
+  /** Normalized form; uniqueness is enforced on this. */
+  normalizedEmail: string;
+  now: Date;
+}
+
 /** Values for inserting a sanitized security event. */
 export interface NewSecurityEvent {
   userId: string | null;
@@ -263,6 +301,25 @@ export interface AuthRepository {
    * detect a further page without a second query.
    */
   listActiveSessionsForUser(params: ListSessionsParams): Promise<SessionRow[]>;
+
+  // ----- Credential management (Sprint 17) -----
+  /**
+   * Atomically replace the user's password hash and revoke every OTHER active
+   * session (and the refresh tokens of every session except the current one).
+   * Implementations MUST run all writes in one transaction so a failure can
+   * never leave a new password alongside un-revoked foreign sessions.
+   */
+  changePasswordKeepingCurrentSession(
+    params: ChangePasswordParams,
+  ): Promise<void>;
+  /**
+   * Atomically replace the user's email (raw + normalized), clear
+   * `email_verified_at`, and invalidate every unused email-verification token.
+   * A duplicate normalized email surfaces as the same conflict error as
+   * registration (the unique index is the authoritative guard). Returns the
+   * updated row.
+   */
+  changeEmail(params: ChangeEmailParams): Promise<UserRow>;
 
   insertSecurityEvent(values: NewSecurityEvent): Promise<void>;
 }

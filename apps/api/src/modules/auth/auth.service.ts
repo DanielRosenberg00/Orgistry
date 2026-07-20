@@ -13,6 +13,10 @@ import type { SessionRow, UserRow } from '@orgistry/db';
 import type {
   AuthSessionResponse,
   AuthUser,
+  ChangeEmailRequest,
+  ChangeEmailResponse,
+  ChangePasswordRequest,
+  ChangePasswordResponse,
   LoginRequest,
   RefreshResponse,
   RegisterRequest,
@@ -31,8 +35,11 @@ import type { RateLimiter } from '../../lib/rate-limit';
 import { createNoopRateLimiter } from '../../lib/rate-limit';
 import { personalWorkspaceSlugBase } from '../organization/organization.provisioning';
 import {
-  invalidCredentialsError,
+  currentPasswordIncorrectError,
   emailAlreadyRegisteredError,
+  emailUnchangedError,
+  invalidCredentialsError,
+  passwordUnchangedError,
   rateLimitedError,
   sessionNotFoundError,
   unauthorizedError,
@@ -55,6 +62,7 @@ const REVOKE_REASONS = {
   reuseDetected: 'refresh_token_reuse_detected',
   logout: 'logout',
   sessionRevoked: 'session_revoked_by_user',
+  passwordChanged: 'password_changed',
 } as const;
 
 /** Per-bucket auth rate limits (from `config.rateLimit.auth`). */
@@ -63,8 +71,12 @@ export interface AuthRateLimits {
   loginPerIpMax: number;
   loginPerEmailMax: number;
   registerPerIpMax: number;
+  /** Keyed on a digest of the normalized email — bounds duplicate probing. */
+  registerPerEmailMax: number;
   refreshPerSessionMax: number;
   refreshPerIpMax: number;
+  changePasswordPerUserMax: number;
+  changeEmailPerUserMax: number;
 }
 
 export interface AuthServiceOptions {
@@ -134,6 +146,26 @@ export interface AuthService {
     targetSessionId: string,
     ctx: RequestContext,
   ): Promise<{ revokedCurrent: boolean }>;
+  /**
+   * Authenticated password change (Sprint 17). Requires the current password;
+   * keeps the CALLER's session alive and revokes every other session (and the
+   * refresh tokens of the revoked sessions) transactionally.
+   */
+  changePassword(
+    accessToken: string,
+    input: ChangePasswordRequest,
+    ctx: RequestContext,
+  ): Promise<ChangePasswordResponse>;
+  /**
+   * Authenticated email change (Sprint 17, direct-change policy). Requires the
+   * current password; commits the new address with verification cleared, then
+   * best-effort sends a fresh verification email to the NEW address.
+   */
+  changeEmail(
+    accessToken: string,
+    input: ChangeEmailRequest,
+    ctx: RequestContext,
+  ): Promise<ChangeEmailResponse>;
 }
 
 /**
@@ -208,8 +240,11 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
     loginPerIpMax: Number.MAX_SAFE_INTEGER,
     loginPerEmailMax: Number.MAX_SAFE_INTEGER,
     registerPerIpMax: Number.MAX_SAFE_INTEGER,
+    registerPerEmailMax: Number.MAX_SAFE_INTEGER,
     refreshPerSessionMax: Number.MAX_SAFE_INTEGER,
     refreshPerIpMax: Number.MAX_SAFE_INTEGER,
+    changePasswordPerUserMax: Number.MAX_SAFE_INTEGER,
+    changeEmailPerUserMax: Number.MAX_SAFE_INTEGER,
   };
 
   /** Persist a sanitized security event. Best-effort context, never secrets. */
@@ -391,10 +426,42 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
 
       const normalizedEmail = normalizeEmail(input.email);
 
+      // Per-email bucket (Sprint 17 registration anti-enumeration): counted
+      // BEFORE the user lookup and identical for existing and unknown emails,
+      // so the limiter itself is not an existence oracle. It bounds how fast
+      // one address can be probed through registration regardless of the
+      // caller's IP pool. The email is hashed into the key (no raw email in
+      // Redis), matching the login limiter's construction.
+      await enforceRateLimit(
+        `rl:register:email:${hashOpaqueToken(normalizedEmail)}`,
+        limits.registerPerEmailMax,
+        'register_per_email',
+        ctx,
+      );
+
       // Friendly pre-check; the unique index is the authoritative guard for the
       // concurrent case (the repo maps a violation to the same conflict error).
+      // The 409 still discloses that the address is registered — an accepted
+      // residual of the current synchronous registration contract (register
+      // returns a live session, so a duplicate cannot be faked as success).
+      // See the registration de-enumeration note in docs/credential-management.md;
+      // the durable event below makes such probing visible to review.
+      //
+      // Event attribution: the caller is UNAUTHENTICATED and unproven, so the
+      // event is anonymous with a null user id (`user_id` is attribution — a
+      // probe must never read as an action by the account owner) and carries
+      // no email or email-derived value. Request context (IP/UA/request id)
+      // rides on the event row's standard sanitized fields.
       const existing = await repo.findUserByNormalizedEmail(normalizedEmail);
       if (existing) {
+        await writeSecurityEvent({
+          userId: null,
+          sessionId: null,
+          actorType: 'anonymous',
+          eventType: SECURITY_EVENT_TYPES.registrationDuplicateEmail,
+          metadata: { reason: 'duplicate_email' },
+          ctx,
+        });
         throw emailAlreadyRegisteredError();
       }
 
@@ -760,6 +827,171 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
       }
 
       return { revokedCurrent: target.id === currentSession.id };
+    },
+
+    async changePassword(accessToken, input, ctx) {
+      const { user, session } = await requireAuthenticatedSession(
+        accessToken,
+        ctx,
+      );
+
+      await enforceRateLimit(
+        `rl:change-password:user:${user.id}`,
+        limits.changePasswordPerUserMax,
+        'change_password_per_user',
+        ctx,
+      );
+
+      // Mandatory re-authentication: a hijacked browser tab must not be able
+      // to rotate the credential without knowing the current password.
+      const currentOk = await verifyPassword(
+        user.passwordHash,
+        input.currentPassword,
+      );
+      if (!currentOk) {
+        await writeSecurityEvent({
+          userId: user.id,
+          sessionId: session.id,
+          actorType: 'user',
+          eventType: SECURITY_EVENT_TYPES.passwordChangeRejected,
+          metadata: { reason: 'bad_current_password' },
+          ctx,
+        });
+        throw currentPasswordIncorrectError();
+      }
+
+      // Reuse rejection: verifying the NEW password against the EXISTING hash
+      // detects a no-op change without ever persisting anything new.
+      const sameAsCurrent = await verifyPassword(
+        user.passwordHash,
+        input.newPassword,
+      );
+      if (sameAsCurrent) {
+        await writeSecurityEvent({
+          userId: user.id,
+          sessionId: session.id,
+          actorType: 'user',
+          eventType: SECURITY_EVENT_TYPES.passwordChangeRejected,
+          metadata: { reason: 'password_unchanged' },
+          ctx,
+        });
+        throw passwordUnchangedError();
+      }
+
+      // Session policy: the session that PROVED the current password survives;
+      // every other session (and its refresh tokens) is revoked in the same
+      // transaction that swaps the hash. `session.id` comes from the verified
+      // access token — never from client input.
+      const newPasswordHash = await hashPassword(input.newPassword);
+      await repo.changePasswordKeepingCurrentSession({
+        userId: user.id,
+        newPasswordHash,
+        currentSessionId: session.id,
+        revokeReason: REVOKE_REASONS.passwordChanged,
+        now: clock.now(),
+      });
+
+      await writeSecurityEvent({
+        userId: user.id,
+        sessionId: session.id,
+        actorType: 'user',
+        eventType: SECURITY_EVENT_TYPES.passwordChanged,
+        metadata: { otherSessionsRevoked: true },
+        ctx,
+      });
+      return { success: true };
+    },
+
+    async changeEmail(accessToken, input, ctx) {
+      const { user, session } = await requireAuthenticatedSession(
+        accessToken,
+        ctx,
+      );
+
+      await enforceRateLimit(
+        `rl:change-email:user:${user.id}`,
+        limits.changeEmailPerUserMax,
+        'change_email_per_user',
+        ctx,
+      );
+
+      const normalizedEmail = normalizeEmail(input.newEmail);
+      if (normalizedEmail === user.normalizedEmail) {
+        throw emailUnchangedError();
+      }
+
+      // Mandatory re-authentication, checked BEFORE any existence lookup so an
+      // attacker with only a stolen access token cannot probe other accounts'
+      // emails through this endpoint's duplicate conflict.
+      const currentOk = await verifyPassword(
+        user.passwordHash,
+        input.currentPassword,
+      );
+      if (!currentOk) {
+        await writeSecurityEvent({
+          userId: user.id,
+          sessionId: session.id,
+          actorType: 'user',
+          eventType: SECURITY_EVENT_TYPES.emailChangeRejected,
+          metadata: { reason: 'bad_current_password' },
+          ctx,
+        });
+        throw currentPasswordIncorrectError();
+      }
+
+      // Direct-change policy (Sprint 17): commit the new address immediately
+      // with verification CLEARED; the account stays usable under the advisory
+      // verification model. The repository transaction also invalidates every
+      // outstanding verification token, so nothing minted for the old address
+      // survives. A duplicate normalized email surfaces the same 409 as
+      // registration — an intentionally allowed disclosure: the caller has
+      // re-proved the account password, and the same signal is already
+      // available through registration itself.
+      let updated: UserRow;
+      try {
+        updated = await repo.changeEmail({
+          userId: user.id,
+          email: input.newEmail.trim(),
+          normalizedEmail,
+          now: clock.now(),
+        });
+      } catch (error) {
+        if (
+          error instanceof AppError &&
+          error.code === ERROR_CODES.EMAIL_ALREADY_REGISTERED
+        ) {
+          await writeSecurityEvent({
+            userId: user.id,
+            sessionId: session.id,
+            actorType: 'user',
+            eventType: SECURITY_EVENT_TYPES.emailChangeRejected,
+            metadata: { reason: 'duplicate_email' },
+            ctx,
+          });
+        }
+        throw error;
+      }
+
+      await writeSecurityEvent({
+        userId: user.id,
+        sessionId: session.id,
+        actorType: 'user',
+        eventType: SECURITY_EVENT_TYPES.emailChanged,
+        metadata: { verificationCleared: true },
+        ctx,
+      });
+
+      // BEST-EFFORT fresh verification for the NEW address, after commit —
+      // same consistency model as the post-registration email: a mail outage
+      // never rolls back the committed change; the user can resend from the
+      // authenticated endpoint (the account remains usable unverified).
+      if (emailVerification) {
+        await emailVerification.sendEmailChangeVerificationEmail(
+          { id: updated.id, email: updated.email },
+          ctx,
+        );
+      }
+      return { user: toAuthUser(updated) };
     },
   };
 }

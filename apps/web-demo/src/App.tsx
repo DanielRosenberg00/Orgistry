@@ -4,6 +4,9 @@ import { AppShell } from './components/AppShell';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { AccountSecurityPage } from './pages/AccountSecurityPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { MembersPage } from './pages/MembersPage';
 import { InvitationsPage } from './pages/InvitationsPage';
@@ -17,6 +20,9 @@ import { NotFoundPage } from './pages/NotFoundPage';
  * Route table.
  *
  *   /auth/login, /auth/register   — public auth screens
+ *   /auth/forgot-password         — public password-recovery request page
+ *   /auth/reset-password          — public reset-completion page (target of
+ *                                   the emailed link)
  *   /auth/verify-email            — public email-verification completion page
  *                                   (target of the emailed link; works signed
  *                                   in or out)
@@ -33,6 +39,8 @@ export function App() {
       <Route path="/" element={<Navigate to="/app" replace />} />
       <Route path="/auth/login" element={<LoginPage />} />
       <Route path="/auth/register" element={<RegisterPage />} />
+      <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
       <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
 
       <Route element={<ProtectedRoute />}>
@@ -45,6 +53,7 @@ export function App() {
           <Route path="plan" element={<PlanPage />} />
           <Route path="api-keys" element={<ApiKeysPage />} />
           <Route path="audit" element={<AuditPage />} />
+          <Route path="account" element={<AccountSecurityPage />} />
         </Route>
       </Route>
 

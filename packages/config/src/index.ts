@@ -63,6 +63,11 @@ export interface Config {
     /** Raw verification token lifetime in seconds. */
     readonly ttlSeconds: number;
   };
+  /** Password-recovery behavior knobs (Sprint 17). */
+  readonly passwordRecovery: {
+    /** Raw reset token lifetime in seconds. Short-lived by design. */
+    readonly ttlSeconds: number;
+  };
   readonly auth: {
     readonly jwtSecret: string;
     readonly cookieSecure: boolean;
@@ -93,8 +98,11 @@ export interface Config {
       readonly loginPerIpMax: number;
       readonly loginPerEmailMax: number;
       readonly registerPerIpMax: number;
+      readonly registerPerEmailMax: number;
       readonly refreshPerSessionMax: number;
       readonly refreshPerIpMax: number;
+      readonly changePasswordPerUserMax: number;
+      readonly changeEmailPerUserMax: number;
     };
     /**
      * Email-verification buckets (Sprint 16). Shares the auth fixed window:
@@ -106,6 +114,18 @@ export interface Config {
       readonly requestPerUserMax: number;
       readonly requestPerIpMax: number;
       readonly completePerIpMax: number;
+    };
+    /**
+     * Password-recovery buckets (Sprint 17). Shares the auth fixed window.
+     * Request is public (per IP + per email digest); completion is public
+     * (per IP + per token-derived internal key).
+     */
+    readonly passwordRecovery: {
+      readonly windowSeconds: number;
+      readonly requestPerIpMax: number;
+      readonly requestPerEmailMax: number;
+      readonly completePerIpMax: number;
+      readonly completePerTokenMax: number;
     };
     /** External API rate limits (per key, per organization). */
     readonly external: {
@@ -179,6 +199,9 @@ function toConfig(env: Env): Config {
     emailVerification: {
       ttlSeconds: env.EMAIL_VERIFICATION_TTL_SECONDS,
     },
+    passwordRecovery: {
+      ttlSeconds: env.PASSWORD_RESET_TTL_SECONDS,
+    },
     auth: {
       jwtSecret: env.JWT_SECRET,
       cookieSecure: env.COOKIE_SECURE,
@@ -203,14 +226,26 @@ function toConfig(env: Env): Config {
         loginPerIpMax: env.RATE_LIMIT_LOGIN_PER_IP_MAX,
         loginPerEmailMax: env.RATE_LIMIT_LOGIN_PER_EMAIL_MAX,
         registerPerIpMax: env.RATE_LIMIT_REGISTER_PER_IP_MAX,
+        registerPerEmailMax: env.RATE_LIMIT_REGISTER_PER_EMAIL_MAX,
         refreshPerSessionMax: env.RATE_LIMIT_REFRESH_PER_SESSION_MAX,
         refreshPerIpMax: env.RATE_LIMIT_REFRESH_PER_IP_MAX,
+        changePasswordPerUserMax: env.RATE_LIMIT_CHANGE_PASSWORD_PER_USER_MAX,
+        changeEmailPerUserMax: env.RATE_LIMIT_CHANGE_EMAIL_PER_USER_MAX,
       },
       emailVerification: {
         windowSeconds: env.RATE_LIMIT_AUTH_WINDOW_SECONDS,
         requestPerUserMax: env.RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_PER_USER_MAX,
         requestPerIpMax: env.RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_PER_IP_MAX,
         completePerIpMax: env.RATE_LIMIT_EMAIL_VERIFICATION_COMPLETE_PER_IP_MAX,
+      },
+      passwordRecovery: {
+        windowSeconds: env.RATE_LIMIT_AUTH_WINDOW_SECONDS,
+        requestPerIpMax: env.RATE_LIMIT_PASSWORD_RECOVERY_REQUEST_PER_IP_MAX,
+        requestPerEmailMax:
+          env.RATE_LIMIT_PASSWORD_RECOVERY_REQUEST_PER_EMAIL_MAX,
+        completePerIpMax: env.RATE_LIMIT_PASSWORD_RECOVERY_COMPLETE_PER_IP_MAX,
+        completePerTokenMax:
+          env.RATE_LIMIT_PASSWORD_RECOVERY_COMPLETE_PER_TOKEN_MAX,
       },
       external: {
         windowSeconds: env.RATE_LIMIT_EXTERNAL_WINDOW_SECONDS,

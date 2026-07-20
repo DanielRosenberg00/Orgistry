@@ -9,7 +9,11 @@ import { defineConfig } from 'vitest/config';
 // use the `*.integration.test.ts` suffix and are excluded from the default run.
 export default defineConfig({
   test: {
-    include: ['packages/*/src/**/*.test.ts', 'apps/api/src/**/*.test.ts'],
+    include: [
+      'packages/*/src/**/*.test.ts',
+      'apps/api/src/**/*.test.ts',
+      'tooling/**/*.test.ts',
+    ],
     exclude: ['**/node_modules/**', '**/dist/**', '**/*.integration.test.ts'],
     server: {
       deps: {

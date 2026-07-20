@@ -29,6 +29,22 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > blockers remain open (ORG-PR-001/002/004/005/006); the repository is still
 > **not ready for staging or production** — sprint completion is not launch
 > clearance.
+>
+> **Post-audit status (Sprint 17, 2026-07-20): Sprint 17 is COMPLETE** in its
+> repository scope. ORG-PR-004 and ORG-PR-039 are closed (password recovery
+> with full session/refresh revocation; current-password-gated password and
+> email change; lifecycle-tested incl. the concurrent reset-completion race);
+> ORG-PR-030 is **materially advanced but still open** (registration
+> duplicate-email 409 is throttled per email digest and recorded as a probe
+> event, but remains distinguishable — full closure needs a
+> verification-first registration redesign). See
+> [docs/credential-management.md](../credential-management.md) and
+> [sprint-17-artifact-package.md](sprint-17-artifact-package.md). Four P1
+> blockers remain open (ORG-PR-001/002/005/006); the repository is still
+> **not ready for staging or production**. Because ORG-PR-030 stays open, the
+> recommended next work is a **focused account-lifecycle follow-up that
+> closes ORG-PR-030** (verification-first registration) **before Sprint 18 —
+> Edge and Application Security Hardening**.
 
 ## Audit context
 
@@ -58,6 +74,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-15-decisions.md](sprint-15-decisions.md) | Decision-gate record (DG-1…DG-5) as of Sprint 15. |
 | [sprint-15-artifact-package.md](sprint-15-artifact-package.md) | The Sprint 15 closing artifact (production config guard). |
 | [sprint-16-artifact-package.md](sprint-16-artifact-package.md) | The Sprint 16 closing artifact (production email + email verification). |
+| [sprint-17-artifact-package.md](sprint-17-artifact-package.md) | The Sprint 17 closing artifact (password recovery + credential management). |
 
 ## Source-of-truth hierarchy
 

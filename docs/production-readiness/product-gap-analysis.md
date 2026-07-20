@@ -11,16 +11,16 @@ not implemented**, **Explicitly deferred**, **No longer applicable**.
 
 | Capability | Status | Evidence | Divergence / production impact | Findings |
 | --- | --- | --- | --- | --- |
-| Registration | Implemented | `auth.routes.ts POST /v1/auth/register`; Argon2id (`password.ts`) | Enumeration oracle on register | ORG-PR-030 |
+| Registration | Implemented | `auth.routes.ts POST /v1/auth/register`; Argon2id (`password.ts`) | Enumeration oracle on register — throttled + evented since S17, 409 still distinguishable | ORG-PR-030 (open, advanced) |
 | Login | Implemented | `POST /v1/auth/login`; uniform error + dummy-hash timing | Fail-open limits under Redis outage | ORG-PR-009 |
 | Logout | Implemented | `POST /v1/auth/logout`; revokes session + refresh tokens | — | — |
 | Refresh / rotation | Implemented | `auth.repo.ts rotateRefreshToken` (txn + `FOR UPDATE`) | Benign double-refresh forces logout | ORG-PR-050 |
 | Sessions (list/revoke) | Implemented | `GET /v1/auth/sessions`, `DELETE …/:id` | — | — |
 | Email verification | **Implemented (S16; advisory)** | `email-verification.{service,repo,routes}.ts`; hash-only single-use tokens; transactional `FOR UPDATE` completion; web flow | Advisory only — nothing gated on the flag yet; external delivery unvalidated | ORG-PR-024 closed; ORG-PR-002 |
 | Resend verification | Implemented (S16) | same authenticated request endpoint; resend invalidates prior unused tokens | — | ORG-PR-024 closed |
-| Password recovery | **Documented but not implemented** | no route/service/token table (grep) | Permanent lockout risk | ORG-PR-004 |
-| Password change | Documented but not implemented | absent (grep) | Cannot rotate a password | ORG-PR-039 |
-| Email change | Documented but not implemented | absent (grep) | Cannot change email | ORG-PR-039 |
+| Password recovery | **Implemented (S17)** | `password-recovery.{service,repo,routes}.ts`; `password_reset_tokens` (hash-only, single-use, 1 h TTL); enumeration-safe request; `FOR UPDATE` completion revokes all sessions/refresh tokens; web flow | External delivery unvalidated; request-timing residual documented | ORG-PR-004 closed; ORG-PR-002 |
+| Password change | Implemented (S17) | `POST /v1/auth/change-password`; current-password re-auth; keep-current-session revocation policy | — | ORG-PR-039 closed |
+| Email change | Implemented (S17) | `POST /v1/auth/change-email`; current-password re-auth; verification reset + re-issue to new address | — | ORG-PR-039 closed |
 | Personal workspace | Implemented | `auth.repo.ts registerAccount` (txn) | Invariant unenforced at DB | ORG-PR-038 |
 | Team organizations | Implemented | `organization.repo.ts createTeamOrganization` | — | — |
 | Organization update | **Partially** | read/create exist; archive/suspend states inert (`organizations.ts status`) | No lifecycle transitions | (roadmap) |
@@ -51,11 +51,14 @@ not implemented**, **Explicitly deferred**, **No longer applicable**.
 The as-built matches the stated v1 scope closely — the docs are honest. Material
 divergences worth recording:
 
-1. **Account-lifecycle recovery remains incomplete.** Email verification
-   shipped in Sprint 16 (advisory; ORG-PR-024/048 closed), but password reset,
-   password change, and email change are still missing. Recovery is the
-   single largest remaining product gap for a real multi-user deployment
-   (ORG-PR-004/039; Sprint 17).
+1. **Account-lifecycle recovery is now complete (Sprint 17).** Email
+   verification shipped in Sprint 16 (advisory; ORG-PR-024/048 closed);
+   password reset, password change, and email change shipped in Sprint 17
+   (ORG-PR-004/039 closed — see
+   [credential-management.md](../credential-management.md)). The remaining
+   lifecycle divergences are registration de-enumeration (ORG-PR-030, open —
+   materially advanced) and the deliberately absent account
+   deletion/export (DG-3).
 2. **Organization lifecycle is modeled but inert.** `archived`/`suspended` states
    exist with no transition endpoint; the resolver already blocks non-active orgs.
 3. **API keys are read-only and non-rotatable.** No rotation/update/reveal; the

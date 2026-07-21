@@ -33,11 +33,19 @@ provider's own security (assessed as trust-boundary assumptions).
 ```
 
 - **B1** Internet → proxy: TLS, headers, global rate limiting (proxy is the
-  intended `trustProxy` hop — ORG-PR-010/011/012 live here).
+  intended `trustProxy` hop — ORG-PR-010/011/012 live here). *Sprint 19
+  (2026-07-21): the API now enforces its own security headers and a global
+  per-trusted-IP limit at this boundary — ORG-PR-010/011/012 closed.*
 - **B2** Proxy → API: the API assumes it is fronted; today it sets no `trustProxy`,
-  so per-IP controls degrade (ORG-PR-010).
+  so per-IP controls degrade (ORG-PR-010). *Sprint 19: closed — typed
+  `TRUST_PROXY` (`'false'` default | hop count | IP/CIDR list); with trust
+  disabled, `X-Forwarded-*` is ignored and `request.ip` is the socket peer, so
+  forwarded-header spoofing is impossible.*
 - **B3** API → PostgreSQL/Redis: single superuser today (ORG-PR-022); Redis
-  fail-open (ORG-PR-009).
+  fail-open (ORG-PR-009). *Sprint 19: ORG-PR-009 materially advanced —
+  sensitive buckets fail closed under the production-default
+  `RATE_LIMIT_FAILURE_MODE=closed`; the global bucket fails open by design;
+  alerting residual → ORG-PR-007.*
 - **B4** API → SMTP → invitee: currently Mailpit only (ORG-PR-002).
 - **B5** SPA ↔ API: cookie + CSRF-header + CORS allow-list; token in memory.
 
@@ -97,13 +105,53 @@ P-severity (which also weighs dependency position and effort).
 | T-MIG | Unsafe migration | A-AVAIL | operator | bad prod migration | transactional, additive | no rollback rehearsal | L | M | Low | ORG-PR-028 |
 | T-PRIV-DATA | Data-subject rights unmet | A-PII | operator/legal | export/delete request | soft-delete honored | no export/delete; retention unenforced | M | M | Medium | ORG-PR-025, 043, 015 |
 
+## Sprint 19 mitigation update (2026-07-21)
+
+The threat table above is the Sprint 14 audit baseline, preserved as recorded.
+The edge and application security hardening sprint changes the control column
+for the following threats (evidence in
+[sprint-19-artifact-package.md](sprint-19-artifact-package.md)):
+
+- **T-CRED** — per-IP rate-limit keys, logs, and audit/security-event IPs now
+  derive from `request.ip` under typed `TRUST_PROXY` (ORG-PR-010 closed), so
+  forwarded-header spoofing cannot rotate limiter identity; sensitive auth
+  buckets fail closed on Redis outage under the production default
+  (ORG-PR-009 materially advanced). Residual: distributed (many-IP) credential
+  stuffing is bounded per IP only, and there is no limiter-outage alerting
+  until ORG-PR-007.
+- **T-DOS** — a global fixed-window per-trusted-IP limit (default 300/60 s)
+  runs `onRequest` before route work, with `/health`, `/ready`, and CORS
+  preflight exempt (ORG-PR-012 closed); the global bucket fails open on Redis
+  outage by design. Residual: no pool/statement/lock timeouts (ORG-PR-021)
+  and per-IP bounding only against distributed abuse.
+- **T-INV** — `POST /v1/invitations/inspect` is now throttled per trusted IP
+  and per token-derived second-order digest (raw tokens never in Redis keys,
+  logs, or events); invitation create is limited per user and per org, accept
+  per user (ORG-PR-012/032 closed).
+- **T-AUDIT** — durable failed-auth `security_events` writes from the External
+  API are bounded per source IP per window; beyond the allowance (or on store
+  outage) the write is skipped and a sanitized warn log retains visibility
+  (ORG-PR-013 closed, DB-backed storm test). Residual: the unindexed org read
+  path (ORG-PR-014), missing retention (ORG-PR-015), and email PII in
+  metadata (ORG-PR-043) remain open.
+- **T-LOG** — inbound `x-request-id` is sanitized centrally (accepted format
+  `[A-Za-z0-9._-]{1,128}`, otherwise replaced with a generated `req_<uuid>`)
+  and a centralized pino redaction backstop covers credentials, tokens, and
+  secrets across header/body/config/error shapes (ORG-PR-033/052 closed).
+- **T-OPS** — `/ready` is coarse in production (ready/not-ready only,
+  per-check outcomes logged server-side) and shutdown is idempotent and
+  bounded by a 10 s force-exit timer (part of ORG-PR-052). Residual: no
+  metrics/alerts/incident process — ORG-PR-007/008/027 remain open.
+
 ## Highest residual risks (target profile)
 
 1. **T-CONF (Critical)** — production boot with dev-default secret / non-Secure
    cookie: enables T-TOKEN-FORGE. Closed by ORG-PR-003 (+006).
 2. **T-DEP / T-CI (High)** — unscanned dependencies + mutable CI actions.
 3. **T-CRED (High)** — brute-force window widened by fail-open limits and proxy IP
-   collapse.
+   collapse. *Sprint 19 (2026-07-21): both weaknesses resolved (ORG-PR-010
+   closed; production fails closed) — residual is distributed abuse bounded
+   per IP only and the missing limiter-outage alerting (ORG-PR-007).*
 4. **T-PRIV (High)** — Admin→Owner escalation pending a policy decision.
 5. **T-DBLOSS (High)** — no tested restore path.
 

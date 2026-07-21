@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigValidationError, loadConfig } from './index';
+import {
+  ConfigValidationError,
+  loadConfig,
+  TRUST_PROXY_MAX_HOPS,
+} from './index';
 
 // Every case builds its own explicit env record and passes it to `loadConfig`
 // directly — `process.env` is never read or mutated, so cases cannot leak
@@ -55,8 +59,86 @@ describe('loadConfig', () => {
     expect(config.api.port).toBe(3000);
     expect(config.redis.url).toBe('redis://localhost:6379');
     expect(config.mailpit.smtpPort).toBe(1025);
-    expect(config.rateLimit.max).toBe(100);
+    expect(config.rateLimit.max).toBe(300);
     expect(config.auth.cookieSecure).toBe(false);
+    // Sprint 19 edge defaults: no proxy trust, open failure mode outside
+    // production, HSTS lifetime present for the production header.
+    expect(config.api.trustProxy).toBe(false);
+    expect(config.rateLimit.failureMode).toBe('open');
+    expect(config.security.hstsMaxAgeSeconds).toBe(15_552_000);
+    expect(config.rateLimit.external.authFailEventsPerIpMax).toBe(10);
+    expect(config.rateLimit.invitations.inspectPerIpMax).toBe(30);
+    expect(config.rateLimit.mutations.orgCreatePerUserMax).toBe(10);
+  });
+
+  it('parses TRUST_PROXY into its typed forms', () => {
+    expect(loadConfig({ ...baseEnv(), TRUST_PROXY: 'false' }).api.trustProxy).toBe(false);
+    expect(loadConfig({ ...baseEnv(), TRUST_PROXY: '1' }).api.trustProxy).toBe(1);
+    expect(loadConfig({ ...baseEnv(), TRUST_PROXY: '2' }).api.trustProxy).toBe(2);
+    // The documented ceiling itself is accepted…
+    expect(
+      loadConfig({ ...baseEnv(), TRUST_PROXY: String(TRUST_PROXY_MAX_HOPS) }).api
+        .trustProxy,
+    ).toBe(TRUST_PROXY_MAX_HOPS);
+  });
+
+  it.each([
+    ['one above the documented maximum', String(TRUST_PROXY_MAX_HOPS + 1)],
+    ['a decimal hop count', '1.5'],
+    ['scientific notation', '1e3'],
+    ['a value above Number.MAX_SAFE_INTEGER', '9007199254740993'],
+    ['an extremely long numeric string', '9'.repeat(64)],
+  ])('rejects %s as a hop count', (_label, raw) => {
+    const issues = loadIssues({ ...baseEnv(), TRUST_PROXY: raw });
+    expect(issues.join('\n')).toContain('TRUST_PROXY');
+    expect(issues.join('\n')).toContain(`between 1 and ${TRUST_PROXY_MAX_HOPS}`);
+  });
+
+  it.each([
+    ['a single IPv4 address', '127.0.0.1', ['127.0.0.1']],
+    ['an IPv4 CIDR', '10.0.0.0/8', ['10.0.0.0/8']],
+    ['a single IPv6 address', '::1', ['::1']],
+    ['an IPv6 CIDR', '2001:db8::/32', ['2001:db8::/32']],
+    [
+      'a mixed IPv4/IPv6/CIDR list with spacing',
+      '10.0.0.0/8, 172.16.0.0/12, ::1, 2001:db8::/32, 192.0.2.7',
+      ['10.0.0.0/8', '172.16.0.0/12', '::1', '2001:db8::/32', '192.0.2.7'],
+    ],
+    ['edge prefixes 0 and 32 (IPv4)', '0.0.0.0/0,10.1.2.3/32', ['0.0.0.0/0', '10.1.2.3/32']],
+    ['edge prefix 128 (IPv6)', '2001:db8::1/128', ['2001:db8::1/128']],
+  ])('accepts %s as a semantic proxy list', (_label, raw, expected) => {
+    expect(loadConfig({ ...baseEnv(), TRUST_PROXY: raw }).api.trustProxy).toEqual(
+      expected,
+    );
+  });
+
+  it.each([
+    ['the literal true (unbounded trust)', 'true'],
+    ['zero hops', '0'],
+    ['a negative hop count', '-1'],
+    ['a hostname', 'localhost'],
+    ['a dotted hostname', 'proxy.internal'],
+    ['out-of-range IPv4 octets', '999.999.999.999'],
+    ['an IPv4 prefix above 32', '10.0.0.1/33'],
+    ['an IPv6 prefix above 128', '2001:db8::/129'],
+    ['ambiguous colon junk', '::::'],
+    ['an empty entry between commas', '10.0.0.0/8,,192.0.2.1'],
+    ['a trailing comma', '10.0.0.0/8,'],
+    ['a leading comma', ',10.0.0.0/8'],
+    ['a zero-padded prefix', '10.0.0.0/08'],
+    ['a CIDR with a hostname address', 'proxy.internal/8'],
+    ['a non-numeric prefix', '10.0.0.0/abc'],
+  ])('rejects %s at configuration load', (_label, raw) => {
+    const issues = loadIssues({ ...baseEnv(), TRUST_PROXY: raw });
+    expect(issues.join('\n')).toContain('TRUST_PROXY');
+  });
+
+  it('derives the rate-limit failure mode from the environment', () => {
+    expect(loadConfig(baseEnv()).rateLimit.failureMode).toBe('open');
+    expect(
+      loadConfig({ ...baseEnv(), RATE_LIMIT_FAILURE_MODE: 'closed' }).rateLimit
+        .failureMode,
+    ).toBe('closed');
   });
 
   it('distinguishes test mode from local development mode', () => {
@@ -179,6 +261,19 @@ describe('production configuration guard (NODE_ENV=production)', () => {
     expect(config.isProduction).toBe(true);
     expect(config.auth.cookieSecure).toBe(true);
     expect(config.auth.refreshCookie.secure).toBe(true);
+  });
+
+  it('defaults the rate-limit failure mode to closed in production', () => {
+    expect(loadConfig(productionEnv()).rateLimit.failureMode).toBe('closed');
+  });
+
+  it('rejects an explicit RATE_LIMIT_FAILURE_MODE=open in production', () => {
+    const issues = loadIssues({
+      ...productionEnv(),
+      RATE_LIMIT_FAILURE_MODE: 'open',
+    });
+    expect(issues.join('\n')).toContain('RATE_LIMIT_FAILURE_MODE');
+    expect(issues.join('\n')).toContain('fail closed');
   });
 
   it('rejects the known development-default JWT_SECRET', () => {

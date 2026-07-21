@@ -49,9 +49,10 @@ omits production concerns (see [known limitations](./known-limitations.md)).
   completion per-IP, password-recovery request per-IP/per-email-digest and
   completion per-IP/per-token-digest, password/email change per-user) and the
   external API (per-key, per-org). No raw email or token material enters a
-  limiter key — emails and tokens are digested first. They **fail open**: if
-  Redis is down, requests are allowed rather than blocked, so an outage never
-  breaks authentication.
+  limiter key — emails and tokens are digested first. Since Sprint 19 the
+  failure mode is configurable: sensitive limiters **fail closed in
+  production** (a Redis outage → `503 SERVICE_UNAVAILABLE`) and fail open in
+  development/test — see the edge-hardening section below.
 - **Session revocation.** Sessions can be listed and individually revoked;
   revoking the current session clears the refresh cookie. Reuse detection revokes
   sessions automatically.
@@ -218,6 +219,84 @@ omits production concerns (see [known limitations](./known-limitations.md)).
   [auth-foundation.md](auth-foundation.md), the authoritative design
   reference for this flow.
 
+## Edge and application hardening (Sprint 19)
+
+The full design and evidence live in
+[production-readiness/sprint-19-artifact-package.md](production-readiness/sprint-19-artifact-package.md).
+
+- **Trust boundary: typed proxy trust.** `TRUST_PROXY` (in `packages/config`)
+  controls whether forwarded headers are believed, applied at Fastify
+  construction (`apps/api/src/app.ts`). `'false'` (the default) means direct
+  exposure — forwarded headers are ignored and `request.ip` is the socket
+  peer; a positive integer is a trusted reverse-proxy hop count, accepted range
+  1–16 (use `1` for
+  one TLS-terminating proxy); a comma-separated proxy IP/CIDR list is also
+  accepted and validated semantically (real IPv4/IPv6 addresses via
+  `node:net`, CIDR prefixes 0–32/0–128; hostnames, malformed entries, and
+  empty list entries fail boot); the literal `'true'` is **rejected at boot**
+  (it would trust arbitrary client-supplied headers). `request.ip` is the single source of
+  client identity for rate-limit keys, request logs, audit IPs, and
+  security-event IPs. Misconfiguration risk: a too-high hop count lets clients
+  spoof their IP; a too-low one collapses everyone into the proxy IP.
+- **Security headers on every response.** Every API response (success, error
+  envelope, 404, CORS preflight) carries `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+  `Cross-Origin-Opener-Policy: same-origin`,
+  `Cross-Origin-Resource-Policy: same-origin`, and a restrictive
+  `Permissions-Policy`; `Strict-Transport-Security` only under
+  `NODE_ENV=production` AND a proxy-aware HTTPS request protocol (a forged
+  `X-Forwarded-Proto` on an untrusted connection never mints HSTS); `Cache-Control: no-store` on `/v1/auth/*` and
+  `/v1/invitations/*`. This is an API response policy, not a frontend CSP (SPA
+  CSP hardening remains a known limitation). CORS and CSRF are unchanged.
+- **Rate-limit architecture: global + route-specific.** One **global**
+  fixed-window bucket per trusted client IP (`RATE_LIMIT_MAX`, default 300 per
+  `RATE_LIMIT_WINDOW_SECONDS`, default 60) is evaluated before route-specific
+  work on every route except `/health`, `/ready`, and `OPTIONS` preflight; it
+  fails open by design (readiness takes the instance out of rotation).
+  Route-specific buckets key on the right dimension per surface: per trusted
+  IP, per user, per org, per key, or per digest. **No raw email, token, or key
+  material ever enters a Redis key** — invitation-inspect throttling, for
+  example, keys on `sha256(sha256(rawToken))`. Mutation buckets (org create,
+  project create, project update/delete, API-key create, demo plan change,
+  invitation create, member role change/removal) run **after** permission
+  checks; permission-first authorization, the uniform cross-tenant 404,
+  quotas, and entitlements are unchanged. Revokes (invitation, API key,
+  session) stay deliberately unthrottled: a revoked resource cannot be
+  revoked twice, so their durable writes are capped by creation — which is
+  itself throttled.
+- **Redis failure policy.** `RATE_LIMIT_FAILURE_MODE` (`open`|`closed`; unset
+  derives production→`closed`, development/test→`open`; production **refuses**
+  an explicit `open` at boot). In `closed` mode a Redis outage makes sensitive
+  rate-limited endpoints (login, refresh, registration, password recovery,
+  email verification, invitation inspect/accept/create, the external API
+  buckets, the mutation buckets) reject with a generic
+  `503 SERVICE_UNAVAILABLE` (request id included, no Redis details). Store
+  failures are logged (sanitized). Alerting/monitoring on this state does not
+  exist yet.
+- **Bounded failed-auth event writes.** Failed external API-key
+  authentication (the uniform 401 family) writes durable `security_events`
+  rows only within an allowance per source IP
+  (`RATE_LIMIT_EXTERNAL_AUTH_FAIL_EVENTS_PER_IP_MAX`, default 10 per window);
+  beyond it — or if Redis is down — the durable write is skipped and a
+  sanitized log line retains visibility. The 401 response contract is
+  unchanged; valid keys are unaffected.
+- **Logger redaction backstop.** All process loggers are built by
+  `apps/api/src/lib/logging.ts` (`buildLoggerOptions`) with pino redact paths
+  covering authorization/cookie headers, the configured CSRF header,
+  passwords, tokens, hashes, API-key and SMTP/JWT secrets across
+  header/body/config/error shapes (censor `[REDACTED]`). It is
+  defense-in-depth behind the standing policy of never logging request
+  bodies/credentials; being path-based, deeply nested or novel keys are not
+  caught.
+- **Request-id sanitization.** An inbound `x-request-id` is accepted only if
+  it matches `[A-Za-z0-9._-]{1,128}`; anything else is replaced by a
+  server-generated `req_<uuid>` before any logging. See
+  [api-conventions.md](api-conventions.md).
+- **Coarse production readiness.** `/ready` in production returns
+  `200 {status:'ready'}` or a generic 503 with no dependency names/details;
+  development/test keep per-dependency output. Redis is a required readiness
+  dependency, consistent with the fail-closed limiters.
+
 ## Invitations
 
 - **Hash-only token storage.** The raw invitation token is high-entropy and opaque,
@@ -247,7 +326,8 @@ sent through a real provider), verification **enforcement** (the flag is
 advisory), cleanup/retention jobs for consumed or expired token and
 pending-registration rows, database RLS, audit retention enforcement/export,
 custom roles, resource-level permissions, and hardened concurrency on quota
-checks. Rate limiting and quotas
-accept fail-open and race-window trade-offs respectively. See
+checks. Quotas accept race-window trade-offs; non-sensitive rate limiting
+fails open on a Redis outage (sensitive endpoints fail closed in production,
+with no alerting on that state yet). See
 [known limitations](./known-limitations.md) for the full list. Do not treat
 Orgistry as a hardened, certified system.

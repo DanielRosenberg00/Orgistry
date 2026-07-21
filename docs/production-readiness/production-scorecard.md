@@ -100,3 +100,23 @@ the P1/P2 work and the launch gate (see
 > (ORG-PR-001, 002, 005, 006).** The overriding rule still yields *not
 > production-ready*; the state remains **C — Ready to continue production
 > implementation** (not ready for staging, not ready for production).
+
+> **Status update (Sprint 19, 2026-07-21).** The edge and application
+> security hardening sprint closed ORG-PR-010, 011, 012, 013 (P2),
+> ORG-PR-032, 033 (P3), and ORG-PR-052 (P4) — the "No headers/proxy/global
+> limit" largest-gap driver on the "Application security" row above is now
+> implemented and test-proven: typed `TRUST_PROXY` (forwarded headers ignored
+> unless explicitly trusted), security headers on every response with
+> production-only HSTS `includeSubDomains`, a global per-trusted-IP rate
+> limit plus `invitations/inspect` per-IP and per-token-digest throttling,
+> failed-auth `security_events` writes bounded per source IP (DB-backed storm
+> test), per-actor mutation buckets enforced after permission checks,
+> centralized logger redaction, request-id sanitization, a coarse production
+> `/ready`, and bounded idempotent shutdown. ORG-PR-009 (P2) is materially
+> advanced — sensitive buckets fail closed under the production-default
+> `RATE_LIMIT_FAILURE_MODE=closed` — but stays open for its alerting half
+> (depends on ORG-PR-007). No P1 movement — the sprint targeted the
+> P2–P4 edge-hardening surface. **4 P1 blockers remain open
+> (ORG-PR-001, 002, 005, 006).** The overriding rule still yields *not
+> production-ready*; the state remains **C — Ready to continue production
+> implementation** (not ready for staging, not ready for production).

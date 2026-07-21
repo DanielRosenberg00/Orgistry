@@ -31,7 +31,7 @@ import { createInvitationService } from './modules/invitations/invitation.servic
 import { createAccountMailer } from './modules/mail/account-mailer-factory';
 import { createDbAuditRepository } from './modules/audit/audit.repo';
 import { createAuditService } from './modules/audit/audit.service';
-import { createRedisRateLimiter } from './lib/rate-limit';
+import { createServerRateLimiter } from './server-rate-limiter';
 import type { ReadinessProbe } from './lib/readiness';
 
 /**
@@ -66,11 +66,36 @@ async function main(): Promise<void> {
     },
   ];
 
+  // ONE Redis-backed limiter instance is shared by every bucket (global,
+  // auth, registration, recovery, verification, invitations, mutations,
+  // external). Construction lives in the unit-tested `createServerRateLimiter`
+  // seam; the logger is bound right after buildApp (limiter construction has
+  // to precede the app because the services consume it).
+  const serverRateLimiter = createServerRateLimiter(redis);
+  const rateLimiter = serverRateLimiter.limiter;
+  const rateLimitFailureMode = config.rateLimit.failureMode;
+
   // One organization repository backs both the organization workflows and the
   // member-management/access-control workflows (they share the same persistence).
   const organizationRepo = createDbOrganizationRepository(dbClient.db);
-  const organizationService = createOrganizationService({ repo: organizationRepo });
-  const memberService = createMemberService({ repo: organizationRepo });
+  const organizationService = createOrganizationService({
+    repo: organizationRepo,
+    rateLimiter,
+    rateLimits: {
+      windowSeconds: config.rateLimit.mutations.windowSeconds,
+      createPerUserMax: config.rateLimit.mutations.orgCreatePerUserMax,
+    },
+    rateLimitFailureMode,
+  });
+  const memberService = createMemberService({
+    repo: organizationRepo,
+    rateLimiter,
+    rateLimits: {
+      windowSeconds: config.rateLimit.mutations.windowSeconds,
+      mutationPerUserMax: config.rateLimit.mutations.memberMutationPerUserMax,
+    },
+    rateLimitFailureMode,
+  });
   const rbacService = createRbacService({
     repo: createDbRbacRepository(dbClient.db),
   });
@@ -86,6 +111,12 @@ async function main(): Promise<void> {
   const planService = createPlanService({
     accessControl: organizationRepo,
     entitlements: entitlementService,
+    rateLimiter,
+    rateLimits: {
+      windowSeconds: config.rateLimit.mutations.windowSeconds,
+      changePerOrgMax: config.rateLimit.mutations.planChangePerOrgMax,
+    },
+    rateLimitFailureMode,
   });
 
   // Shared account mailer (Sprint 16). One explicitly selected driver
@@ -105,6 +136,9 @@ async function main(): Promise<void> {
     mailer: accountMailer,
     ttlSeconds: config.invitations.ttlSeconds,
     webBaseUrl: config.web.url,
+    rateLimiter,
+    rateLimits: config.rateLimit.invitations,
+    rateLimitFailureMode,
   });
 
   // Email verification (Sprint 16). Constructed BEFORE the auth service so it
@@ -115,8 +149,9 @@ async function main(): Promise<void> {
     mailer: accountMailer,
     webBaseUrl: config.web.url,
     ttlSeconds: config.emailVerification.ttlSeconds,
-    rateLimiter: createRedisRateLimiter(redis),
+    rateLimiter,
     rateLimits: config.rateLimit.emailVerification,
+    rateLimitFailureMode,
   });
 
   // Password recovery (Sprint 17). Public request + completion; shares the
@@ -127,8 +162,9 @@ async function main(): Promise<void> {
     mailer: accountMailer,
     webBaseUrl: config.web.url,
     ttlSeconds: config.passwordRecovery.ttlSeconds,
-    rateLimiter: createRedisRateLimiter(redis),
+    rateLimiter,
     rateLimits: config.rateLimit.passwordRecovery,
+    rateLimitFailureMode,
   });
 
   // Verification-first registration (Sprint 18). Public request + completion;
@@ -145,8 +181,9 @@ async function main(): Promise<void> {
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
-    rateLimiter: createRedisRateLimiter(redis),
+    rateLimiter,
     rateLimits: config.rateLimit.registration,
+    rateLimitFailureMode,
     // Invitation collaborator (same instance as the invitation routes).
     invitations: invitationService,
   });
@@ -157,10 +194,12 @@ async function main(): Promise<void> {
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
-    // Redis is the official v1 rate-limit store. It fails open, so a Redis
-    // outage disables rate limiting but never affects auth correctness.
-    rateLimiter: createRedisRateLimiter(redis),
+    // Redis is the official v1 rate-limit store. A store outage follows the
+    // configured failure mode (production: fail closed for these sensitive
+    // buckets); it never affects auth correctness either way.
+    rateLimiter,
     rateLimits: config.rateLimit.auth,
+    rateLimitFailureMode,
     // Best-effort post-email-change verification email (same instance as the
     // verification routes).
     emailVerification: emailVerificationService,
@@ -178,6 +217,13 @@ async function main(): Promise<void> {
     accessControl: organizationRepo,
     projects: projectRepo,
     entitlements: entitlementService,
+    rateLimiter,
+    rateLimits: {
+      windowSeconds: config.rateLimit.mutations.windowSeconds,
+      createPerUserMax: config.rateLimit.mutations.projectCreatePerUserMax,
+      mutationPerUserMax: config.rateLimit.mutations.projectMutationPerUserMax,
+    },
+    rateLimitFailureMode,
   });
 
   // API keys (Sprint 8). One repository backs management AND external auth.
@@ -186,16 +232,24 @@ async function main(): Promise<void> {
     accessControl: organizationRepo,
     apiKeys: apiKeyRepo,
     entitlements: entitlementService,
+    rateLimiter,
+    rateLimits: {
+      windowSeconds: config.rateLimit.mutations.windowSeconds,
+      createPerUserMax: config.rateLimit.mutations.apiKeyCreatePerUserMax,
+    },
+    rateLimitFailureMode,
   });
   // The external authenticator derives the organization from the key row, checks
-  // the entitlement on every request, and applies Redis-backed per-key/per-org
-  // rate limits (fail-open, so Redis never affects auth correctness).
+  // the entitlement on every request, applies Redis-backed per-key/per-org
+  // rate limits, and bounds durable failed-auth event writes per IP
+  // (Sprint 19, ORG-PR-013).
   const apiKeyAuthenticator = createApiKeyAuthenticator({
     apiKeys: apiKeyRepo,
     organizations: organizationRepo,
     entitlements: entitlementService,
-    rateLimiter: createRedisRateLimiter(redis),
+    rateLimiter,
     rateLimits: config.rateLimit.external,
+    rateLimitFailureMode,
     lastUsedThrottleSeconds: config.apiKeys.lastUsedThrottleSeconds,
   });
   const externalProjectsService = createExternalProjectsService({
@@ -232,7 +286,9 @@ async function main(): Promise<void> {
     auditService,
     externalProjectsService,
     apiKeyAuthenticator,
+    globalRateLimiter: rateLimiter,
   });
+  serverRateLimiter.bindLogger(app.log);
 
   // Prevent unhandled 'error' events when Redis is unreachable; readiness is
   // the source of truth for connectivity, so log at debug and move on.
@@ -240,16 +296,38 @@ async function main(): Promise<void> {
     app.log.debug({ err: error }, 'Redis connection error');
   });
 
+  // Graceful shutdown (hardened in Sprint 19): idempotent across repeated
+  // signals, and bounded — if in-flight requests or client teardown hang, the
+  // process force-exits after SHUTDOWN_TIMEOUT_MS instead of wedging under an
+  // orchestrator's stop grace period. The timer is unref'd so a fast clean
+  // shutdown never waits on it.
+  const SHUTDOWN_TIMEOUT_MS = 10_000;
+  let shuttingDown = false;
+
   const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+      app.log.info({ signal }, 'Shutdown already in progress; ignoring signal');
+      return;
+    }
+    shuttingDown = true;
     app.log.info({ signal }, 'Shutting down');
+    const forceExit = setTimeout(() => {
+      app.log.error(
+        { signal, timeoutMs: SHUTDOWN_TIMEOUT_MS },
+        'Shutdown timed out; forcing exit',
+      );
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+    forceExit.unref();
     await app.close();
     await dbClient.close();
     redis.disconnect();
+    process.exit(0);
   };
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
-      void shutdown(signal).finally(() => process.exit(0));
+      void shutdown(signal);
     });
   }
 

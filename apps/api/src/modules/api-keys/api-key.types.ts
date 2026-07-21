@@ -49,6 +49,13 @@ export interface ApiKeyRequestContext {
   requestId: string | null;
   ipAddress: string | null;
   userAgent: string | null;
+  /**
+   * Sanitized structured-log sink for the authenticator (Sprint 19). Routes
+   * bind this to the per-request logger so suppressed failed-auth event
+   * writes stay observable; payloads must remain coarse — never credential
+   * material.
+   */
+  log?: (data: Record<string, unknown>, message: string) => void;
 }
 
 /** Inputs for creating a key under an organization (hash already computed). */

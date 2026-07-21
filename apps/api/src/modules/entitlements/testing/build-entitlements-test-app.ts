@@ -16,7 +16,14 @@ import {
 import { createProjectService } from '../../projects/project.service';
 import { createInMemoryProjectRepository } from '../../projects/testing/in-memory-project-repo';
 import { createEntitlementService } from '../entitlement.service';
-import { createPlanService } from '../plan.service';
+import {
+  createPlanService,
+  type PlanMutationRateLimits,
+} from '../plan.service';
+import type {
+  RateLimiter,
+  RateLimitFailureMode,
+} from '../../../lib/rate-limit';
 import { createInMemoryEntitlementRepository } from './in-memory-plan-repo';
 import {
   createInMemoryAccountMailer,
@@ -43,7 +50,16 @@ export interface EntitlementsTestContext {
   config: Config;
 }
 
-export async function buildEntitlementsTestApp(): Promise<EntitlementsTestContext> {
+export interface BuildEntitlementsAppOptions {
+  /** Limiter for the demo plan-change mutation bucket (Sprint 19). */
+  rateLimiter?: RateLimiter;
+  planRateLimits?: PlanMutationRateLimits;
+  rateLimitFailureMode?: RateLimitFailureMode;
+}
+
+export async function buildEntitlementsTestApp(
+  options: BuildEntitlementsAppOptions = {},
+): Promise<EntitlementsTestContext> {
   const config = testConfig();
   const orgStore = createInMemoryOrgStore();
   const authRepo = createInMemoryAuthRepository({ orgStore });
@@ -69,6 +85,9 @@ export async function buildEntitlementsTestApp(): Promise<EntitlementsTestContex
   const planService = createPlanService({
     accessControl: orgRepo,
     entitlements: entitlementService,
+    rateLimiter: options.rateLimiter,
+    rateLimits: options.planRateLimits,
+    rateLimitFailureMode: options.rateLimitFailureMode,
   });
   const projectService = createProjectService({
     accessControl: orgRepo,

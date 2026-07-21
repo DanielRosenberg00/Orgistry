@@ -44,7 +44,13 @@ export function registerExternalProjectRoutes(
   const { service, authenticator } = options;
 
   app.get('/v1/external/projects', async (request, reply) => {
-    const ctx = requestContext(request);
+    // The per-request logger rides along so the authenticator can keep
+    // suppressed failed-auth event writes observable (sanitized payloads only).
+    const ctx = {
+      ...requestContext(request),
+      log: (data: Record<string, unknown>, message: string) =>
+        request.log.warn(data, message),
+    };
     // Authenticate the API key and require the read scope. The actor carries the
     // organization id (from the key row) — the ONLY source of tenant context.
     const actor = await authenticator.authenticate(

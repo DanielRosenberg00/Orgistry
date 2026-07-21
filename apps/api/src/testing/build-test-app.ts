@@ -1,9 +1,13 @@
 import { loadConfig, type Config } from '@orgistry/config';
+import type { FastifyServerOptions } from 'fastify';
 import { buildApp } from '../app';
+import type { RateLimiter } from '../lib/rate-limit';
 import type { ReadinessProbe } from '../lib/readiness';
 
 /** Valid configuration for tests — no real infrastructure is contacted. */
-export function testConfig(): Config {
+export function testConfig(
+  overrides: Record<string, string> = {},
+): Config {
   return loadConfig({
     NODE_ENV: 'test',
     DATABASE_URL: 'postgres://orgistry:orgistry@localhost:5432/orgistry_test',
@@ -12,6 +16,32 @@ export function testConfig(): Config {
     // Tests must never open real SMTP sockets; suites that assert on delivery
     // inject the in-memory account mailer and inspect its captured messages.
     MAIL_DRIVER: 'memory',
+    ...overrides,
+  });
+}
+
+/**
+ * PRODUCTION-SHAPED configuration for edge-behavior tests (HSTS, coarse
+ * readiness, fail-closed limiters). The values satisfy the production config
+ * guard but are public unit-test fixtures — never real credentials — and no
+ * test using this config touches real SMTP, PostgreSQL, or Redis (`buildApp`
+ * constructs no clients; services are injected).
+ */
+export function productionLikeTestConfig(
+  overrides: Record<string, string> = {},
+): Config {
+  return loadConfig({
+    NODE_ENV: 'production',
+    DATABASE_URL: 'postgres://orgistry:orgistry@db.internal:5432/orgistry',
+    JWT_SECRET: '4f1c9b2e7a8d3c6f5e0b9a4d7c2f8e1b6a3d0c5f9e2b7a4d',
+    COOKIE_SECURE: 'true',
+    WEB_DEMO_URL: 'https://app.orgistry.example-deployment.com',
+    MAIL_DRIVER: 'smtp',
+    MAIL_FROM_EMAIL: 'no-reply@orgistry.example-deployment.com',
+    SMTP_HOST: 'smtp.provider.example-deployment.com',
+    SMTP_USERNAME: 'orgistry-mailer',
+    SMTP_PASSWORD: '9e2b7a4d0c5f4f1c9b2e7a8d3c6f5e0b',
+    ...overrides,
   });
 }
 
@@ -30,16 +60,27 @@ export function failingProbe(name: string): ReadinessProbe {
   };
 }
 
+export interface BuildTestAppOptions {
+  /** Config override; defaults to `testConfig()`. */
+  config?: Config;
+  /** Store for the global per-IP rate limit; absent = no global limit. */
+  globalRateLimiter?: RateLimiter;
+  /** Logger override (defaults to disabled for clean test output). */
+  logger?: FastifyServerOptions['logger'];
+}
+
 /**
  * Build an app for injection tests. Logging is disabled to keep test output
  * clean; readiness probes default to healthy PostgreSQL + Redis.
  */
 export function buildTestApp(
   probes: ReadinessProbe[] = [passingProbe('postgres'), passingProbe('redis')],
+  options: BuildTestAppOptions = {},
 ) {
   return buildApp({
-    config: testConfig(),
+    config: options.config ?? testConfig(),
     readinessProbes: probes,
-    logger: false,
+    globalRateLimiter: options.globalRateLimiter,
+    logger: options.logger ?? false,
   });
 }

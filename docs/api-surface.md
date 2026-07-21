@@ -17,13 +17,23 @@ defined under `apps/api/src/routes` and `apps/api/src/modules/*`.
 - Every response uses the standard envelope (`{ ok, data }` / `{ ok, error }`)
   and organization-scoped reads are cursor-paginated. See
   [api-conventions](./api-conventions.md).
+- **Global rate limit (Sprint 19)**: every route except `/health`, `/ready`,
+  and CORS `OPTIONS` preflight shares one fixed-window bucket per trusted
+  client IP (`RATE_LIMIT_MAX`, default 300 per `RATE_LIMIT_WINDOW_SECONDS`,
+  default 60), evaluated before route-specific work; over-limit →
+  `429 RATE_LIMITED`. Endpoints marked **429** below additionally carry their
+  own per-actor buckets. Sensitive rate-limited endpoints (auth flows,
+  invitation inspect/accept/create, the external API, the mutation buckets)
+  may return `503 SERVICE_UNAVAILABLE` when Redis is down and the limiter
+  fails closed (the production default) — see
+  [api-conventions](./api-conventions.md).
 
 ## Health / Readiness
 
 | Method | Path | Auth | Purpose / notes |
 | --- | --- | --- | --- |
 | GET | `/health` | none | Liveness only; never touches dependencies; always `200` when up. |
-| GET | `/ready` | none | Readiness; checks PostgreSQL + Redis; `503` with a per-dependency `checks` array if any is down. |
+| GET | `/ready` | none | Readiness; checks PostgreSQL + Redis (both required). In development/test: `503` with a per-dependency `checks` array (name/ok/latencyMs; never error text/hosts/ports) if any is down. In production (Sprint 19): coarse output only — `200 {status:'ready'}` or a generic `503 SERVICE_UNAVAILABLE` with no dependency names; per-check outcomes are logged server-side. |
 
 ## Auth
 
@@ -48,7 +58,7 @@ defined under `apps/api/src/routes` and `apps/api/src/modules/*`.
 
 | Method | Path | Auth | Permission | Purpose / notes |
 | --- | --- | --- | --- | --- |
-| POST | `/v1/organizations` | Bearer | — | Create a team org (Free plan; caller becomes Owner). |
+| POST | `/v1/organizations` | Bearer | — | Create a team org (Free plan; caller becomes Owner). **429**: throttled per user (`RATE_LIMIT_ORG_CREATE_PER_USER_MAX`, default 10/min; Sprint 19). |
 | GET | `/v1/organizations` | Bearer | — | List orgs where the caller has an active membership. |
 | GET | `/v1/organizations/:organizationId` | Bearer | `org.read` | Read one org (requires active membership). |
 
@@ -57,8 +67,8 @@ defined under `apps/api/src/routes` and `apps/api/src/modules/*`.
 | Method | Path | Auth | Permission | Purpose / notes |
 | --- | --- | --- | --- | --- |
 | GET | `/v1/organizations/:organizationId/members` | Bearer | `members.read` | List members (cursor-paginated; soft-removed omitted). |
-| PATCH | `/v1/organizations/:organizationId/members/:membershipId/role` | Bearer | `members.change_role` | Change a member's role; Last Owner invariant enforced transactionally. |
-| DELETE | `/v1/organizations/:organizationId/members/:membershipId` | Bearer | `members.remove` | Soft-remove a member; Last Owner protected. |
+| PATCH | `/v1/organizations/:organizationId/members/:membershipId/role` | Bearer | `members.change_role` | Change a member's role; Last Owner invariant enforced transactionally. **429**: shares the per-acting-user member-admin bucket (`RATE_LIMIT_MEMBER_MUTATION_PER_USER_MAX`, default 30/min; Sprint 19 refinement). |
+| DELETE | `/v1/organizations/:organizationId/members/:membershipId` | Bearer | `members.remove` | Soft-remove a member; Last Owner protected. **429**: shares the member-admin bucket above (Sprint 19 refinement). |
 
 ## Roles and Permissions
 
@@ -85,10 +95,10 @@ Organization-scoped, permission-gated:
 | Method | Path | Auth | Permission | Entitlement / quota | Purpose / notes |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/v1/organizations/:organizationId/projects` | Bearer | `projects.read` | — | List projects (cursor-paginated; soft-deleted omitted). |
-| POST | `/v1/organizations/:organizationId/projects` | Bearer | `projects.create` | `max_projects` quota | Create a project; quota checked after permission; records `project.created`. |
+| POST | `/v1/organizations/:organizationId/projects` | Bearer | `projects.create` | `max_projects` quota | Create a project; quota checked after permission; records `project.created`. **429**: throttled per user after the permission check (`RATE_LIMIT_PROJECT_CREATE_PER_USER_MAX`, default 30/min; Sprint 19). |
 | GET | `/v1/organizations/:organizationId/projects/:projectId` | Bearer | `projects.read` | — | Read a project; cross-tenant/deleted → uniform `404`. |
-| PATCH | `/v1/organizations/:organizationId/projects/:projectId` | Bearer | `projects.update` | — | Rename a project. |
-| DELETE | `/v1/organizations/:organizationId/projects/:projectId` | Bearer | `projects.delete` | — | Soft-delete; records `project.deleted`; no hard delete/restore. |
+| PATCH | `/v1/organizations/:organizationId/projects/:projectId` | Bearer | `projects.update` | — | Rename a project. **429**: shares the per-acting-user project-mutation bucket (`RATE_LIMIT_PROJECT_MUTATION_PER_USER_MAX`, default 60/min; Sprint 19 refinement). |
+| DELETE | `/v1/organizations/:organizationId/projects/:projectId` | Bearer | `projects.delete` | — | Soft-delete; records `project.deleted`; no hard delete/restore. **429**: shares the project-mutation bucket above (Sprint 19 refinement). |
 
 ## Plans and Entitlements
 
@@ -96,13 +106,13 @@ Organization-scoped, permission-gated:
 | --- | --- | --- | --- | --- |
 | GET | `/v1/organizations/:organizationId/plan` | Bearer | `plan.read` | Current plan + assignment timestamps. |
 | GET | `/v1/organizations/:organizationId/entitlements` | Bearer | `plan.read` | Resolved entitlement/quota values for the plan. |
-| PATCH | `/v1/organizations/:organizationId/plan/demo` | Bearer | `plan.change_demo` | **Demo-only** plan switch (Free/Pro/Business); no billing. |
+| PATCH | `/v1/organizations/:organizationId/plan/demo` | Bearer | `plan.change_demo` | **Demo-only** plan switch (Free/Pro/Business); no billing. **429**: throttled per org after the permission check (`RATE_LIMIT_PLAN_CHANGE_PER_ORG_MAX`, default 10/min; Sprint 19). |
 
 ## API Keys (management, user-authenticated)
 
 | Method | Path | Auth | Permission | Entitlement / quota | Purpose / notes |
 | --- | --- | --- | --- | --- | --- |
-| POST | `/v1/organizations/:organizationId/api-keys` | Bearer | `api_keys.create` | `api_keys_access` + `max_api_keys` quota | Create a key; raw secret returned **once**; checks permission → entitlement → quota. |
+| POST | `/v1/organizations/:organizationId/api-keys` | Bearer | `api_keys.create` | `api_keys_access` + `max_api_keys` quota | Create a key; raw secret returned **once**; checks permission → entitlement → quota. **429**: throttled per user after the permission check (`RATE_LIMIT_API_KEY_CREATE_PER_USER_MAX`, default 10/min; Sprint 19). |
 | GET | `/v1/organizations/:organizationId/api-keys` | Bearer | `api_keys.read` | `api_keys_access` | List keys (cursor-paginated; secrets never returned). |
 | DELETE | `/v1/organizations/:organizationId/api-keys/:apiKeyId` | Bearer | `api_keys.revoke` | `api_keys_access` | Revoke a key (audited, idempotent). |
 
@@ -110,17 +120,17 @@ Organization-scoped, permission-gated:
 
 | Method | Path | Auth | Scope | Entitlement | Purpose / notes |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/v1/external/projects` | API key | `projects:read` | `api_keys_access` (every request) | Machine-facing projects read. **No** org ID in the route (tenant derived from the key); **no** browser JWT. Redis rate limits (per-key/per-org, fail-open); throttled `last_used_at`. |
+| GET | `/v1/external/projects` | API key | `projects:read` | `api_keys_access` (every request) | Machine-facing projects read. **No** org ID in the route (tenant derived from the key); **no** browser JWT. Redis rate limits (per-key/per-org; fail closed in production, `503` on Redis outage — Sprint 19); throttled `last_used_at`; failed-auth security-event writes bounded per IP. |
 
 ## Invitations
 
 | Method | Path | Auth | Permission | Entitlement / quota | Purpose / notes |
 | --- | --- | --- | --- | --- | --- |
-| POST | `/v1/organizations/:organizationId/invitations` | Bearer | `invitations.create` | `max_members` (reservation: active members + pending) | Create + email (fail-closed before persist); records `invitation.created`. |
+| POST | `/v1/organizations/:organizationId/invitations` | Bearer | `invitations.create` | `max_members` (reservation: active members + pending) | Create + email (fail-closed before persist); records `invitation.created`. **429**: throttled per user (`RATE_LIMIT_INVITATION_CREATE_PER_USER_MAX`, default 20/min) and per org (`RATE_LIMIT_INVITATION_CREATE_PER_ORG_MAX`, default 60/min), after the permission check (Sprint 19). |
 | GET | `/v1/organizations/:organizationId/invitations` | Bearer | `invitations.read` | — | List pending invitations (cursor-paginated). |
 | DELETE | `/v1/organizations/:organizationId/invitations/:invitationId` | Bearer | `invitations.revoke` | — | Revoke a pending invitation (idempotent). |
-| POST | `/v1/invitations/inspect` | none | — | — | Public, safe token inspection (no token/hash leaked); supports new-user onboarding. |
-| POST | `/v1/invitations/accept` | Bearer | active user | `max_members` quota | Accept; email must match; creates membership transactionally; does **not** create a session. |
+| POST | `/v1/invitations/inspect` | none | — | — | Public, safe token inspection (no token/hash leaked); supports new-user onboarding. **429**: throttled per trusted IP (`RATE_LIMIT_INVITATION_INSPECT_PER_IP_MAX`, default 30/min) and per token digest across all IPs (`RATE_LIMIT_INVITATION_INSPECT_PER_TOKEN_MAX`, default 10/min); response contract unchanged (Sprint 19). |
+| POST | `/v1/invitations/accept` | Bearer | active user | `max_members` quota | Accept; email must match; creates membership transactionally; does **not** create a session. **429**: throttled per user (`RATE_LIMIT_INVITATION_ACCEPT_PER_USER_MAX`, default 10/min; Sprint 19). |
 
 ## Audit Log
 

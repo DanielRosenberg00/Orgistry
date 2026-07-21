@@ -84,6 +84,16 @@ These are intentional non-goals, not bugs:
 - **No audit retention enforcement.** The audit log is **read-only**. The plan's
   `audit_retention_days` is surfaced as a display-only field; there is no
   deletion/cleanup job. There is no audit export, webhook, SIEM, or alerting.
+- **No alerting on rate-limiter store failure.** When Redis fails and the
+  limiters degrade (fail open) or reject (fail closed, the production
+  default for sensitive endpoints — Sprint 19), the state is logged
+  (sanitized) but nothing alerts an operator; monitoring/alerting on
+  limiter-store failure and fail-closed activation does not exist yet
+  (the ORG-PR-009 residual).
+- **No frontend CSP.** Sprint 19's security headers are an **API response
+  policy** (nosniff, frame denial, referrer/permissions policy, HSTS in
+  production, `no-store` on auth/invitation responses). The web demo SPA has
+  no Content-Security-Policy hardening; that remains open.
 - **No organization lifecycle endpoints** (archive/suspend) and **no project
   hard-delete or restore** — deletes are soft.
 - **No object storage** and **no production deployment automation** (no
@@ -124,10 +134,41 @@ These are intentional non-goals, not bugs:
   requests could in principle both pass a check at the ceiling. This is an
   accepted demo-scale trade-off; the invariant is enforced per request, not under
   adversarial concurrency.
-- **Rate limits fail open.** The Redis-backed fixed-window limiters allow requests
-  when Redis is unavailable rather than blocking them, so a Redis outage never
-  breaks authentication. The cost is that rate limiting is unavailable during such
-  an outage.
+- **Rate-limit failure mode is environment-derived (revised in Sprint 19).**
+  The Redis-backed limiters no longer unconditionally fail open. Under
+  `RATE_LIMIT_FAILURE_MODE=closed` — derived automatically in production,
+  which also refuses an explicit `open` — a Redis outage makes **sensitive**
+  endpoints (auth flows, invitation inspect/accept/create, the external API,
+  the mutation buckets) reject with `503 SERVICE_UNAVAILABLE`; in
+  development/test the limiters fail open and requests proceed unthrottled.
+  The **global** per-IP limiter fails open by design (readiness takes the
+  instance out of rotation). Residual: there is no alerting on either state
+  (see above).
+- **Fixed-window limiter bursts.** All limiters are fixed-window: a client can
+  see up to 2x the configured rate across a window boundary (e.g. the tail of
+  one window plus the head of the next). Accepted; sliding windows are not
+  implemented.
+- **Failed-auth event bounding is per-IP only.** The Sprint 19 bound on
+  durable failed-API-key-auth `security_events` writes
+  (`RATE_LIMIT_EXTERNAL_AUTH_FAIL_EVENTS_PER_IP_MAX`) is keyed per source IP
+  (requests with no resolved IP share one coarse internal `unknown` bucket) —
+  a distributed storm is bounded per IP, not in aggregate. Beyond the bound,
+  visibility is one sanitized warn per window per process (an in-process
+  gate, so it survives a Redis outage); a fleet of N instances can emit up to
+  N lines per window.
+- **Logger redaction is a path-based backstop.** The pino redact paths
+  (Sprint 19; `apps/api/src/lib/logging.ts`) cover known credential-shaped
+  keys across header/body/config/error and one-level nested shapes, but deeply
+  nested or novel keys are not caught. The primary control remains the policy
+  of never logging request bodies or credentials; redaction is
+  defense-in-depth, not a guarantee.
+- **HSTS requires production AND trusted HTTPS context.** The
+  `Strict-Transport-Security` header is emitted only when
+  `NODE_ENV=production` and the request's proxy-aware protocol resolves to
+  `https` (real TLS, or a trusted forwarded hop under `TRUST_PROXY`).
+  Non-production deployments get no transport pinning, and a production
+  deployment with a wrong `TRUST_PROXY` value or HTTP-only termination
+  silently gets none either — deployment must configure both.
 - **UI is demo-quality.** The web demo is a deliberately thin, official API
   consumer for reviewing backend behavior — not a polished, production product
   surface. Permission-aware UI is a usability *hint*; the backend remains the sole

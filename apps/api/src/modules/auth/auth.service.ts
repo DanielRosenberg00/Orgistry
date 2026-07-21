@@ -30,8 +30,14 @@ import {
   systemClock,
 } from '@orgistry/shared';
 import { AppError } from '../../lib/errors';
-import type { RateLimiter } from '../../lib/rate-limit';
-import { createNoopRateLimiter } from '../../lib/rate-limit';
+import type {
+  RateLimiter,
+  RateLimitFailureMode,
+} from '../../lib/rate-limit';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+} from '../../lib/rate-limit';
 import {
   currentPasswordIncorrectError,
   emailUnchangedError,
@@ -85,6 +91,12 @@ export interface AuthServiceOptions {
   /** Redis-backed in production; a no-op limiter when omitted. */
   rateLimiter?: RateLimiter;
   rateLimits?: AuthRateLimits;
+  /**
+   * What to do when the limiter store cannot answer (Sprint 19, ORG-PR-009):
+   * `open` allows the request, `closed` rejects with a generic 503. Wired
+   * from `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
   /**
    * Post-email-change verification-email collaborator (Sprint 17). OPTIONAL
    * and best-effort: see `EmailChangeVerification` — it never throws, so it
@@ -215,6 +227,7 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
     sessionTtlSeconds,
     refreshTokenTtlSeconds,
     rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
     emailVerification,
     clock = systemClock,
   } = options;
@@ -256,6 +269,8 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
    * Consume one rate-limit hit. On exceed, write a sanitized
    * `rate_limit_exceeded` event (bucket name only — no email/IP value in
    * metadata; the event row already carries the IP) and throw `RATE_LIMITED`.
+   * A limiter-store outage follows the configured failure mode: fail open
+   * (allow) or fail closed (generic 503) — see `enforceStoreAvailability`.
    */
   async function enforceRateLimit(
     key: string,
@@ -263,7 +278,12 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
     bucket: string,
     ctx: RequestContext,
   ): Promise<void> {
-    const allowed = await rateLimiter.consume(key, limit, limits.windowSeconds);
+    const decision = await rateLimiter.consume(
+      key,
+      limit,
+      limits.windowSeconds,
+    );
+    const allowed = enforceStoreAvailability(decision, rateLimitFailureMode);
     if (!allowed) {
       await writeSecurityEvent({
         userId: null,

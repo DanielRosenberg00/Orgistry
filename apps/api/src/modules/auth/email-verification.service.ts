@@ -4,8 +4,14 @@ import type {
   EmailVerificationRequestResponse,
 } from '@orgistry/contracts';
 import { type Clock, systemClock } from '@orgistry/shared';
-import type { RateLimiter } from '../../lib/rate-limit';
-import { createNoopRateLimiter } from '../../lib/rate-limit';
+import type {
+  RateLimiter,
+  RateLimitFailureMode,
+} from '../../lib/rate-limit';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+} from '../../lib/rate-limit';
 import type { AccountMailer } from '../mail/account-mailer';
 import { rateLimitedError } from './auth.errors';
 import {
@@ -69,6 +75,12 @@ export interface EmailVerificationServiceOptions {
   /** Redis-backed in production; a no-op limiter when omitted. */
   rateLimiter?: RateLimiter;
   rateLimits?: EmailVerificationRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009): `open` allows,
+   * `closed` rejects with a generic 503. Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
   clock?: Clock;
 }
 
@@ -116,6 +128,7 @@ export function createEmailVerificationService(
     webBaseUrl,
     ttlSeconds,
     rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
     clock = systemClock,
   } = options;
 
@@ -159,7 +172,12 @@ export function createEmailVerificationService(
     bucket: string,
     ctx: RequestContext,
   ): Promise<void> {
-    const allowed = await rateLimiter.consume(key, limit, limits.windowSeconds);
+    const decision = await rateLimiter.consume(
+      key,
+      limit,
+      limits.windowSeconds,
+    );
+    const allowed = enforceStoreAvailability(decision, rateLimitFailureMode);
     if (!allowed) {
       await writeSecurityEvent({
         userId: null,

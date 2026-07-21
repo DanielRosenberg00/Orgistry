@@ -11,7 +11,13 @@ import {
   type UserSummary,
 } from '@orgistry/contracts';
 import { decodeCursor, encodeCursor } from '@orgistry/shared';
-import { AppError } from '../../lib/errors';
+import { AppError, rateLimitedError } from '../../lib/errors';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+  type RateLimiter,
+  type RateLimitFailureMode,
+} from '../../lib/rate-limit';
 import {
   type OrganizationActor,
   requireMembership,
@@ -41,6 +47,25 @@ import type { MemberAuditContext, MemberView, OrganizationRepository } from './o
 
 export interface MemberServiceOptions {
   repo: OrganizationRepository;
+  /** Redis-backed in production; a no-op limiter when omitted. */
+  rateLimiter?: RateLimiter;
+  /** Member-admin mutation bucket (Sprint 19, ORG-PR-032; from `config.rateLimit.mutations`). */
+  rateLimits?: MemberMutationRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009): `open` allows,
+   * `closed` rejects with a generic 503. Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
+}
+
+/**
+ * Member-administration bucket: role change and removal each write a durable
+ * audit event per call, so both share one per-acting-user bucket.
+ */
+export interface MemberMutationRateLimits {
+  windowSeconds: number;
+  mutationPerUserMax: number;
 }
 
 export interface ListMembersInput {
@@ -120,7 +145,34 @@ function decodeMemberCursor(
 export function createMemberService(
   options: MemberServiceOptions,
 ): MemberService {
-  const { repo } = options;
+  const {
+    repo,
+    rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
+  } = options;
+
+  const limits: MemberMutationRateLimits = options.rateLimits ?? {
+    windowSeconds: 60,
+    mutationPerUserMax: Number.MAX_SAFE_INTEGER,
+  };
+
+  /**
+   * Consume one mutation rate-limit hit (Sprint 19, ORG-PR-032); throw the
+   * standard RATE_LIMITED envelope on exceed. Runs AFTER authentication and
+   * permission checks so throttling never masks an authorization result. A
+   * limiter-store outage follows the configured failure mode (production:
+   * fail closed with a generic 503).
+   */
+  async function enforceMutationRateLimit(
+    key: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<void> {
+    const decision = await rateLimiter.consume(key, limit, windowSeconds);
+    if (!enforceStoreAvailability(decision, rateLimitFailureMode)) {
+      throw rateLimitedError();
+    }
+  }
 
   /** Resolve the actor (active membership + effective permissions) for a request. */
   async function actorFor(input: {
@@ -168,6 +220,13 @@ export function createMemberService(
       });
       requirePermission(actor, PERMISSION_KEYS.membersChangeRole);
 
+      // AFTER the permission check, BEFORE the write + audit event.
+      await enforceMutationRateLimit(
+        `rl:member:mutate:user:${actor.userId}`,
+        limits.mutationPerUserMax,
+        limits.windowSeconds,
+      );
+
       // The new role is a fixed system role (validated at the contract boundary);
       // map it to its stable seeded id. The Last Owner invariant is enforced
       // transactionally inside the repository.
@@ -189,6 +248,13 @@ export function createMemberService(
         requestId: input.ctx.requestId,
       });
       requirePermission(actor, PERMISSION_KEYS.membersRemove);
+
+      // Shares the member-admin bucket with role changes (same audit seam).
+      await enforceMutationRateLimit(
+        `rl:member:mutate:user:${actor.userId}`,
+        limits.mutationPerUserMax,
+        limits.windowSeconds,
+      );
 
       const view = await repo.removeMember({
         organizationId: actor.organizationId,

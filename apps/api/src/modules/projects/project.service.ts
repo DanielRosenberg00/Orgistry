@@ -10,7 +10,13 @@ import {
   type ProjectUpdateResponse,
 } from '@orgistry/contracts';
 import { decodeCursor, encodeCursor } from '@orgistry/shared';
-import { AppError } from '../../lib/errors';
+import { AppError, rateLimitedError } from '../../lib/errors';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+  type RateLimiter,
+  type RateLimitFailureMode,
+} from '../../lib/rate-limit';
 import type { EntitlementService } from '../entitlements/entitlement.service';
 import {
   type OrganizationActor,
@@ -48,6 +54,16 @@ export interface ProjectServiceOptions {
   accessControl: AccessControlRepository;
   /** Tenant-aware project persistence. */
   projects: ProjectRepository;
+  /** Redis-backed in production; a no-op limiter when omitted. */
+  rateLimiter?: RateLimiter;
+  /** Project-creation bucket (Sprint 19, ORG-PR-032; from `config.rateLimit.mutations`). */
+  rateLimits?: ProjectRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009): `open` allows,
+   * `closed` rejects with a generic 503. Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
   /**
    * Organization-level entitlement/quota service. Project CREATE enforces the
    * `max_projects` quota through it, AFTER the permission check. This is the
@@ -155,10 +171,52 @@ function actionContext(
   };
 }
 
+/**
+ * Project mutation buckets: creation writes a durable row + audit event;
+ * update/delete also write an audit event per call and share one
+ * per-acting-user bucket (Sprint 19 refinement).
+ */
+export interface ProjectRateLimits {
+  windowSeconds: number;
+  createPerUserMax: number;
+  mutationPerUserMax: number;
+}
+
 export function createProjectService(
   options: ProjectServiceOptions,
 ): ProjectService {
-  const { accessControl, projects, entitlements } = options;
+  const {
+    accessControl,
+    projects,
+    entitlements,
+    rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
+  } = options;
+
+  const limits: ProjectRateLimits = options.rateLimits ?? {
+    windowSeconds: 60,
+    createPerUserMax: Number.MAX_SAFE_INTEGER,
+    mutationPerUserMax: Number.MAX_SAFE_INTEGER,
+  };
+
+  /**
+   * Consume one mutation rate-limit hit (Sprint 19, ORG-PR-032); throw the
+   * standard RATE_LIMITED envelope on exceed. Runs AFTER authentication and
+   * permission checks so throttling never masks an authorization result. No
+   * durable event per blocked attempt (bounded writes are the point); the 429
+   * stays visible in request logs. A limiter-store outage follows the
+   * configured failure mode (production: fail closed with a generic 503).
+   */
+  async function enforceMutationRateLimit(
+    key: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<void> {
+    const decision = await rateLimiter.consume(key, limit, windowSeconds);
+    if (!enforceStoreAvailability(decision, rateLimitFailureMode)) {
+      throw rateLimitedError();
+    }
+  }
 
   /** Resolve the actor (active membership + effective permissions) for a request. */
   async function actorFor(input: {
@@ -206,6 +264,13 @@ export function createProjectService(
       });
       requirePermission(actor, PERMISSION_KEYS.projectsCreate);
 
+      // AFTER the permission check, BEFORE the quota read and the write.
+      await enforceMutationRateLimit(
+        `rl:project:create:user:${actor.userId}`,
+        limits.createPerUserMax,
+        limits.windowSeconds,
+      );
+
       // Enforcement order: permission (above) THEN quota. A user without
       // projects.create is already blocked; an authorized user is still blocked
       // when the organization's plan is at its max_projects ceiling. The quota
@@ -248,6 +313,13 @@ export function createProjectService(
       });
       requirePermission(actor, PERMISSION_KEYS.projectsUpdate);
 
+      // AFTER the permission check, BEFORE the write + audit event.
+      await enforceMutationRateLimit(
+        `rl:project:mutate:user:${actor.userId}`,
+        limits.mutationPerUserMax,
+        limits.windowSeconds,
+      );
+
       const project = await projects.updateProject({
         organizationId: actor.organizationId,
         projectId: input.projectId,
@@ -265,6 +337,13 @@ export function createProjectService(
         requestId: input.ctx.requestId,
       });
       requirePermission(actor, PERMISSION_KEYS.projectsDelete);
+
+      // Shares the update bucket (same audit-write amplification profile).
+      await enforceMutationRateLimit(
+        `rl:project:mutate:user:${actor.userId}`,
+        limits.mutationPerUserMax,
+        limits.windowSeconds,
+      );
 
       await projects.softDeleteProject({
         organizationId: actor.organizationId,

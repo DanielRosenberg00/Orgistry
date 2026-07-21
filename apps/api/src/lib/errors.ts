@@ -28,3 +28,26 @@ export class AppError extends Error {
     );
   }
 }
+
+/**
+ * A rate-limit bucket was exceeded (Sprint 19 shared factory). One message and
+ * shape for every limiter so no bucket can leak which dimension tripped.
+ */
+export function rateLimitedError(): AppError {
+  return new AppError(
+    ERROR_CODES.RATE_LIMITED,
+    429,
+    'Too many requests. Please slow down and try again later.',
+  );
+}
+
+/**
+ * A SENSITIVE limiter could not reach its store and the configured failure
+ * mode is `closed` (Sprint 19, ORG-PR-009). Deliberately generic: no store
+ * name, host, command, or exception detail reaches the client.
+ */
+export function rateLimitStoreUnavailableError(): AppError {
+  return AppError.serviceUnavailable(
+    'The service is temporarily unavailable. Please try again shortly.',
+  );
+}

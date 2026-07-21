@@ -10,7 +10,10 @@ import {
   type ApiKeysTestContext,
   type BuildApiKeysAppOptions,
 } from './testing/build-api-keys-test-app';
-import { createInMemoryRateLimiter } from '../../lib/rate-limit';
+import {
+  createInMemoryRateLimiter,
+  type RateLimiter,
+} from '../../lib/rate-limit';
 
 /**
  * End-to-end EXTERNAL read-only Projects API behavior over the shared in-memory
@@ -468,6 +471,7 @@ describe('GET /v1/external/projects — rate limits (Redis-backed limiter)', () 
         windowSeconds: 60,
         perKeyMax: 2,
         perOrgMax: 1000,
+        authFailEventsPerIpMax: 1000,
       },
     });
     const owner = await registerUser();
@@ -495,6 +499,7 @@ describe('GET /v1/external/projects — rate limits (Redis-backed limiter)', () 
         windowSeconds: 60,
         perKeyMax: 1000,
         perOrgMax: 2,
+        authFailEventsPerIpMax: 1000,
       },
     });
     const owner = await registerUser();
@@ -509,5 +514,132 @@ describe('GET /v1/external/projects — rate limits (Redis-backed limiter)', () 
     const third = await externalList(keyA.secret);
     expect(third.statusCode).toBe(429);
     expect(third.json().error.code).toBe('RATE_LIMITED');
+  });
+});
+
+describe('GET /v1/external/projects — failed-auth durable write bounding (Sprint 19)', () => {
+  it('bounds security-event writes per IP under an invalid-credential burst, keeps the 401 contract, and stays fail-closed-safe on store outage', async () => {
+    await setup({
+      rateLimiter: createInMemoryRateLimiter(),
+      externalRateLimits: {
+        windowSeconds: 3600,
+        perKeyMax: 1000,
+        perOrgMax: 1000,
+        authFailEventsPerIpMax: 2,
+      },
+    });
+
+    const baseline = ctx.orgStore.securityEvents.filter((e) =>
+      e.eventType.startsWith('api_key.auth_'),
+    ).length;
+
+    for (let i = 0; i < 10; i += 1) {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/external/projects',
+        remoteAddress: '198.51.100.42',
+        headers: { authorization: 'Bearer okey_live_invalid_burst_credential' },
+      });
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error.code).toBe('API_KEY_UNAUTHORIZED');
+    }
+
+    const growth =
+      ctx.orgStore.securityEvents.filter((e) =>
+        e.eventType.startsWith('api_key.auth_'),
+      ).length - baseline;
+    expect(growth).toBe(2);
+
+    // No credential material in any recorded event.
+    const serialized = JSON.stringify(ctx.orgStore.securityEvents);
+    expect(serialized).not.toContain('okey_live_invalid_burst_credential');
+  });
+
+  it('skips the durable write when the limiter store is unavailable (outage never re-opens amplification)', async () => {
+    const storeDown: RateLimiter = { consume: async () => 'unavailable' };
+    await setup({
+      rateLimiter: storeDown,
+      externalRateLimits: {
+        windowSeconds: 60,
+        perKeyMax: 1000,
+        perOrgMax: 1000,
+        authFailEventsPerIpMax: 1000,
+      },
+      // Fail-open mode: invalid keys still answer 401 (auth correctness is
+      // independent of the limiter), but no durable rows are written.
+      rateLimitFailureMode: 'open',
+    });
+
+    const before = ctx.orgStore.securityEvents.length;
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/external/projects',
+      remoteAddress: '198.51.100.43',
+      headers: { authorization: 'Bearer okey_live_invalid_outage_credential' },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(ctx.orgStore.securityEvents.length).toBe(before);
+  });
+});
+
+describe('GET /v1/external/projects — Redis-outage semantics (Sprint 19)', () => {
+  /** Store down for the per-key/per-org throughput buckets only. */
+  const throughputStoreDown: RateLimiter = {
+    consume: async (key) =>
+      key.startsWith('rl:ext:key:') || key.startsWith('rl:ext:org:')
+        ? 'unavailable'
+        : 'allowed',
+  };
+
+  it('fails CLOSED for a VALID key when its throughput buckets cannot be evaluated (production mode)', async () => {
+    await setup({
+      rateLimiter: throughputStoreDown,
+      rateLimitFailureMode: 'closed',
+    });
+    const owner = await registerUser();
+    const orgId = await createTeamOrg(owner.token, 'Acme');
+    setPlan(orgId);
+    const key = await createKey(owner.token, orgId);
+
+    const response = await externalList(key.secret);
+    expect(response.statusCode).toBe(503);
+    const body = response.json();
+    expect(body.error.code).toBe('SERVICE_UNAVAILABLE');
+    // Generic envelope: no store internals, no key material.
+    const serialized = response.body.toLowerCase();
+    expect(serialized).not.toContain('redis');
+    expect(serialized).not.toContain('rl:ext');
+    expect(response.body).not.toContain(key.secret);
+  });
+
+  it('fails OPEN for a VALID key in the documented dev/test mode', async () => {
+    await setup({
+      rateLimiter: throughputStoreDown,
+      rateLimitFailureMode: 'open',
+    });
+    const owner = await registerUser();
+    const orgId = await createTeamOrg(owner.token, 'Acme');
+    setPlan(orgId);
+    const key = await createKey(owner.token, orgId);
+
+    expect((await externalList(key.secret)).statusCode).toBe(200);
+  });
+
+  it('keeps INVALID credentials at the uniform 401 during a total store outage, even in closed mode', async () => {
+    // Auth correctness precedes every limiter: an invalid credential is
+    // rejected before the throughput buckets run, and the failed-auth
+    // event-write bound treats a store outage as "skip the durable write",
+    // never as a 503 and never as acceptance.
+    const totalOutage: RateLimiter = { consume: async () => 'unavailable' };
+    await setup({
+      rateLimiter: totalOutage,
+      rateLimitFailureMode: 'closed',
+    });
+
+    const before = ctx.orgStore.securityEvents.length;
+    const response = await externalList('okey_live_invalid_during_outage');
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe('API_KEY_UNAUTHORIZED');
+    expect(ctx.orgStore.securityEvents.length).toBe(before);
   });
 });

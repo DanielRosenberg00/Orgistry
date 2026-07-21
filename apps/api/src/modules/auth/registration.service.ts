@@ -15,8 +15,14 @@ import type {
 import type { UserRow } from '@orgistry/db';
 import { type Clock, createId, systemClock } from '@orgistry/shared';
 import { AppError } from '../../lib/errors';
-import type { RateLimiter } from '../../lib/rate-limit';
-import { createNoopRateLimiter } from '../../lib/rate-limit';
+import type {
+  RateLimiter,
+  RateLimitFailureMode,
+} from '../../lib/rate-limit';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+} from '../../lib/rate-limit';
 import type { AccountMailer } from '../mail/account-mailer';
 import { rateLimitedError } from './auth.errors';
 import { toAuthUser } from './auth.service';
@@ -142,6 +148,12 @@ export interface RegistrationServiceOptions {
   /** Redis-backed in production; a no-op limiter when omitted. */
   rateLimiter?: RateLimiter;
   rateLimits?: RegistrationRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009): `open` allows,
+   * `closed` rejects with a generic 503. Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
   /** Invitation collaborator. OPTIONAL: without it, invitation tokens are rejected. */
   invitations?: RegistrationInvitations;
   clock?: Clock;
@@ -238,6 +250,7 @@ export function createRegistrationService(
     sessionTtlSeconds,
     refreshTokenTtlSeconds,
     rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
     invitations,
     clock = systemClock,
   } = options;
@@ -285,7 +298,12 @@ export function createRegistrationService(
     bucket: string,
     ctx: RequestContext,
   ): Promise<void> {
-    const allowed = await rateLimiter.consume(key, limit, limits.windowSeconds);
+    const decision = await rateLimiter.consume(
+      key,
+      limit,
+      limits.windowSeconds,
+    );
+    const allowed = enforceStoreAvailability(decision, rateLimitFailureMode);
     if (!allowed) {
       await writeSecurityEvent({
         userId: null,
@@ -342,17 +360,15 @@ export function createRegistrationService(
     normalizedEmail: string,
     ctx: RequestContext,
   ): Promise<void> {
-    let allowed: boolean;
-    try {
-      allowed = await rateLimiter.consume(
-        `rl:register:notice:email:${hashOpaqueToken(normalizedEmail)}`,
-        limits.existingAccountNoticePerEmailMax,
-        limits.windowSeconds,
-      );
-    } catch {
-      allowed = false;
-    }
-    if (!allowed) {
+    // INTERNAL bucket: a store outage conservatively SKIPS the email (never a
+    // client error) — an unbounded notice stream to one mailbox is worse than
+    // a missed courtesy email, regardless of the public failure mode.
+    const decision = await rateLimiter.consume(
+      `rl:register:notice:email:${hashOpaqueToken(normalizedEmail)}`,
+      limits.existingAccountNoticePerEmailMax,
+      limits.windowSeconds,
+    );
+    if (decision !== 'allowed') {
       await recordRequestOutcome('existing_account_notice_throttled', ctx);
       return;
     }

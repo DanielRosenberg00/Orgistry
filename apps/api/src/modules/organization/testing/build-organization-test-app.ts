@@ -7,9 +7,19 @@ import {
   createInMemoryAuthRepository,
   type InMemoryAuthRepository,
 } from '../../auth/testing/in-memory-auth-repo';
-import { createMemberService } from '../member.service';
+import {
+  createMemberService,
+  type MemberMutationRateLimits,
+} from '../member.service';
 import { createOrganizationRbacService } from '../org-rbac.service';
-import { createOrganizationService } from '../organization.service';
+import {
+  createOrganizationService,
+  type OrganizationRateLimits,
+} from '../organization.service';
+import type {
+  RateLimiter,
+  RateLimitFailureMode,
+} from '../../../lib/rate-limit';
 import { createRbacService } from '../../rbac/rbac.service';
 import { createInMemoryRbacRepository } from '../../rbac/testing/in-memory-rbac-repo';
 import { createInMemoryOrganizationRepository } from './in-memory-organization-repo';
@@ -40,7 +50,17 @@ export interface OrganizationTestContext {
   config: Config;
 }
 
-export async function buildOrganizationTestApp(): Promise<OrganizationTestContext> {
+export interface BuildOrganizationAppOptions {
+  /** Limiter for the org-creation + member-admin mutation buckets (Sprint 19). */
+  rateLimiter?: RateLimiter;
+  orgRateLimits?: OrganizationRateLimits;
+  memberRateLimits?: MemberMutationRateLimits;
+  rateLimitFailureMode?: RateLimitFailureMode;
+}
+
+export async function buildOrganizationTestApp(
+  options: BuildOrganizationAppOptions = {},
+): Promise<OrganizationTestContext> {
   const config = testConfig();
   const orgStore = createInMemoryOrgStore();
   const authRepo = createInMemoryAuthRepository({ orgStore });
@@ -59,8 +79,18 @@ export async function buildOrganizationTestApp(): Promise<OrganizationTestContex
     authRepo,
     mailer,
   });
-  const organizationService = createOrganizationService({ repo: orgRepo });
-  const memberService = createMemberService({ repo: orgRepo });
+  const organizationService = createOrganizationService({
+    repo: orgRepo,
+    rateLimiter: options.rateLimiter,
+    rateLimits: options.orgRateLimits,
+    rateLimitFailureMode: options.rateLimitFailureMode,
+  });
+  const memberService = createMemberService({
+    repo: orgRepo,
+    rateLimiter: options.rateLimiter,
+    rateLimits: options.memberRateLimits,
+    rateLimitFailureMode: options.rateLimitFailureMode,
+  });
   const rbacService = createRbacService({
     repo: createInMemoryRbacRepository(orgStore),
   });

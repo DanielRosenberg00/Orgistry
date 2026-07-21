@@ -75,7 +75,13 @@ it with the schema change. The snapshot/diff helpers are unit-tested
 ## Integration validation: `pnpm validate:integration`
 
 Requires live PostgreSQL + Redis (start them with `pnpm infra:up`; see the
-[runbook](./runbook.md)). The relevant environment variables must be set
+[runbook](./runbook.md)). Redis is MANDATORY for a valid integration pass:
+the real-Redis limiter suite
+(`apps/api/src/lib/rate-limit.redis.integration.test.ts`) fails hard — it
+never skips — so `pnpm validate:integration` exits non-zero when Redis is
+unreachable rather than reporting a green run that silently omitted the
+Redis evidence. (The DB-backed suites are separately gated by
+`db:reset:test`, which refuses to run without a reachable test database.) The relevant environment variables must be set
 (`DATABASE_URL`, `TEST_DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`,
 `NODE_ENV=test`); `cp .env.example .env` provides working local defaults.
 
@@ -119,6 +125,14 @@ pnpm validate:integration    # db:reset:test + test:integration
   equality matrix lives in `invitation.routes.test.ts`, and the web demo's
   registration flows — plain and invitation-aware — are covered by
   `registration.test.tsx` and `invitation-registration.test.tsx`).
+- The Sprint 19 edge hardening holds: a failed-auth **storm** integration test
+  proves the per-IP durable-write bound on external API-key auth failures
+  (writes stop at the allowance while the uniform 401 contract holds). The
+  rest of the edge-security surface is covered by unit/route suites in the
+  offline tier: `TRUST_PROXY` parsing and client-IP resolution, the security
+  headers on every response class, the global per-IP limiter and the
+  mutation/invitation throttles (429 envelopes, fail-open/fail-closed
+  behavior), request-id sanitization, and pino logger redaction.
 
 ### Integration tests skip safely
 

@@ -6,7 +6,12 @@ export {
   parseId,
   isValidId,
 } from './ids';
-export { generateRequestId, resolveRequestId } from './request-id';
+export {
+  generateRequestId,
+  isSafeRequestId,
+  resolveRequestId,
+  REQUEST_ID_MAX_LENGTH,
+} from './request-id';
 export { type Clock, systemClock } from './clock';
 export { encodeCursor, decodeCursor } from './cursor';
 

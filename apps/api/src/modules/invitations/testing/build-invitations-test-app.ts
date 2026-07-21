@@ -16,7 +16,14 @@ import {
 import { createMemberService } from '../../organization/member.service';
 import { createEntitlementService } from '../../entitlements/entitlement.service';
 import { createInMemoryEntitlementRepository } from '../../entitlements/testing/in-memory-plan-repo';
-import { createInvitationService } from '../invitation.service';
+import {
+  createInvitationService,
+  type InvitationRateLimits,
+} from '../invitation.service';
+import type {
+  RateLimiter,
+  RateLimitFailureMode,
+} from '../../../lib/rate-limit';
 import { createInMemoryInvitationRepository } from './in-memory-invitation-repo';
 import {
   createInMemoryAccountMailer,
@@ -51,6 +58,12 @@ export interface InvitationsTestContext {
 export interface BuildInvitationsAppOptions {
   /** Token TTL in seconds. Defaults to the config default (7 days). */
   ttlSeconds?: number;
+  /** Limiter for the invitation abuse-control buckets (Sprint 19). */
+  rateLimiter?: RateLimiter;
+  /** Deterministic bucket thresholds for throttle tests. */
+  rateLimits?: InvitationRateLimits;
+  /** Store-outage behavior under test ('open' default, like unit tests). */
+  rateLimitFailureMode?: RateLimitFailureMode;
 }
 
 export async function buildInvitationsTestApp(
@@ -72,6 +85,9 @@ export async function buildInvitationsTestApp(
     mailer,
     ttlSeconds: options.ttlSeconds ?? config.invitations.ttlSeconds,
     webBaseUrl: config.web.url,
+    rateLimiter: options.rateLimiter,
+    rateLimits: options.rateLimits,
+    rateLimitFailureMode: options.rateLimitFailureMode,
   });
 
   const authService = createAuthService({

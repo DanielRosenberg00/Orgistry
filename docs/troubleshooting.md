@@ -48,8 +48,11 @@ host port (e.g. `5433`) in `infra/docker-compose.yml` and update
 
 - `/ready` returns `503` with `redis` unhealthy. Start Redis (`pnpm infra:up`)
   or fix a 6379 conflict (`lsof -nP -iTCP:6379 -sTCP:LISTEN`).
-- Note: rate limiting **fails open** — auth still works without Redis — but the
-  readiness probe and the rate-limit integration behavior depend on it.
+- Note: rate limiting **fails open locally** (development/test derive
+  `RATE_LIMIT_FAILURE_MODE=open`) — auth still works without Redis — but the
+  readiness probe and the rate-limit integration behavior depend on it. In
+  production the sensitive limiters fail **closed** instead; see
+  "503 SERVICE_UNAVAILABLE on auth endpoints" below.
 
 ## Mailpit unavailable
 
@@ -98,7 +101,11 @@ host port (e.g. `5433`) in `infra/docker-compose.yml` and update
 `GET /ready` returns `503` with a per-dependency `checks` array naming the failed
 dependency (`postgres` and/or `redis`). `GET /health` is liveness only and is
 `200` whenever the process is up. Use the `checks` array to see exactly which
-dependency is down, then apply the relevant fix above.
+dependency is down, then apply the relevant fix above. The per-dependency
+`checks` output exists only in development/test — under `NODE_ENV=production`
+`/ready` is deliberately coarse (`200 {status:'ready'}` or a generic `503`
+with no dependency names); per-check outcomes are logged server-side on
+failure, so consult the process logs there.
 
 ## CORS / cookie issues between web and API
 
@@ -124,6 +131,67 @@ cross-origin, and refresh/logout rely on a cookie sent with
 - **Rate-limited (`429`).** The auth buckets are intentionally tight. Wait for the
   window (default 60s) or raise the relevant `RATE_LIMIT_*` value in `.env` for
   local testing.
+
+## Unexpected `429 RATE_LIMITED` outside auth
+
+Since Sprint 19 the auth buckets are not the only limiters:
+
+- **The global limit.** Every route except `/health`, `/ready`, and `OPTIONS`
+  preflight shares one bucket per client IP — `RATE_LIMIT_MAX` (default 300)
+  per `RATE_LIMIT_WINDOW_SECONDS` (default 60). Bulk local scripting or a seed
+  run hammering the API from one IP can trip it; raise `RATE_LIMIT_MAX` in
+  `.env` for local testing.
+- **Mutation buckets.** Org create, project create/update/delete, API-key
+  create, demo plan change, member role change/removal, and invitation
+  create/inspect/accept carry their own per-actor limits
+  (`RATE_LIMIT_ORG_CREATE_PER_USER_MAX`,
+  `RATE_LIMIT_PROJECT_CREATE_PER_USER_MAX`,
+  `RATE_LIMIT_PROJECT_MUTATION_PER_USER_MAX`,
+  `RATE_LIMIT_API_KEY_CREATE_PER_USER_MAX`,
+  `RATE_LIMIT_PLAN_CHANGE_PER_ORG_MAX`,
+  `RATE_LIMIT_MEMBER_MUTATION_PER_USER_MAX`, `RATE_LIMIT_INVITATION_*`) over
+  `RATE_LIMIT_MUTATION_WINDOW_SECONDS` (default 60). Raise the specific
+  variable named for the endpoint you are hitting.
+
+Either way the response is the standard `429 RATE_LIMITED` envelope; wait for
+the window or raise the relevant value locally.
+
+## 503 SERVICE_UNAVAILABLE on auth endpoints
+
+Sensitive rate-limited endpoints (login, refresh, registration, password
+recovery, email verification, invitation inspect/accept/create, the external
+API, the mutation buckets) return a generic `503 SERVICE_UNAVAILABLE` when
+Redis is unreachable **and** the limiter failure mode is `closed` — the
+production default (`RATE_LIMIT_FAILURE_MODE` unset derives
+production→closed; production refuses an explicit `open`). Check `GET /ready`
+and Redis health, and look for sanitized limiter-store failure lines in the
+server logs (the response itself carries no Redis details). Locally the mode
+defaults to `open`, so seeing this in development usually means
+`RATE_LIMIT_FAILURE_MODE=closed` was set explicitly.
+
+## Wrong client IPs / all requests share one rate-limit bucket
+
+Behind a reverse proxy with the default `TRUST_PROXY=false`, forwarded headers
+are ignored and every request's `request.ip` is the proxy's address — so all
+clients collapse into one rate-limit bucket and logs/audit/security events
+record the proxy IP. Set `TRUST_PROXY` to the trusted hop count (accepted
+range 1–16; `1` for one TLS-terminating proxy) or to a comma-separated proxy IP/CIDR list (entries
+are validated semantically at boot: real IPv4/IPv6 addresses, CIDR prefixes
+0–32/0–128 — hostnames, malformed entries, and empty comma entries refuse to
+start). Do not overshoot: a too-high hop count lets clients spoof their IP
+via forged headers. The literal `true` is rejected at boot. For direct local
+access, leave the default `false`. Note HSTS also depends on this value:
+production emits it only for requests whose proxy-aware protocol resolves to
+`https`, so a wrong `TRUST_PROXY` silently disables HSTS.
+
+## `x-request-id` differs from what the client sent
+
+An inbound `x-request-id` is honored only if it matches
+`[A-Za-z0-9._-]{1,128}`. Anything else — empty, over 128 chars, whitespace,
+control characters, or other characters — is replaced by a server-generated
+`req_<uuid>`, which is what the response header, logs, and error envelopes
+then carry. If your correlation ids "change", make the client send ids in the
+accepted format.
 
 ## Integration test environment variables
 

@@ -18,7 +18,7 @@ column now carries later per-item updates (e.g. Sprint 15). Owner types:
 | LC-1.4 | SHA-pin CI actions + add `permissions:` block | ORG-PR-019 | 20 | workflow diff | SecEng | Open |
 | LC-1.5 | Add dependency/secret/SAST scanning to CI | ORG-PR-020 | 20 | CI runs scanners | SecEng | Open |
 | LC-1.6 | Build deployable non-root artifacts + pipeline to staging | ORG-PR-001 | 21 | tagged build deploys to staging | Eng/Ops | Open |
-| LC-1.7 | Security headers + `trustProxy` + DB timeouts | ORG-PR-011, 010, 021 | 18/21 | header/proxy/timeout tests | Eng | Open |
+| LC-1.7 | Security headers + `trustProxy` + DB timeouts | ORG-PR-011, 010, 021 | 18/21 | header/proxy/timeout tests | Eng | Open — advanced (Sprint 19): security headers on every response (`apps/api/src/plugins/security-headers.ts`) and typed `TRUST_PROXY` shipped with tests (ORG-PR-010/011 closed); DB/pool/statement timeouts (ORG-PR-021) remain for Sprint 21 |
 
 ## Stage 2 — Mandatory before production data
 
@@ -40,8 +40,8 @@ column now carries later per-item updates (e.g. Sprint 15). Owner types:
 | --- | --- | --- | --- | --- | --- | --- |
 | LC-3.1 | Password recovery flow | ORG-PR-004 | 17 | reset integration tests (expiry/reuse/enum) | Eng | **Done (S17)** — route + live-DB suites cover expiry, reuse, concurrency, enumeration, revocation |
 | LC-3.2 | Email verification + register de-enumeration | ORG-PR-024, 030 | 16/17/18 | verification tests; no register oracle | Eng | **Done (S18)** — verification lifecycle (S16) + verification-first registration (S18): the register oracle is removed (contract-identical generic acceptance for all account states, proven by an equality-matrix test); a residual timing side channel is documented in the findings register |
-| LC-3.3 | Global/edge rate limiting + bound pre-auth writes + throttle inspect | ORG-PR-012, 013, 032 | 18 | limiter tests; load test bounds writes | SecEng | Open |
-| LC-3.4 | Rate-limit fail-closed option + alerting | ORG-PR-009 | 18/23 | fail-closed test + alert | SecEng/Ops | Open |
+| LC-3.3 | Global/edge rate limiting + bound pre-auth writes + throttle inspect | ORG-PR-012, 013, 032 | 18 | limiter tests; load test bounds writes | SecEng | **Done (Sprint 19)** — global per-trusted-IP limiter, `invitations/inspect` per-IP + per-token-digest throttling, per-actor mutation buckets, and failed-auth `security_events` writes bounded per source IP (DB-backed storm test `api-key.failed-auth.integration.test.ts`) |
+| LC-3.4 | Rate-limit fail-closed option + alerting | ORG-PR-009 | 18/23 | fail-closed test + alert | SecEng/Ops | Open — advanced (Sprint 19): fail-closed implemented, tested, and production-default (`RATE_LIMIT_FAILURE_MODE`; guard refuses `open` in production); the alerting half awaits ORG-PR-007 (Sprint 23) |
 | LC-3.5 | Observability: metrics/tracing/dashboards/alerts | ORG-PR-007 | 23 | dashboard + synthetic-failure alert | Ops | Open |
 | LC-3.6 | Incident process + production runbooks + ops docs | ORG-PR-008, 027 | 23 | tabletop passes; docs published | Ops | Open |
 | LC-3.7 | External security review / pentest + DAST | ORG-PR-018, 020 | 24 | report with no unresolved high | SecEng | Open |
@@ -65,7 +65,7 @@ column now carries later per-item updates (e.g. Sprint 15). Owner types:
 | --- | --- | --- | --- | --- | --- | --- |
 | LC-5.1 | MFA/passkeys + security notifications | ORG-PR-045 | post-launch | enrol/verify + notification tests | Eng | Open |
 | LC-5.2 | Remove redundant index / dead scaffolding | ORG-PR-051, 048 | as convenient | schema-drift passes | Eng | Open |
-| LC-5.3 | `/ready` disclosure + shutdown timeout | ORG-PR-052 | as convenient | minimized `/ready`; bounded shutdown | Eng | Open |
+| LC-5.3 | `/ready` disclosure + shutdown timeout | ORG-PR-052 | as convenient | minimized `/ready`; bounded shutdown | Eng | **Done (Sprint 19)** — `/ready` coarse in production (ready/not-ready only), shutdown idempotent with a 10s bounded force-exit timer, plus inbound `x-request-id` sanitization (ORG-PR-052 closed) |
 | LC-5.4 | PostgreSQL RLS as defense-in-depth | (roadmap) | post-launch | RLS blocks a missing app-scope | Eng | Open |
 
 ## Launch gate summary

@@ -72,6 +72,31 @@ path), so it never reaches access logs or `Referer` headers — the same
 secrets-out-of-URLs discipline the refresh cookie and API-key Authorization
 header already follow.
 
+### Request throttling (Sprint 19)
+
+The invitation surfaces carry Redis-backed fixed-window throttles; exceeding
+any returns the standard `429 RATE_LIMITED` envelope:
+
+- **Inspect** (public): per trusted client IP
+  (`RATE_LIMIT_INVITATION_INSPECT_PER_IP_MAX`, default 30/min) **and** per
+  token-derived digest across all IPs
+  (`RATE_LIMIT_INVITATION_INSPECT_PER_TOKEN_MAX`, default 10/min). The Redis
+  key uses `sha256(sha256(rawToken))` — the raw token never enters a Redis
+  key, log line, or event metadata.
+- **Accept**: per authenticated user
+  (`RATE_LIMIT_INVITATION_ACCEPT_PER_USER_MAX`, default 10/min).
+- **Create**: per user (`RATE_LIMIT_INVITATION_CREATE_PER_USER_MAX`, default
+  20/min) and per organization
+  (`RATE_LIMIT_INVITATION_CREATE_PER_ORG_MAX`, default 60/min). The create
+  limiter runs **after** the permission check, so it cannot be used to probe
+  authorization.
+
+The inspect/accept response contracts are unchanged — the throttles bound
+token-guessing volume without altering what a valid or invalid token
+discloses. When Redis is down these limiters follow the system failure mode
+(fail closed in production → `503 SERVICE_UNAVAILABLE`; see
+[security-model.md](security-model.md)).
+
 ### Where the code lives
 
 ```
@@ -335,7 +360,11 @@ re-invite to free the duplicate-pending slot).
 `QUOTA_EXCEEDED` (409, with `details.quota = max_members`), `CONFLICT` (409,
 duplicate pending / already an active member), `FORBIDDEN` (403, missing
 permission), `UNAUTHORIZED` (401), `VALIDATION_ERROR` (400). (The platform's
-"unauthenticated" code is `UNAUTHORIZED`.)
+"unauthenticated" code is `UNAUTHORIZED`.) Since Sprint 19, `RATE_LIMITED`
+(429) on inspect/accept/create (see
+[Request throttling](#request-throttling-sprint-19)) and
+`SERVICE_UNAVAILABLE` (503) when Redis is down and the limiter fails closed
+(production).
 
 ### Permission decision
 

@@ -1,11 +1,15 @@
 import type { Config } from '@orgistry/config';
-import { generateRequestId } from '@orgistry/shared';
+import { resolveRequestId } from '@orgistry/shared';
 import cors from '@fastify/cors';
 import Fastify, {
   type FastifyInstance,
   type FastifyServerOptions,
 } from 'fastify';
+import { buildLoggerOptions } from './lib/logging';
+import type { RateLimiter } from './lib/rate-limit';
 import { registerErrorHandler } from './plugins/error-handler';
+import { registerGlobalRateLimit } from './plugins/global-rate-limit';
+import { registerSecurityHeaders } from './plugins/security-headers';
 import { registerHealthRoute } from './routes/health';
 import { registerReadinessRoute } from './routes/readiness';
 import { registerAuthRoutes } from './modules/auth/auth.routes';
@@ -142,7 +146,18 @@ export interface BuildAppOptions {
    * API keys are not user sessions. Required to register the external routes.
    */
   apiKeyAuthenticator?: ApiKeyAuthenticator;
-  /** Logger override. Defaults to a JSON logger at the configured level. */
+  /**
+   * Store backing the GLOBAL per-IP rate limit (Sprint 19). Optional so unit
+   * tests and infrastructure-free contexts run without a limiter; `server.ts`
+   * wires the Redis-backed store. When omitted, no global limit is enforced.
+   */
+  globalRateLimiter?: RateLimiter;
+  /**
+   * Logger override. Defaults to the centralized options from
+   * `lib/logging.ts` (configured level + the pino redaction backstop). Tests
+   * that capture log output pass `buildLoggerOptions(config, stream)` here so
+   * redaction stays active while lines land in memory.
+   */
   logger?: FastifyServerOptions['logger'];
 }
 
@@ -153,23 +168,76 @@ export interface BuildAppOptions {
  * exercise the app via `app.inject(...)` with no open ports or real network,
  * and lets startup own process concerns (signals, real clients, shutdown).
  *
- * Request-id handling: Fastify reuses an inbound `x-request-id` header when
- * present and otherwise generates one. The id is echoed on every response and
- * included in error envelopes and log lines (`reqId`).
+ * Edge boundary (Sprint 19), in lifecycle order:
+ *  1. `trustProxy` is fixed at CONSTRUCTION time from typed config — the only
+ *     place forwarded headers may be honored, so `request.ip` is trustworthy
+ *     for every later hook, limiter key, and security event.
+ *  2. Request-id sanitization runs in `genReqId` (before logging exists for
+ *     the request): a client `x-request-id` is preserved only when it matches
+ *     the conservative accepted format; anything unsafe is REPLACED with a
+ *     generated id. The resolved id is echoed on every response and included
+ *     in error envelopes and log lines (`requestId`).
+ *  3. The global per-IP rate limit runs in `onRequest`, before body parsing
+ *     and route work (OPTIONS preflight and the health/readiness probes are
+ *     exempt — see the plugin).
+ *  4. Security headers apply in `onSend` to every response, errors included.
+ *  5. CORS (`@fastify/cors`) keeps the explicit typed origin allow-list.
  */
 export function buildApp(options: BuildAppOptions): FastifyInstance {
   const { config, readinessProbes } = options;
 
+  // Startup invariant (Sprint 19): a PRODUCTION process must never come up
+  // without the global baseline limiter. Unit tests run under test/dev config
+  // and stay limiter-free; `server.ts` always wires the Redis-backed store, so
+  // this throw can only fire on a miswired production composition.
+  if (config.isProduction && !options.globalRateLimiter) {
+    throw new Error(
+      'buildApp: a global rate limiter is required when NODE_ENV=production (wire the Redis-backed limiter as in server.ts)',
+    );
+  }
+
+  // `false` (direct exposure) omits the option entirely; a hop count or an
+  // explicit proxy IP/CIDR list is passed through verbatim. `true` (trust
+  // every peer) is unrepresentable — the config schema rejects it.
+  const trustProxy = config.api.trustProxy;
+
   const app = Fastify({
-    logger: options.logger ?? { level: config.logLevel },
-    requestIdHeader: 'x-request-id',
+    logger: options.logger ?? buildLoggerOptions(config),
+    ...(trustProxy === false
+      ? {}
+      : {
+          trustProxy: Array.isArray(trustProxy)
+            ? [...trustProxy]
+            : (trustProxy as number),
+        }),
+    // `requestIdHeader: false` stops Fastify from trusting the inbound header
+    // verbatim; `genReqId` owns resolution INCLUDING sanitization.
+    requestIdHeader: false,
     requestIdLogLabel: 'requestId',
-    genReqId: () => generateRequestId(),
+    genReqId: (req) => resolveRequestId(req.headers['x-request-id']),
   });
 
-  // Echo the resolved request id on every response for client-side correlation.
+  // Echo the resolved (sanitized) request id on every response for
+  // client-side correlation.
   app.addHook('onSend', async (request, reply) => {
     reply.header('x-request-id', request.id);
+  });
+
+  // Global baseline limiter — registered before any route so it runs ahead of
+  // route-specific processing. Only active when a store is wired (server.ts).
+  if (options.globalRateLimiter) {
+    registerGlobalRateLimit(app, {
+      limiter: options.globalRateLimiter,
+      maxPerIp: config.rateLimit.max,
+      windowSeconds: config.rateLimit.windowSeconds,
+    });
+  }
+
+  // Security headers on every response, error envelopes included. HSTS is
+  // production-only so local plain-HTTP development is never poisoned.
+  registerSecurityHeaders(app, {
+    enableHsts: config.isProduction,
+    hstsMaxAgeSeconds: config.security.hstsMaxAgeSeconds,
   });
 
   app.register(cors, {
@@ -179,7 +247,9 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   registerErrorHandler(app);
   registerHealthRoute(app);
-  registerReadinessRoute(app, readinessProbes);
+  registerReadinessRoute(app, readinessProbes, {
+    disclosure: config.isProduction ? 'coarse' : 'detailed',
+  });
   // Password-recovery routes (Sprint 17). Deliberately independent of
   // `authService`: both routes are public (see the option doc above).
   if (options.passwordRecoveryService) {

@@ -38,6 +38,19 @@ normalization, or security-event persistence.
 > section below. Login/refresh/logout/me/sessions/change-password/change-email
 > are unchanged.
 
+> **Sprint 19 update.** The auth-family rate limiters (login, refresh,
+> registration request/completion, password-recovery request/completion,
+> email-verification request/completion) no longer unconditionally fail open.
+> Under `RATE_LIMIT_FAILURE_MODE=closed` — derived automatically when
+> `NODE_ENV=production` (production also refuses an explicit `open` at boot) —
+> a Redis outage makes these endpoints reject with a generic
+> `503 SERVICE_UNAVAILABLE` (request id included, no Redis details) instead of
+> proceeding unlimited. Development/test default to `open`, where requests
+> proceed as before. No other auth behavior changed — endpoints, contracts,
+> bucket dimensions, and error codes are untouched. See
+> [security-model.md](security-model.md) and
+> [production-readiness/sprint-19-artifact-package.md](production-readiness/sprint-19-artifact-package.md).
+
 Sections A–F of this document are the **historical Sprint 2 reference**. They
 describe the auth foundation as it was first shipped: register/login/
 current-user with no refresh endpoint, logout, session listing/revocation, or
@@ -303,7 +316,10 @@ registration-completion token.
   still performs one insert and one mailer hand-off. The pre-lookup per-IP
   and per-email-digest rate limits bound how fast the residual can be
   sampled.
-- Redis rate limiting still fails open (system-wide policy).
+- Redis rate limiting failed open system-wide when Sprint 18 shipped; since
+  Sprint 19 the sensitive auth limiters fail closed in production
+  (`RATE_LIMIT_FAILURE_MODE`; `503 SERVICE_UNAVAILABLE` on a Redis outage) —
+  see the Sprint 19 update note at the top of this document.
 - No cleanup scheduler for consumed/expired `pending_registrations` rows (the
   `expires_at` index exists for a future sweep).
 - Production SMTP delivery remains externally unvalidated; there is no
@@ -549,8 +565,9 @@ state see [`session-lifecycle.md`](session-lifecycle.md) (Sprint 3) and
   cursor-paginated).
 - Auth rate limiting — **resolved in Sprint 3** (Redis-backed login-per-IP,
   login-per-email, register-per-IP, refresh-per-session, and refresh-per-IP
-  buckets returning `RATE_LIMITED`; the limiter fails open, so a Redis outage
-  disables limiting but never affects auth correctness).
+  buckets returning `RATE_LIMITED`; the limiter originally failed open — since
+  Sprint 19 the sensitive auth limiters fail closed in production; see the
+  Sprint 19 update note at the top of this document).
 - Organization-linked registration — **resolved in Sprint 4**: registration
   provisions the user's personal workspace (organization + active Owner
   membership) atomically, and authenticated team-organization create/list/read

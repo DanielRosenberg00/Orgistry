@@ -3,7 +3,7 @@ import type { EmailVerificationTokenRow } from '@orgistry/db';
 import type { Clock } from '@orgistry/shared';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../../app';
-import type { RateLimiter } from '../../../lib/rate-limit';
+import type { RateLimiter, RateLimitFailureMode } from '../../../lib/rate-limit';
 import { passingProbe, testConfig } from '../../../testing/build-test-app';
 import {
   createInMemoryAccountMailer,
@@ -64,6 +64,8 @@ export interface AuthTestContext {
 
 export interface BuildAuthTestAppOptions {
   rateLimiter?: RateLimiter;
+  /** Store-outage behavior shared by every auth-family service under test. */
+  rateLimitFailureMode?: RateLimitFailureMode;
   rateLimits?: AuthRateLimits;
   registrationRateLimits?: RegistrationRateLimits;
   emailVerificationRateLimits?: EmailVerificationRateLimits;
@@ -106,6 +108,7 @@ export async function buildAuthTestApp(
     ttlSeconds:
       options.emailVerificationTtlSeconds ?? config.emailVerification.ttlSeconds,
     rateLimiter: options.rateLimiter,
+    rateLimitFailureMode: options.rateLimitFailureMode,
     rateLimits: options.emailVerificationRateLimits,
     clock: options.clock,
   });
@@ -116,6 +119,7 @@ export async function buildAuthTestApp(
     ttlSeconds:
       options.passwordResetTtlSeconds ?? config.passwordRecovery.ttlSeconds,
     rateLimiter: options.rateLimiter,
+    rateLimitFailureMode: options.rateLimitFailureMode,
     rateLimits: options.passwordRecoveryRateLimits,
     clock: options.clock,
   });
@@ -137,6 +141,7 @@ export async function buildAuthTestApp(
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
     rateLimiter: options.rateLimiter,
+    rateLimitFailureMode: options.rateLimitFailureMode,
     rateLimits: options.registrationRateLimits,
     invitations: options.registrationInvitations,
     clock: options.clock,
@@ -148,6 +153,7 @@ export async function buildAuthTestApp(
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
     rateLimiter: options.rateLimiter,
+    rateLimitFailureMode: options.rateLimitFailureMode,
     rateLimits: options.rateLimits,
     emailVerification: emailVerificationService,
     clock: options.clock,

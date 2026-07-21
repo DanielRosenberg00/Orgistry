@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
 import { enforceMailerConfigCompleteness } from './mail-policy';
 import { enforceProductionConfigSafety } from './production-policy';
@@ -26,6 +27,82 @@ const booleanFromEnv = z
 const portSchema = z.coerce.number().int().min(1).max(65535);
 
 /**
+ * Typed proxy-trust value passed verbatim to Fastify's `trustProxy` option:
+ * `false` (no proxy — forwarded headers ignored), a positive hop count, or an
+ * explicit list of trusted proxy IPs/CIDRs.
+ */
+export type TrustProxySetting = false | number | readonly string[];
+
+/**
+ * Upper bound for the TRUST_PROXY hop count. Real reverse-proxy chains are a
+ * handful of hops (CDN → LB → proxy is three); 16 is far beyond any sane
+ * topology while still rejecting nonsense like an unbounded or overflowing
+ * count — every hop above the real chain length is a spoofing opportunity.
+ * The recommended normal deployment value is 1.
+ */
+export const TRUST_PROXY_MAX_HOPS = 16;
+
+/**
+ * True when `entry` is a real IP address or a well-formed CIDR block:
+ * `node:net`'s `isIP` validates the address part (octet ranges, IPv6 group
+ * syntax — no shape heuristics), and the optional prefix must be an
+ * unpadded decimal within 0–32 (IPv4) or 0–128 (IPv6).
+ */
+function isIpOrCidr(entry: string): boolean {
+  const slashIndex = entry.indexOf('/');
+  const address = slashIndex === -1 ? entry : entry.slice(0, slashIndex);
+  const family = isIP(address); // 0 = not an IP, 4, or 6
+  if (family === 0) {
+    return false;
+  }
+  if (slashIndex === -1) {
+    return true;
+  }
+  const prefix = entry.slice(slashIndex + 1);
+  if (!/^(0|[1-9]\d{0,2})$/.test(prefix)) {
+    return false;
+  }
+  return Number(prefix) <= (family === 4 ? 32 : 128);
+}
+
+/**
+ * Parse the TRUST_PROXY environment string into its typed form, or `undefined`
+ * when the value is not acceptable. `'true'` is rejected deliberately —
+ * unbounded trust would let any direct client spoof its resolved IP.
+ */
+export function parseTrustProxy(raw: string): TrustProxySetting | undefined {
+  const value = raw.trim();
+  if (value === '' || value.toLowerCase() === 'true') {
+    return undefined;
+  }
+  if (value.toLowerCase() === 'false') {
+    return false;
+  }
+  if (/^\d+$/.test(value)) {
+    // Plain decimal digits only (scientific notation, decimals, and signs
+    // fall through to the IP/CIDR branch and fail there). The count must be
+    // a Number-safe integer within 1..TRUST_PROXY_MAX_HOPS — an overlong or
+    // overflowing digit string is a misconfiguration, not a hop count.
+    const hops = Number(value);
+    if (!Number.isSafeInteger(hops) || hops < 1 || hops > TRUST_PROXY_MAX_HOPS) {
+      return undefined;
+    }
+    return hops;
+  }
+  // Empty entries (leading/trailing/double commas) are REJECTED, not skipped:
+  // a malformed list must fail loudly at boot, never silently trust less (or
+  // more) than the operator wrote.
+  const entries = value.split(',').map((entry) => entry.trim());
+  if (
+    entries.length === 0 ||
+    !entries.every((entry) => entry.length > 0 && isIpOrCidr(entry))
+  ) {
+    return undefined;
+  }
+  return entries;
+}
+
+/**
  * Raw environment schema. Keys map 1:1 to environment variable names so the
  * mapping between `.env` and validated config is obvious.
  */
@@ -42,6 +119,38 @@ const rawEnvSchema = z.object({
   // API HTTP server.
   API_HOST: z.string().min(1).default('0.0.0.0'),
   API_PORT: portSchema.default(3000),
+
+  // Reverse-proxy trust (Sprint 19). Controls Fastify's `trustProxy` at
+  // construction time — the ONLY place forwarded headers may be honored.
+  //   'false'          — default. Direct exposure: `X-Forwarded-*` from the
+  //                      socket peer is IGNORED; `request.ip` is the socket IP.
+  //   a positive int   — trust exactly that many proxy hops (e.g. '1' for one
+  //                      TLS-terminating reverse proxy directly in front).
+  //   comma-separated  — explicit trusted proxy IPs/CIDRs (e.g.
+  //                      '10.0.0.0/8,172.16.0.0/12') once the deployment
+  //                      defines a stable proxy address range.
+  // `'true'` (trust everything) is deliberately NOT accepted: it would let any
+  // direct client spoof its IP — and therefore every IP-keyed rate limit and
+  // security event — with a forged header.
+  TRUST_PROXY: z
+    .string()
+    .default('false')
+    .superRefine((value, ctx) => {
+      if (parseTrustProxy(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            `TRUST_PROXY must be "false", a hop count between 1 and ${TRUST_PROXY_MAX_HOPS} (e.g. "1" for one reverse proxy), or a comma-separated list of valid proxy IPs/CIDRs (IPv4 prefix 0-32, IPv6 prefix 0-128; no hostnames, no empty entries); "true" (trust every peer) is not accepted`,
+        });
+      }
+    }),
+
+  // HSTS lifetime (Sprint 19). Strict-Transport-Security is emitted only when
+  // BOTH NODE_ENV=production AND Fastify's proxy-aware request protocol
+  // resolves to https (a real TLS socket, or X-Forwarded-Proto from a TRUSTED
+  // hop), so local plain-HTTP development is never poisoned with a cached
+  // HSTS policy and a forged header cannot mint one. Default: 180 days.
+  HSTS_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(15_552_000),
 
   // Web demo. Used for the default CORS allow-list entry.
   WEB_DEMO_URL: z.string().url().default('http://localhost:5173'),
@@ -178,10 +287,106 @@ const rawEnvSchema = z.object({
   // CORS preflight that the strict allow-list denies.
   AUTH_CSRF_HEADER_NAME: z.string().min(1).default('x-orgistry-csrf'),
 
-  // Generic rate-limit namespace (declared in Sprint 1; not used for auth
-  // buckets, which have their own typed values below).
+  // Global API rate limit (Sprint 19; the variables date from Sprint 1). One
+  // fixed-window bucket per trusted client IP applied to every route before
+  // route-specific processing, as a baseline abuse boundary — it never replaces
+  // the stricter per-endpoint buckets below. `/health`, `/ready`, and CORS
+  // preflight (OPTIONS) are exempt (operators poll the probes; preflights are
+  // browser-controlled). The global bucket FAILS OPEN on a Redis outage by
+  // design regardless of RATE_LIMIT_FAILURE_MODE: readiness already takes the
+  // instance out of rotation, and failing the entire API closed would turn a
+  // Redis blip into a total outage while every sensitive endpoint keeps its
+  // own fail-closed bucket.
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
-  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
+
+  // Rate-limit failure mode (Sprint 19, ORG-PR-009). Governs what SENSITIVE
+  // route-specific limiters do when the Redis limiter store is unreachable:
+  //   open   — allow the request (development/test usability).
+  //   closed — reject with 503 SERVICE_UNAVAILABLE (production posture: an
+  //            outage must not silently disable credential/token abuse
+  //            controls).
+  // Defaults per environment: production → closed, development/test → open.
+  // The production guard additionally REJECTS an explicit 'open' in
+  // production.
+  RATE_LIMIT_FAILURE_MODE: z.enum(['open', 'closed']).optional(),
+
+  // Invitation abuse-control buckets (Sprint 19, ORG-PR-012). The public
+  // inspect endpoint is limited per trusted IP AND per token-derived internal
+  // digest (never the raw token); accept and create are authenticated and
+  // limited per user (+ per organization for create, which sends real email).
+  // Shares the auth fixed window.
+  RATE_LIMIT_INVITATION_INSPECT_PER_IP_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30),
+  RATE_LIMIT_INVITATION_INSPECT_PER_TOKEN_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
+  RATE_LIMIT_INVITATION_ACCEPT_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
+  RATE_LIMIT_INVITATION_CREATE_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(20),
+  RATE_LIMIT_INVITATION_CREATE_PER_ORG_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+
+  // Authenticated-mutation buckets (Sprint 19, ORG-PR-032). Targeted limits on
+  // the mutations that are genuinely spammable — they provision durable rows,
+  // write audit events, or (invitations) send real email on every call. Keyed
+  // by authenticated user id and/or organization id (trusted identities), one
+  // shared fixed window. Reads and low-cost idempotent mutations are
+  // deliberately unlimited — see the abuse-control matrix in the docs.
+  RATE_LIMIT_MUTATION_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+  RATE_LIMIT_ORG_CREATE_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
+  RATE_LIMIT_PROJECT_CREATE_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30),
+  RATE_LIMIT_API_KEY_CREATE_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
+  RATE_LIMIT_PLAN_CHANGE_PER_ORG_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
+  // Member-administration mutations (role change + removal) and project
+  // update/delete each write a durable audit event per call, so they share
+  // per-acting-user buckets. Ceilings are generous — legitimate admin work
+  // never approaches them; a scripted audit-write loop does.
+  RATE_LIMIT_MEMBER_MUTATION_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30),
+  RATE_LIMIT_PROJECT_MUTATION_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
 
   // Auth rate-limit buckets (Sprint 3, Redis-backed, fixed-window). One shared
   // window length; per-bucket maximums tuned to each surface's abuse profile.
@@ -322,6 +527,20 @@ const rawEnvSchema = z.object({
     .int()
     .positive()
     .default(600),
+
+  // External failed-auth durable-event bound (Sprint 19, ORG-PR-013). At most
+  // this many DURABLE `security_events` rows are written per source IP per
+  // external window for FAILED API-key authentication (missing/malformed/
+  // unknown/revoked/expired/inactive-org — the 401 family). Beyond the bound
+  // (or when the limiter store is unreachable) the failure is still visible
+  // through sanitized structured logs, but no further rows are written, so an
+  // invalid-credential storm cannot grow the table one row per request. The
+  // 401 response contract itself is unchanged.
+  RATE_LIMIT_EXTERNAL_AUTH_FAIL_EVENTS_PER_IP_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
 
   // API key `last_used_at` write throttle (Sprint 8). Successful external auth
   // updates `last_used_at` at most once per this window per key, so a busy key

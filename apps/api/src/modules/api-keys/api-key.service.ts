@@ -15,7 +15,13 @@ import {
   encodeCursor,
   systemClock,
 } from '@orgistry/shared';
-import { AppError } from '../../lib/errors';
+import { AppError, rateLimitedError } from '../../lib/errors';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+  type RateLimiter,
+  type RateLimitFailureMode,
+} from '../../lib/rate-limit';
 import type { EntitlementService } from '../entitlements/entitlement.service';
 import {
   type OrganizationActor,
@@ -56,7 +62,23 @@ export interface ApiKeyServiceOptions {
   apiKeys: ApiKeyRepository;
   /** Organization-level entitlement/quota service (the api_keys_access + max_api_keys gates). */
   entitlements: EntitlementService;
+  /** Redis-backed in production; a no-op limiter when omitted. */
+  rateLimiter?: RateLimiter;
+  /** Key-creation bucket (Sprint 19, ORG-PR-032; from `config.rateLimit.mutations`). */
+  rateLimits?: ApiKeyMutationRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009): `open` allows,
+   * `closed` rejects with a generic 503. Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
   clock?: Clock;
+}
+
+/** API-key management buckets: creation mints a credential + audit event. */
+export interface ApiKeyMutationRateLimits {
+  windowSeconds: number;
+  createPerUserMax: number;
 }
 
 /** Per-request security metadata threaded from the route into action events. */
@@ -162,7 +184,38 @@ function actionContext(
 export function createApiKeyService(
   options: ApiKeyServiceOptions,
 ): ApiKeyService {
-  const { accessControl, apiKeys, entitlements, clock = systemClock } = options;
+  const {
+    accessControl,
+    apiKeys,
+    entitlements,
+    rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
+    clock = systemClock,
+  } = options;
+
+  const limits: ApiKeyMutationRateLimits = options.rateLimits ?? {
+    windowSeconds: 60,
+    createPerUserMax: Number.MAX_SAFE_INTEGER,
+  };
+
+  /**
+   * Consume one mutation rate-limit hit (Sprint 19, ORG-PR-032); throw the
+   * standard RATE_LIMITED envelope on exceed. Runs AFTER authentication and
+   * permission checks so throttling never masks an authorization result. No
+   * durable event per blocked attempt (bounded writes are the point); the 429
+   * stays visible in request logs. A limiter-store outage follows the
+   * configured failure mode (production: fail closed with a generic 503).
+   */
+  async function enforceMutationRateLimit(
+    key: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<void> {
+    const decision = await rateLimiter.consume(key, limit, windowSeconds);
+    if (!enforceStoreAvailability(decision, rateLimitFailureMode)) {
+      throw rateLimitedError();
+    }
+  }
 
   async function actorFor(input: {
     userId: string;
@@ -184,6 +237,13 @@ export function createApiKeyService(
         requestId: input.ctx.requestId,
       });
       requirePermission(actor, PERMISSION_KEYS.apiKeysCreate);
+
+      // AFTER the permission check, BEFORE entitlement/quota reads and the write.
+      await enforceMutationRateLimit(
+        `rl:api-key:create:user:${actor.userId}`,
+        limits.createPerUserMax,
+        limits.windowSeconds,
+      );
 
       // Entitlement THEN quota, both AFTER the permission check. A user without
       // api_keys.create is already blocked; an authorized user is blocked when

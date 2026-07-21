@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Clock } from '@orgistry/shared';
 import { buildApp } from '../../../app';
 import { passingProbe, testConfig } from '../../../testing/build-test-app';
-import type { RateLimiter } from '../../../lib/rate-limit';
+import type { RateLimiter, RateLimitFailureMode } from '../../../lib/rate-limit';
 import { createAuthService } from '../../auth/auth.service';
 import {
   createInMemoryAuthRepository,
@@ -19,7 +19,10 @@ import { createEntitlementService } from '../../entitlements/entitlement.service
 import { createInMemoryEntitlementRepository } from '../../entitlements/testing/in-memory-plan-repo';
 import { createProjectService } from '../../projects/project.service';
 import { createInMemoryProjectRepository } from '../../projects/testing/in-memory-project-repo';
-import { createApiKeyService } from '../api-key.service';
+import {
+  createApiKeyService,
+  type ApiKeyMutationRateLimits,
+} from '../api-key.service';
 import {
   createApiKeyAuthenticator,
   type ExternalRateLimits,
@@ -51,6 +54,10 @@ export interface BuildApiKeysAppOptions {
   externalRateLimits?: ExternalRateLimits;
   /** Rate limiter for the external authenticator. Defaults to a no-op limiter. */
   rateLimiter?: RateLimiter;
+  /** Store-outage behavior for the external buckets ('open' default). */
+  rateLimitFailureMode?: RateLimitFailureMode;
+  /** Key-creation mutation bucket thresholds (Sprint 19). */
+  apiKeyMutationRateLimits?: ApiKeyMutationRateLimits;
   /** Last-used write throttle window. Defaults to 60s. */
   lastUsedThrottleSeconds?: number;
   /** Clock shared by the API key service + authenticator. Defaults to systemClock. */
@@ -102,6 +109,9 @@ export async function buildApiKeysTestApp(
     accessControl: orgRepo,
     apiKeys: apiKeyRepo,
     entitlements: entitlementService,
+    rateLimiter: options.rateLimiter,
+    rateLimits: options.apiKeyMutationRateLimits,
+    rateLimitFailureMode: options.rateLimitFailureMode,
     clock: options.clock,
   });
   const apiKeyAuthenticator = createApiKeyAuthenticator({
@@ -110,6 +120,7 @@ export async function buildApiKeysTestApp(
     entitlements: entitlementService,
     rateLimiter: options.rateLimiter,
     rateLimits: options.externalRateLimits,
+    rateLimitFailureMode: options.rateLimitFailureMode,
     lastUsedThrottleSeconds: options.lastUsedThrottleSeconds ?? 60,
     clock: options.clock,
   });

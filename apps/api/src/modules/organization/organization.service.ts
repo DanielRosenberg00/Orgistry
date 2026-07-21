@@ -14,7 +14,13 @@ import type {
 } from '@orgistry/contracts';
 import { ERROR_CODES } from '@orgistry/contracts';
 import { decodeCursor, encodeCursor } from '@orgistry/shared';
-import { AppError } from '../../lib/errors';
+import { AppError, rateLimitedError } from '../../lib/errors';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+  type RateLimiter,
+  type RateLimitFailureMode,
+} from '../../lib/rate-limit';
 import { resolveOrganizationContext } from './organization.context';
 import type {
   OrganizationMembershipView,
@@ -23,6 +29,22 @@ import type {
 
 export interface OrganizationServiceOptions {
   repo: OrganizationRepository;
+  /** Redis-backed in production; a no-op limiter when omitted. */
+  rateLimiter?: RateLimiter;
+  /** Org-creation bucket (Sprint 19, ORG-PR-032; from `config.rateLimit.mutations`). */
+  rateLimits?: OrganizationRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009): `open` allows,
+   * `closed` rejects with a generic 503. Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
+}
+
+/** Organization mutation buckets: creation provisions rows + plan state. */
+export interface OrganizationRateLimits {
+  windowSeconds: number;
+  createPerUserMax: number;
 }
 
 export interface ListOrganizationsInput {
@@ -101,10 +123,46 @@ function toView(view: OrganizationMembershipView) {
 export function createOrganizationService(
   options: OrganizationServiceOptions,
 ): OrganizationService {
-  const { repo } = options;
+  const {
+    repo,
+    rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
+  } = options;
+
+  const limits: OrganizationRateLimits = options.rateLimits ?? {
+    windowSeconds: 60,
+    createPerUserMax: Number.MAX_SAFE_INTEGER,
+  };
+
+  /**
+   * Consume one mutation rate-limit hit (Sprint 19, ORG-PR-032); throw the
+   * standard RATE_LIMITED envelope on exceed. Runs AFTER authentication and
+   * permission checks so throttling never masks an authorization result. No
+   * durable event per blocked attempt (bounded writes are the point); the 429
+   * stays visible in request logs. A limiter-store outage follows the
+   * configured failure mode (production: fail closed with a generic 503).
+   */
+  async function enforceMutationRateLimit(
+    key: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<void> {
+    const decision = await rateLimiter.consume(key, limit, windowSeconds);
+    if (!enforceStoreAvailability(decision, rateLimitFailureMode)) {
+      throw rateLimitedError();
+    }
+  }
 
   return {
     async createOrganization(userId, input) {
+      // Authenticated caller; creation provisions an organization, Owner
+      // membership, and plan state, so it is throttled per user.
+      await enforceMutationRateLimit(
+        `rl:org:create:user:${userId}`,
+        limits.createPerUserMax,
+        limits.windowSeconds,
+      );
+
       const view = await repo.createTeamOrganization({
         userId,
         name: input.name,

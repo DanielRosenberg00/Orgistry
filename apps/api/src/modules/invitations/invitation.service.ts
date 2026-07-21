@@ -26,7 +26,13 @@ import {
   encodeCursor,
   systemClock,
 } from '@orgistry/shared';
-import { AppError } from '../../lib/errors';
+import { AppError, rateLimitedError } from '../../lib/errors';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+  type RateLimiter,
+  type RateLimitFailureMode,
+} from '../../lib/rate-limit';
 import {
   type OrganizationActor,
   requireMembership,
@@ -49,6 +55,7 @@ import {
 import {
   generateInvitationToken,
   hashInvitationToken,
+  invitationInspectRateLimitKey,
 } from './invitation.token';
 import type {
   InvitationActionContext,
@@ -126,6 +133,8 @@ export interface RevokeInvitationInput {
 
 export interface InspectInvitationInput {
   rawToken: string;
+  /** Request context for the abuse-control buckets (Sprint 19). */
+  ctx: InvitationRequestContext;
 }
 
 export interface AcceptInvitationInput {
@@ -199,7 +208,33 @@ export interface InvitationServiceOptions {
   ttlSeconds: number;
   /** Web origin used to build the acceptance link in the invitation email. */
   webBaseUrl: string;
+  /** Redis-backed in production; a no-op limiter when omitted. */
+  rateLimiter?: RateLimiter;
+  rateLimits?: InvitationRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009): `open` allows,
+   * `closed` rejects with a generic 503. Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
   clock?: Clock;
+}
+
+/**
+ * Invitation abuse-control buckets (Sprint 19, ORG-PR-012; from
+ * `config.rateLimit.invitations`). Public inspect is limited per trusted IP
+ * AND per token-derived digest (never the raw token — see
+ * `invitationInspectRateLimitKey`); accept and create are authenticated and
+ * limited per user (create additionally per organization, because every
+ * create sends a real email and provisions a durable row).
+ */
+export interface InvitationRateLimits {
+  windowSeconds: number;
+  inspectPerIpMax: number;
+  inspectPerTokenMax: number;
+  acceptPerUserMax: number;
+  createPerUserMax: number;
+  createPerOrgMax: number;
 }
 
 /** Internal invitation-list cursor shape. Opaque to clients. */
@@ -284,8 +319,37 @@ export function createInvitationService(
     mailer,
     ttlSeconds,
     webBaseUrl,
+    rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
     clock = systemClock,
   } = options;
+
+  // Permissive defaults when no limits are wired (unit tests). Production
+  // passes real values from config.
+  const limits: InvitationRateLimits = options.rateLimits ?? {
+    windowSeconds: 60,
+    inspectPerIpMax: Number.MAX_SAFE_INTEGER,
+    inspectPerTokenMax: Number.MAX_SAFE_INTEGER,
+    acceptPerUserMax: Number.MAX_SAFE_INTEGER,
+    createPerUserMax: Number.MAX_SAFE_INTEGER,
+    createPerOrgMax: Number.MAX_SAFE_INTEGER,
+  };
+
+  /**
+   * Consume one rate-limit hit; throw the standard RATE_LIMITED envelope on
+   * exceed. Deliberately NO durable security-event write here: the inspect
+   * bucket faces unauthenticated traffic, and a per-blocked-attempt durable
+   * row would recreate the write-amplification problem these buckets exist to
+   * close (ORG-PR-013). Blocked attempts remain visible in request logs via
+   * the 429 response. A limiter-store outage follows the configured failure
+   * mode (production: fail closed with a generic 503).
+   */
+  async function enforceRateLimit(key: string, limit: number): Promise<void> {
+    const decision = await rateLimiter.consume(key, limit, limits.windowSeconds);
+    if (!enforceStoreAvailability(decision, rateLimitFailureMode)) {
+      throw rateLimitedError();
+    }
+  }
 
   async function actorFor(input: {
     userId: string;
@@ -320,6 +384,19 @@ export function createInvitationService(
         requestId: input.ctx.requestId,
       });
       requirePermission(actor, CREATE_PERMISSION);
+
+      // AFTER the permission check (permission-first is preserved; a caller
+      // without invitations.create never sees a 429), BEFORE any lookup or
+      // email work. Every create sends a real email, so both dimensions are
+      // tight: per acting user and per organization.
+      await enforceRateLimit(
+        `rl:invitation:create:user:${input.userId}`,
+        limits.createPerUserMax,
+      );
+      await enforceRateLimit(
+        `rl:invitation:create:org:${actor.organizationId}`,
+        limits.createPerOrgMax,
+      );
 
       const invitedEmailNormalized = normalizeEmail(input.email);
       const roleId = ROLE_IDS[input.role];
@@ -441,6 +518,20 @@ export function createInvitationService(
     },
 
     async inspectInvitation(input): Promise<InvitationInspectResponse> {
+      // Public endpoint: throttle BEFORE the token lookup. Per trusted IP,
+      // plus per token-derived digest so a distributed probe of one token is
+      // still bounded. The raw token never enters a limiter key.
+      if (input.ctx.ipAddress) {
+        await enforceRateLimit(
+          `rl:invitation:inspect:ip:${input.ctx.ipAddress}`,
+          limits.inspectPerIpMax,
+        );
+      }
+      await enforceRateLimit(
+        `rl:invitation:inspect:token:${invitationInspectRateLimitKey(input.rawToken)}`,
+        limits.inspectPerTokenMax,
+      );
+
       const context = await invitations.findContextByTokenHash(
         hashInvitationToken(input.rawToken),
       );
@@ -462,6 +553,13 @@ export function createInvitationService(
     },
 
     async acceptInvitation(input) {
+      // Authenticated endpoint: one per-user bucket bounds token-guessing by
+      // a signed-in account without affecting legitimate single acceptance.
+      await enforceRateLimit(
+        `rl:invitation:accept:user:${input.userId}`,
+        limits.acceptPerUserMax,
+      );
+
       const normalized = normalizeEmail(input.userEmail);
       const tokenHash = hashInvitationToken(input.rawToken);
 

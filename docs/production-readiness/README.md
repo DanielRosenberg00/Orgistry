@@ -73,6 +73,27 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > demo seed. See the refinement record in
 > [sprint-18-artifact-package.md](sprint-18-artifact-package.md) and the
 > ORG-PR-030 refinement note in the findings register.
+>
+> **Post-audit status (Sprint 19, 2026-07-21): Sprint 19 is COMPLETE** in its
+> repository scope — the edge and application security hardening sprint.
+> Seven findings are closed: ORG-PR-010 (typed `TRUST_PROXY`; forwarded
+> headers ignored unless explicitly trusted), ORG-PR-011 (security headers on
+> every response, HSTS `includeSubDomains` only under `NODE_ENV=production`;
+> the SPA CSP remains ORG-PR-035), ORG-PR-012 (global per-trusted-IP rate
+> limit plus `invitations/inspect` throttled per IP and per token-derived
+> digest), ORG-PR-013 (durable failed-auth `security_events` writes bounded
+> per source IP), ORG-PR-032 (per-actor throttling of spammable authenticated
+> mutations), ORG-PR-033 (centralized pino logger redaction), and ORG-PR-052
+> (inbound request-id sanitization, coarse production `/ready`, bounded
+> idempotent shutdown). ORG-PR-009 is **materially advanced but still open**
+> — sensitive rate-limit buckets fail closed under the production-default
+> `RATE_LIMIT_FAILURE_MODE=closed`, but the finding's alerting half depends
+> on ORG-PR-007 (observability). `pnpm validate` and `pnpm validate:integration`
+> exit 0 (2026-07-21). See
+> [sprint-19-artifact-package.md](sprint-19-artifact-package.md). Four P1
+> blockers remain open (ORG-PR-001/002/005/006); the repository is still
+> **not ready for staging or production** — the state remains
+> **C — Ready to continue production implementation**.
 
 ## Audit context
 
@@ -104,6 +125,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-16-artifact-package.md](sprint-16-artifact-package.md) | The Sprint 16 closing artifact (production email + email verification). |
 | [sprint-17-artifact-package.md](sprint-17-artifact-package.md) | The Sprint 17 closing artifact (password recovery + credential management). |
 | [sprint-18-artifact-package.md](sprint-18-artifact-package.md) | The Sprint 18 closing artifact (verification-first registration; ORG-PR-030 closure). |
+| [sprint-19-artifact-package.md](sprint-19-artifact-package.md) | The Sprint 19 closing artifact (edge and application security hardening). |
 
 ## Source-of-truth hierarchy
 

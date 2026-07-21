@@ -30,10 +30,10 @@ are drawn only from: **Satisfied**, **Partially satisfied**, **Not satisfied**,
 | Access control (object/function level) | Partially satisfied | permission-first, repo org-scoping, uniform 404 | Admin→Owner; 2 read paths skip gate | P2/P4 | ORG-PR-017, 053 |
 | Validation & injection | Partially satisfied | Zod on all inputs; parameterized queries | drizzle advisory in range | P2 | ORG-PR-018 |
 | Cryptography & secret management | Partially satisfied | jose HS256 allowlist; hash-only secrets | dev-default secrets in prod; no rotation/manager | P1 | ORG-PR-003, 006, 049 |
-| Logging & monitoring | Partially satisfied | request IDs, sanitized event metadata | no metrics/alerts; no redaction backstop | P2/P3 | ORG-PR-007, 033 |
+| Logging & monitoring | Partially satisfied (S19) | request IDs (inbound id sanitized, S19), sanitized event metadata, centralized pino redaction backstop (S19) | no metrics/alerts | P2 | ORG-PR-007; 033 closed (S19) |
 | Data protection & privacy | Not satisfied | soft-delete only | no export/delete; PII retained | P2/P3 | ORG-PR-025, 043 |
-| Business logic / anti-automation | Partially satisfied | per-surface auth limits; per-request quota | no global limit; quota TOCTOU; fail-open | P2/P3 | ORG-PR-009, 012, 029 |
-| API & configuration | Partially satisfied | uniform envelope; safe error handler | no security headers/proxy/timeouts; prod config guards | P1/P2 | ORG-PR-003, 011, 010, 021 |
+| Business logic / anti-automation | Partially satisfied (S19) | per-surface auth limits; global per-trusted-IP limit + per-actor mutation buckets (S19); sensitive buckets fail closed in production (S19) | quota TOCTOU; limiter-outage alerting pending ORG-PR-007 | P2/P3 | ORG-PR-029; 012/032 closed, 009 materially advanced (S19) |
+| API & configuration | Partially satisfied (S19) | uniform envelope; safe error handler; prod config guard (S15); security headers + typed proxy trust (S19) | no DB/pool/statement timeouts | P2 | ORG-PR-021; 003 closed (S15), 010/011 closed (S19) |
 
 ## NIST SSDF (SP 800-218) — named practice groups
 

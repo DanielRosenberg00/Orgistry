@@ -119,8 +119,29 @@ Phase 6: End-to-End Verification & Security Review
   Sprint 19 in execution order.
 
 ### Phase 3 — Security & data-integrity hardening (largely parallelizable)
-- **Sprint 19 (roadmap "Sprint 18") — Edge & app-security hardening.
-  RECOMMENDED NEXT.** Security headers, `trustProxy`,
+- **Sprint 19 (roadmap "Sprint 18") — Edge & app-security hardening.**
+  ✅ **Repository scope COMPLETE (2026-07-21)** — see
+  [sprint-19-artifact-package.md](sprint-19-artifact-package.md). Delivered:
+  typed `TRUST_PROXY` applied at Fastify construction (forwarded headers
+  ignored unless explicitly trusted; the literal `'true'` rejected at config
+  load), security headers on every response with production-only HSTS
+  `includeSubDomains` (`apps/api/src/plugins/security-headers.ts`), a global
+  per-trusted-IP fixed-window limiter
+  (`apps/api/src/plugins/global-rate-limit.ts`), `invitations/inspect`
+  throttled per IP and per token-derived digest, per-actor buckets on
+  spammable authenticated mutations (enforced after permission checks),
+  bounded durable failed-auth `security_events` writes on the External API,
+  centralized pino logger redaction (`apps/api/src/lib/logging.ts`),
+  request-id sanitization (`packages/shared/src/request-id.ts`), coarse
+  production `/ready`, and bounded idempotent shutdown. **Closed:
+  ORG-PR-010, 011, 012, 013, 032, 033, 052. ORG-PR-009 remains OPEN
+  (materially advanced):** sensitive buckets fail closed under the
+  production-default `RATE_LIMIT_FAILURE_MODE=closed` (guard refuses `open`
+  in production), but the finding's alerting half depends on ORG-PR-007
+  (Sprint 23). Exit criteria met: proxy-trust/header/limiter test suites plus
+  a DB-backed failed-auth storm test bounding pre-auth writes;
+  `pnpm validate` and `pnpm validate:integration` exit 0 (2026-07-21).
+- *(original plan)* Security headers, `trustProxy`,
   global/edge rate limiting, throttle `invitations/inspect`, per-actor mutation
   limits, bound pre-auth external writes, logger redaction, request-id
   sanitization. Closes ORG-PR-010, 011, 012, 013, 032, 033, 052. Exit: header/

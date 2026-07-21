@@ -105,6 +105,17 @@ identically (`200 { accepted: true }`) for every account state, and it never
 returns `EMAIL_ALREADY_REGISTERED`. See
 [`auth-foundation.md`](auth-foundation.md).
 
+Edge-hardening code uses (Sprint 19): no new codes, but two existing ones
+gained producers. `RATE_LIMITED` (429) is now also returned by the **global**
+per-IP limiter (every route except `/health`, `/ready`, and `OPTIONS`
+preflight) and by the per-actor **mutation buckets** (org create, project
+create, API-key create, demo plan change, invitation create) and the
+invitation inspect/accept throttles — always in the standard envelope with a
+request id. `SERVICE_UNAVAILABLE` (503) is now also returned by **sensitive**
+rate-limited endpoints when Redis is unreachable and the limiter fails closed
+(the production default) — generic message, request id included, no Redis
+details. See [`security-model.md`](security-model.md).
+
 ## Auth endpoints
 
 See [`auth-foundation.md`](auth-foundation.md) (registration/login/me) and
@@ -190,25 +201,72 @@ permissions).
   IP/token-digest, refresh-per-session/IP, change-password/change-email
   per user, password-recovery request per IP/email-digest, password-recovery
   completion per IP/token-digest, email-verification request/complete) from
-  typed config; exceeding → `429 RATE_LIMITED` with a request id. The limiter
-  fails open — a Redis outage never affects auth correctness. No raw email or
-  token material ever enters a limiter key (emails and tokens are digested
+  typed config; exceeding → `429 RATE_LIMITED` with a request id. No raw email
+  or token material ever enters a limiter key (emails and tokens are digested
   first).
+- **Global + mutation limits (Sprint 19).** One additional fixed-window bucket
+  per trusted client IP covers every route except `/health`, `/ready`, and
+  `OPTIONS` preflight (`RATE_LIMIT_MAX`, default 300 per
+  `RATE_LIMIT_WINDOW_SECONDS`, default 60), evaluated before route-specific
+  work; and per-actor mutation buckets (org/project/API-key create, demo plan
+  change, invitation create — run **after** permission checks) plus invitation
+  inspect/accept throttles. All produce the same standard
+  `429 RATE_LIMITED` envelope.
+- **Limiter failure mode (Sprint 19).** `RATE_LIMIT_FAILURE_MODE`
+  (`open`|`closed`; unset derives production→`closed`,
+  development/test→`open`; production refuses an explicit `open` at boot). In
+  `closed` mode a Redis outage makes **sensitive** rate-limited endpoints
+  (login, refresh, registration, password recovery, email verification,
+  invitation inspect/accept/create, the external API buckets, the mutation
+  buckets) reject with `503 SERVICE_UNAVAILABLE` — generic message, request id
+  included, no Redis details. In `open` mode requests proceed. The **global**
+  limiter always fails open by design (readiness takes the instance out of
+  rotation).
 
 ## Request IDs
 
-- Fastify reuses an inbound `x-request-id` header if present, otherwise
-  generates `req_<uuid>` (`@orgistry/shared`).
-- The id is echoed on every response via the `x-request-id` header.
-- It appears in every error envelope (`error.requestId`) and in logs as
-  `requestId`. This is the single value to correlate a request end to end.
+- An inbound `x-request-id` header is accepted **only** if it matches
+  `[A-Za-z0-9._-]{1,128}` (max 128 chars). Anything else — missing, empty,
+  overlong, whitespace, CR/LF/NUL, control characters, or any other character
+  — is replaced by a server-generated `req_<uuid>`. The policy lives in
+  `packages/shared/src/request-id.ts` (`resolveRequestId`) and is applied in
+  `genReqId` before any logging (Sprint 19).
+- The one resolved id is echoed on every response via the `x-request-id`
+  header.
+- It appears in every error envelope (`error.requestId`), in logs as
+  `requestId`, and flows into audit/security events. This is the single value
+  to correlate a request end to end.
+
+## Security headers (Sprint 19)
+
+Every API response — success, error envelope, `404`, and CORS preflight —
+carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`,
+`Cross-Origin-Resource-Policy: same-origin`, and
+`Permissions-Policy: camera=(), microphone=(), geolocation=()`.
+`Strict-Transport-Security` (`max-age=<HSTS_MAX_AGE_SECONDS>`, default
+15552000; `includeSubDomains`) is sent only when BOTH `NODE_ENV=production`
+AND the request's proxy-aware protocol resolves to `https` (a real TLS
+socket, or `X-Forwarded-Proto: https` through a TRUSTED hop under
+`TRUST_PROXY`) — never on local HTTP, and never from a forged header on an
+untrusted connection. `/v1/auth/*` and `/v1/invitations/*` responses
+additionally carry `Cache-Control: no-store`. This is an **API response
+policy**, not a frontend CSP (SPA CSP hardening remains a known limitation).
+Implemented in `apps/api/src/plugins/security-headers.ts`; CORS and CSRF
+behavior are unchanged.
 
 ## Health vs. readiness
 
 - `GET /health` — liveness; never touches dependencies; `200` when up.
-- `GET /ready` — `200` with per-dependency `checks` when PostgreSQL and Redis
-  are reachable; `503` with a `SERVICE_UNAVAILABLE` error envelope (whose
-  `details.checks` flag the failing dependency) otherwise.
+- `GET /ready` — readiness over PostgreSQL and Redis (both required; Redis is
+  a readiness dependency consistent with the fail-closed limiters). In
+  development/test: `200` with per-dependency `checks` (name/ok/latencyMs —
+  never error text, hosts, or ports) when both are reachable; `503` with a
+  `SERVICE_UNAVAILABLE` error envelope (whose `details.checks` flag the
+  failing dependency) otherwise. In production (Sprint 19): **coarse output
+  only** — `200 {status:'ready'}` or a generic `503 SERVICE_UNAVAILABLE` with
+  no dependency names or details; per-check outcomes are logged server-side on
+  failure.
 
 ## Pagination
 

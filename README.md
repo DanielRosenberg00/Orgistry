@@ -180,8 +180,14 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   shipped password recovery and password/email change (see
   [credential management](docs/credential-management.md)); Sprint 18 shipped
   verification-first registration, closing the register enumeration oracle
-  (see [auth foundation](docs/auth-foundation.md)); the project
-  remains not ready for staging or production.
+  (see [auth foundation](docs/auth-foundation.md)); Sprint 19 shipped edge and
+  application security hardening — typed proxy trust (`TRUST_PROXY`), security
+  headers on every API response, a global per-IP rate limit plus per-endpoint
+  mutation/invitation throttles, a production fail-closed limiter policy for
+  sensitive endpoints, bounded failed-auth event writes, pino logger
+  redaction, request-id sanitization, and coarse production `/ready` output
+  (see [docs/production-readiness/sprint-19-artifact-package.md](docs/production-readiness/sprint-19-artifact-package.md));
+  the project remains not ready for staging or production.
 
 **Authoritative (current):**
 
@@ -227,7 +233,11 @@ shipped* — for current behavior, prefer the authoritative docs above.
 
 Hash-only passwords (Argon2id) and refresh tokens; short-lived JWTs; HttpOnly
 SameSite=Lax refresh cookie with transactional rotation and reuse detection;
-custom-header CSRF defense; fail-open Redis rate limits; ID-based tenant
+custom-header CSRF defense; Redis rate limits (a global per-IP limit plus
+per-endpoint buckets; sensitive endpoints fail closed in production, the rest
+fail open); typed proxy trust (`TRUST_PROXY`) so `request.ip` is a trustworthy
+client identity; security headers on every API response; sanitized request
+ids; pino logger redaction as a defense-in-depth backstop; ID-based tenant
 isolation; permission-first authorization with Last Owner protection; separated
 entitlement/quota gates; hash-only one-time API key secrets with scopes;
 hash-only invitation tokens with email-match enforcement; hash-only single-use
@@ -246,8 +256,10 @@ real provider; verification is advisory), workers/
 queues, PostgreSQL RLS, custom roles, resource-level/ABAC permissions, audit
 retention enforcement / export / SIEM, write-enabled external API, API key
 rotation, full browser E2E tests, and production deployment automation. The UI is
-demo-quality, quotas accept small race windows, and rate limiting fails open. The
-complete, honest list is [docs/known-limitations.md](docs/known-limitations.md).
+demo-quality, quotas accept small race windows, and non-sensitive rate limiting
+fails open on a Redis outage (sensitive endpoints fail closed in production;
+there is no alerting on that state yet). The complete, honest list is
+[docs/known-limitations.md](docs/known-limitations.md).
 
 ## Prerequisites
 

@@ -108,7 +108,10 @@ requireMembership                  → active member?           (else ORGANIZATI
 ```
 
 Returns `201` with the key DTO **and** the raw `secret` (the one and only time it
-appears). An optional `expiresAt` (future ISO-8601) may be supplied.
+appears). An optional `expiresAt` (future ISO-8601) may be supplied. Since
+Sprint 19, creation is additionally throttled per user **after** the
+permission check (`RATE_LIMIT_API_KEY_CREATE_PER_USER_MAX`, default 10 per
+`RATE_LIMIT_MUTATION_WINDOW_SECONDS`, default 60) → `429 RATE_LIMITED`.
 
 **`GET …/api-keys`** — list. Requires `api_keys.read` + `api_keys_access`.
 Cursor-paginated, returns active **and** revoked keys (status is shown), never the
@@ -150,6 +153,30 @@ implementation detail, not a conceptual merge**: separate writer methods, separa
 input types, different actor types, and disjoint event-name namespaces keep the two
 projectable apart for a future audit-log reader. No secret, hash, Authorization
 header, cookie, or request body is ever placed in either kind of metadata.
+
+### Bounded failed-auth event writes (Sprint 19)
+
+Failed API-key authentication — the whole 401 family: missing, malformed,
+unknown, revoked, or expired key, or an inactive organization — writes a
+durable `security_events` row only within an allowance of
+`RATE_LIMIT_EXTERNAL_AUTH_FAIL_EVENTS_PER_IP_MAX` (default 10) per source IP
+per `RATE_LIMIT_EXTERNAL_WINDOW_SECONDS`; requests with no resolved client
+IP share one coarse internal `unknown` bucket, so the bound holds even for
+unattributable traffic. Beyond that allowance — or if Redis is down — the
+durable write is **skipped**, so a credential-stuffing storm cannot amplify
+unauthenticated requests into unbounded database writes. Suppression
+visibility is itself bounded: one sanitized warn per limiter window per
+process (coarse event type + reason only, never a credential or a digest of
+one) through an in-process gate that keeps working during a Redis outage —
+never one log line per suppressed request.
+
+Redis-outage semantics, explicitly: an **invalid** credential stays a uniform
+`API_KEY_UNAUTHORIZED` 401 during an outage (auth correctness precedes every
+limiter; the event-write bound only skips writes). A **valid** key whose
+per-key (120/min) or per-org (600/min) throughput bucket cannot be evaluated
+**fails closed in production** (`503 SERVICE_UNAVAILABLE`; development/test
+default to fail-open). Scope checks and last-used throttling behave as
+before. See [security-model.md](security-model.md).
 
 ### Using a key: external route
 
@@ -213,9 +240,12 @@ curl https://api.example.test/v1/external/projects \
   soft-delete filtering for free. The only difference from the internal slice is
   the *absence* of `requireMembership` — a deliberate, visible omission.
 - **Redis is kept off the auth correctness path.** Rate limiting runs *after* the
-  key is fully validated and fails **open** (a Redis outage disables throttling,
-  never auth). PostgreSQL and the `api_keys` table are the sole source of auth
-  truth.
+  key is fully validated. PostgreSQL and the `api_keys` table are the sole
+  source of auth truth: Redis never decides whether a key is *valid*. (As
+  shipped in Sprint 8 the limiter failed **open**; since Sprint 19 the
+  per-key/per-org limits fail **closed in production** — a Redis outage
+  rejects with `503 SERVICE_UNAVAILABLE` rather than allowing unthrottled
+  traffic — while development/test keep fail-open.)
 
 ### Tradeoffs made
 
@@ -396,9 +426,13 @@ key. The two credential systems share nothing but the `security_events` audit si
 - **`last_used_at` is throttled (approximate).** ≤ 1 write per
   `API_KEY_LAST_USED_THROTTLE_SECONDS` (default 60) per key; failed/revoked/expired
   auth never updates it.
-- **Rate limiting fails open.** A Redis outage disables external throttling (never
-  auth correctness; quota and key validation never consult Redis). Redis remains
-  required for `/ready`.
+- **Rate limiting failure mode is environment-derived (revised in Sprint 19).**
+  In production the per-key/per-org limits fail **closed** — a Redis outage
+  makes external requests reject with `503 SERVICE_UNAVAILABLE` (generic
+  message, no Redis details). In development/test they fail open (a Redis
+  outage disables throttling; never auth correctness — quota and key
+  validation never consult Redis). Redis remains required for `/ready`. There
+  is no alerting on limiter-store failure yet.
 
 ---
 

@@ -29,3 +29,15 @@ export function generateInvitationToken(): string {
 export function hashInvitationToken(rawToken: string): string {
   return hashOpaqueToken(rawToken);
 }
+
+/**
+ * Derive the INTERNAL rate-limit key for a presented raw token (Sprint 19):
+ * the hash of the storage hash, mirroring `registrationCompletionRateLimitKey`.
+ * Rate limiting must not key on the raw token (it would put the secret in
+ * Redis) nor on the storage hash itself (the exact DB lookup value), so
+ * inspect attempts are bucketed under this second-order digest — still
+ * deterministic per token, but useless for a table lookup if leaked.
+ */
+export function invitationInspectRateLimitKey(rawToken: string): string {
+  return hashOpaqueToken(hashOpaqueToken(rawToken));
+}

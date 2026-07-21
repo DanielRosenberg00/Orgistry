@@ -110,9 +110,11 @@ export function registerInvitationRoutes(
 
   // Inspect a raw token (UNAUTHENTICATED — supports new-user onboarding). Returns
   // only safe public context for an acceptable invitation; rejects otherwise.
+  // Throttled per trusted IP and per token-derived digest (Sprint 19).
   app.post('/v1/invitations/inspect', async (request, reply) => {
+    const ctx = requestContext(request);
     const { token } = invitationTokenRequestSchema.parse(request.body);
-    const result = await service.inspectInvitation({ rawToken: token });
+    const result = await service.inspectInvitation({ rawToken: token, ctx });
     return sendSuccess(reply, result);
   });
 

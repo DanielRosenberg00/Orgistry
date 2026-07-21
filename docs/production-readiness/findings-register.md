@@ -77,6 +77,32 @@ that signal can be sampled. **Open P1 production blockers: ORG-PR-001,
 ORG-PR-002, ORG-PR-005, ORG-PR-006.** The repository remains not ready for
 staging or production.
 
+**Status update (Sprint 19, 2026-07-21):** the edge and application security
+hardening sprint closes [ORG-PR-010](#org-pr-010) (typed `TRUST_PROXY` applied
+at Fastify construction; forwarded-header spoofing rejected when untrusted),
+[ORG-PR-011](#org-pr-011) (centralized security-header policy on every
+response with production-only HSTS; no API-level CSP claim — the frontend CSP
+remains ORG-PR-035), [ORG-PR-012](#org-pr-012) (global per-trusted-IP limiter
+plus a reconciled public abuse-control matrix including `invitations/inspect`
+per-IP + per-token-digest throttling), [ORG-PR-013](#org-pr-013) (durable
+failed-auth `security_events` writes bounded per source IP per window, proven
+by a DB-backed storm test), [ORG-PR-032](#org-pr-032) (per-user/per-org
+buckets on organization/project/API-key/invitation creation and demo plan
+change, enforced after permission checks), [ORG-PR-033](#org-pr-033)
+(centralized pino redaction with log-capture tests), and
+[ORG-PR-052](#org-pr-052) (request-id sanitization/replacement, coarse
+production `/ready`, bounded idempotent shutdown).
+[ORG-PR-009](#org-pr-009) (P2) is **Materially advanced, not closed**: the
+limiter store now reports outages explicitly, every sensitive bucket fails
+closed under the production-default `RATE_LIMIT_FAILURE_MODE=closed` (the
+guard refuses `open` in production), and the behavior is tested — but the
+finding's alerting half (a metric/alert when the limiter store is down)
+depends on ORG-PR-007 observability, which remains open. Fail-closed behavior
+does not replace monitoring. **Open P1 production blockers: ORG-PR-001,
+ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged.** The repository remains not
+ready for staging or production. See
+[sprint-19-artifact-package.md](sprint-19-artifact-package.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
@@ -89,11 +115,11 @@ staging or production.
 | [ORG-PR-006](#org-pr-006) | No secrets management or rotation procedure | Secrets/Ops | Production blocker | P1 | High |
 | [ORG-PR-007](#org-pr-007) | No observability (metrics/tracing/dashboards/alerts) | Observability | Operational gap | P2 | High |
 | [ORG-PR-008](#org-pr-008) | No incident response / production runbook / on-call | Operations | Operational gap | P2 | High |
-| [ORG-PR-009](#org-pr-009) | Rate limiting fails open on Redis outage | Auth/App security | Security risk | P2 | High |
-| [ORG-PR-010](#org-pr-010) | `trustProxy` unset → per-IP limits and audit IPs invalid behind a proxy | Auth/App security | Security risk | P2 | High |
-| [ORG-PR-011](#org-pr-011) | No HTTP security headers (helmet) | App security | Security risk | P2 | High |
-| [ORG-PR-012](#org-pr-012) | No global/edge rate limiting; unauthenticated `invitations/inspect` oracle unthrottled | App security | Security risk | P2 | High |
-| [ORG-PR-013](#org-pr-013) | External API writes an un-throttled `security_events` row per unauthenticated request | App security/Reliability | Reliability risk | P2 | High |
+| [ORG-PR-009](#org-pr-009) | Rate limiting fails open on Redis outage — **Materially advanced (Sprint 19): sensitive buckets fail closed in production; alerting residual → ORG-PR-007** | Auth/App security | Security risk | P2 | High |
+| [ORG-PR-010](#org-pr-010) | `trustProxy` unset → per-IP limits and audit IPs invalid behind a proxy — **Closed (Sprint 19)** | Auth/App security | Security risk | P2 | High |
+| [ORG-PR-011](#org-pr-011) | No HTTP security headers (helmet) — **Closed (Sprint 19)** | App security | Security risk | P2 | High |
+| [ORG-PR-012](#org-pr-012) | No global/edge rate limiting; unauthenticated `invitations/inspect` oracle unthrottled — **Closed (Sprint 19)** | App security | Security risk | P2 | High |
+| [ORG-PR-013](#org-pr-013) | External API writes an un-throttled `security_events` row per unauthenticated request — **Closed (Sprint 19)** | App security/Reliability | Reliability risk | P2 | High |
 | [ORG-PR-014](#org-pr-014) | `security_events` lacks an `organization_id` index backing the audit read path | Database/Perf | Reliability risk | P2 | High |
 | [ORG-PR-015](#org-pr-015) | No retention/cleanup for unbounded tables | Data governance | Operational gap | P2 | High |
 | [ORG-PR-016](#org-pr-016) | No background-processing runtime (workers/scheduler) | Reliability | Operational gap | P2 | High |
@@ -112,8 +138,8 @@ staging or production.
 | [ORG-PR-029](#org-pr-029) | Quota ceilings are TOCTOU-racy under concurrency | Concurrency | Data-integrity risk | P3 | High |
 | [ORG-PR-030](#org-pr-030) | User enumeration on registration — **Closed (Sprint 18): verification-first registration; public register is contract-identical for all account states** | Auth | Security risk | P3 | High |
 | [ORG-PR-031](#org-pr-031) | No idempotency keys on create operations | API | Reliability risk | P3 | Medium |
-| [ORG-PR-032](#org-pr-032) | Spammable authenticated mutations lack rate limits | App security | Security risk | P3 | High |
-| [ORG-PR-033](#org-pr-033) | No structured-logger redaction backstop | Observability/Security | Maintainability issue | P3 | Medium |
+| [ORG-PR-032](#org-pr-032) | Spammable authenticated mutations lack rate limits — **Closed (Sprint 19)** | App security | Security risk | P3 | High |
+| [ORG-PR-033](#org-pr-033) | No structured-logger redaction backstop — **Closed (Sprint 19)** | Observability/Security | Maintainability issue | P3 | Medium |
 | [ORG-PR-034](#org-pr-034) | "Best-effort" last-used / auth-event writes not isolated | Reliability | Reliability risk | P3 | Medium |
 | [ORG-PR-035](#org-pr-035) | No CSP / security meta in the web demo | Frontend | Security risk | P3 | Medium |
 | [ORG-PR-036](#org-pr-036) | Frontend UX/robustness gaps (revoke confirm, deep-link, expiry UX, a11y) | Frontend | Developer-experience issue | P3 | High |
@@ -132,7 +158,7 @@ staging or production.
 | [ORG-PR-049](#org-pr-049) | HS256 symmetric JWT with no `kid`/rotation path | Cryptography | Optional enhancement | P4 | High |
 | [ORG-PR-050](#org-pr-050) | Concurrent legitimate refresh revokes family + session (multi-tab logout) | Auth | Reliability risk | P4 | High |
 | [ORG-PR-051](#org-pr-051) | Redundant unique index duplicates PK on `role_permissions` | Database | Optional enhancement | P4 | High |
-| [ORG-PR-052](#org-pr-052) | Minor API disclosures (`/ready` deps, inbound `x-request-id`, no shutdown timeout) | API | Maintainability issue | P4 | Medium |
+| [ORG-PR-052](#org-pr-052) | Minor API disclosures (`/ready` deps, inbound `x-request-id`, no shutdown timeout) — **Closed (Sprint 19)** | API | Maintainability issue | P4 | Medium |
 | [ORG-PR-053](#org-pr-053) | Two read paths skip the permission gate (divergence, no current gap) | Authorization | Maintainability issue | P4 | High |
 | [ORG-PR-054](#org-pr-054) | `esbuild` moderate dev-only advisory (via `drizzle-kit`) | Supply chain | Optional enhancement | P4 | High |
 
@@ -285,6 +311,23 @@ Standards · Threats.
 - **Remediation:** Add a per-surface fail-closed option and emit a metric/alert when Redis is unavailable.
 - **Dependencies:** ORG-PR-007 (alerting). **Effort:** M. **Validation:** test that login fails closed (or degrades) when the limiter throws in the configured mode.
 - **Roadmap:** Phase 3. **Standards:** ASVS V11.1 (anti-automation). **Threats:** T-CRED, T-DOS.
+- **Resolution (Sprint 19 — Materially advanced, not closed):** the limiter
+  store contract now reports `allowed | limited | unavailable`
+  (`lib/rate-limit.ts`); every sensitive bucket (auth, registration, recovery,
+  verification, invitations, mutations, external API) applies the typed
+  `RATE_LIMIT_FAILURE_MODE` — production defaults to `closed` (generic 503,
+  `enforceStoreAvailability`), the production guard refuses an explicit
+  `open`, dev/test default `open` — and each store failure emits a sanitized
+  structured warn (`server.ts` `onStoreError`). Readiness requires Redis, so a
+  production instance also leaves rotation. Tested:
+  `lib/rate-limit.test.ts`, `modules/auth/rate-limit.failure-mode.test.ts`,
+  `invitation.throttle.test.ts`, `mutation-throttle.test.ts`, and — with the
+  REAL Redis client (`lib/rate-limit.redis.integration.test.ts`) — the
+  healthy-store path, the fail-closed 503 after a deterministic real-client
+  failure (`redis.quit()`), and the dev fail-open path. The GLOBAL
+  bucket fails open by design (documented in the Sprint 19 artifact).
+  **Residual:** no metric/alert on limiter-store failure — that half of the
+  expected behavior depends on ORG-PR-007 (observability), still open.
 
 <a id="org-pr-010"></a>
 ### ORG-PR-010 — `trustProxy` unset → per-IP limits and audit IPs invalid behind a proxy
@@ -296,6 +339,17 @@ Standards · Threats.
 - **Remediation:** Set `trustProxy` to the known proxy hop(s) once the deployment topology is fixed.
 - **Dependencies:** ORG-PR-001 (topology known). **Effort:** S. **Validation:** integration test asserting client IP resolves correctly with a trusted `X-Forwarded-For` and is ignored otherwise.
 - **Roadmap:** Phase 3 / Phase 4. **Standards:** ASVS V11, V7.3 (log integrity). **Threats:** T-CRED, T-DOS, T-AUDIT.
+- **Resolution (Sprint 19 — Closed):** typed `TRUST_PROXY` config
+  (`packages/config/src/schema.ts — parseTrustProxy`: `false` | hop count |
+  IP/CIDR list; `"true"` rejected at boot) applied at Fastify CONSTRUCTION
+  time (`app.ts`). With trust disabled (default), a directly presented
+  `X-Forwarded-For` is ignored — `request.ip` is the socket peer; with
+  `TRUST_PROXY=1`, the client IP resolves behind exactly one documented hop.
+  All IP consumers (limiter keys, request logs, audit/security-event IPs) read
+  `request.ip`. Tested end to end in `app.proxy-trust.test.ts` (spoof
+  rejection, hop resolution, multi-value XFF, limiter-key IP). The deployment
+  must still set the value matching its topology (documented, with
+  misconfiguration risk, in `docs/security-model.md` and the artifact).
 
 <a id="org-pr-011"></a>
 ### ORG-PR-011 — No HTTP security headers (helmet)
@@ -306,6 +360,17 @@ Standards · Threats.
 - **Risk:** A browser-facing, cookie-authenticating API (`credentials: true`) without header hardening is exposed to clickjacking, MIME sniffing, and downgrade; pairs with the missing frontend CSP (ORG-PR-035).
 - **Remediation:** Register a security-headers plugin; align CSP with the SPA.
 - **Dependencies:** none. **Effort:** S. **Validation:** response-header assertion test. **Roadmap:** Phase 3. **Standards:** ASVS V14.4 (HTTP security headers). **Threats:** T-XSS, T-CSRF.
+- **Resolution (Sprint 19 — Closed):** centralized internal plugin
+  (`plugins/security-headers.ts`) applies `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, COOP/CORP
+  `same-origin`, and a minimal `Permissions-Policy` to EVERY response (success,
+  error envelope, 404, preflight); production-only HSTS
+  (`HSTS_MAX_AGE_SECONDS`, never emitted locally); `Cache-Control: no-store`
+  on `/v1/auth/*` and `/v1/invitations/*`. Tested (normal/error/preflight/
+  HSTS-by-environment/CORS compatibility) in `plugins/security-headers.test.ts`.
+  Deliberately NO API-level document CSP — the API serves JSON only, and the
+  frontend CSP remains ORG-PR-035 (open); this policy makes no frontend-CSP
+  claim.
 
 <a id="org-pr-012"></a>
 ### ORG-PR-012 — No global/edge rate limiting; unauthenticated `invitations/inspect` oracle unthrottled
@@ -316,6 +381,23 @@ Standards · Threats.
 - **Risk:** Token-guessing and generic request flooding; combines with ORG-PR-013 for a cheap DoS.
 - **Remediation:** Add a global limiter and/or edge rate limiting; throttle `invitations/inspect` specifically.
 - **Dependencies:** ORG-PR-010 (accurate client IP). **Effort:** M. **Validation:** limiter test on `invitations/inspect` and a default global bucket. **Roadmap:** Phase 3. **Standards:** ASVS V11.1. **Threats:** T-INV, T-DOS.
+- **Resolution (Sprint 19 — Closed):** global per-trusted-IP fixed-window
+  limiter (`plugins/global-rate-limit.ts`; `RATE_LIMIT_MAX`/`_WINDOW_SECONDS`)
+  runs in `onRequest` ahead of route work, exempting `/health`, `/ready`, and
+  OPTIONS preflight, returning the standard `RATE_LIMITED` envelope, keying on
+  the ORG-PR-010-resolved IP, failing open on store outage by design
+  (readiness gates rotation; sensitive buckets fail closed individually).
+  `POST /v1/invitations/inspect` is throttled per trusted IP AND per
+  token-derived second-order digest (`invitationInspectRateLimitKey` — never
+  the raw token), with accept per-user and create per-user + per-org buckets
+  (`invitation.service.ts`). The full public abuse-control matrix is in the
+  Sprint 19 artifact. Tested: `plugins/global-rate-limit.test.ts`,
+  `invitation.throttle.test.ts`, and against LIVE Redis
+  (`lib/rate-limit.redis.integration.test.ts`: threshold, per-identity key
+  isolation, positive TTLs, secret-free keys, standard envelope). A
+  production `buildApp` refuses to construct without the global limiter
+  (refinement iteration). Edge-of-network (WAF/CDN) controls remain
+  future infrastructure work under ORG-PR-001.
 
 <a id="org-pr-013"></a>
 ### ORG-PR-013 — External API writes an un-throttled `security_events` row per unauthenticated request
@@ -326,6 +408,24 @@ Standards · Threats.
 - **Risk:** Unauthenticated table-flooding → unbounded growth, index bloat, degraded audit reads (amplifies ORG-PR-014), and disk-exhaustion DoS.
 - **Remediation:** Add edge/global rate limiting ahead of the authenticator (ORG-PR-012); consider sampling/aggregating pre-auth failure events; add the org index (ORG-PR-014) and retention (ORG-PR-015).
 - **Dependencies:** ORG-PR-012, ORG-PR-014, ORG-PR-015. **Effort:** M. **Validation:** load test confirming pre-auth writes are bounded. **Roadmap:** Phase 3. **Standards:** ASVS V11.1, V7. **Threats:** T-DOS, T-AUDIT.
+- **Resolution (Sprint 19 — Closed):** every 401-family failed-auth event
+  (missing/malformed/unknown/revoked/expired/inactive-org) now funnels through
+  `recordFailedAuthEventBounded` (`api-key.authenticator.ts`), which consumes
+  a per-source-IP allowance (`RATE_LIMIT_EXTERNAL_AUTH_FAIL_EVENTS_PER_IP_MAX`,
+  default 10/window) BEFORE the durable INSERT; beyond the allowance — or on a
+  limiter-store outage, which must never re-open the amplification hole — the
+  write is skipped. Refinement iteration: requests with NO resolved client IP
+  share one coarse internal `unknown` bucket (a missing IP never means "write
+  every event"), and the suppression warn itself is bounded to one sanitized
+  line per window per process through an in-process gate that survives a
+  store outage (coarse event type + reason only; never the credential or any
+  digest of it). The uniform 401 contract is unchanged. Proven by
+  `api-key.failed-auth.integration.test.ts` (DB-backed 25-request storm →
+  bounded row growth, no credential in rows or captured logs, valid key
+  unaffected), `api-key.failed-auth-bounding.test.ts` (null-IP burst and
+  log-bound cases), and `external-projects.routes.test.ts` (outage
+  semantics). Retention (ORG-PR-015) and the org index (ORG-PR-014) remain
+  separate open findings.
 
 <a id="org-pr-014"></a>
 ### ORG-PR-014 — `security_events` lacks an `organization_id` index backing the audit read path
@@ -527,6 +627,26 @@ Standards · Threats.
 - **Risk:** Email-abuse/reputation damage, resource spam.
 - **Remediation:** Apply per-actor limits to mutations (pairs with ORG-PR-012 global limiter).
 - **Dependencies:** ORG-PR-012. **Effort:** M. **Validation:** limiter tests on invitation/key create. **Roadmap:** Phase 3. **Standards:** ASVS V11.1. **Threats:** T-INV, T-DOS.
+- **Resolution (Sprint 19 — Closed; completed in the refinement iteration):**
+  every surface named by this finding is now covered. Targeted per-actor
+  buckets on the provisioning mutations — organization create (per user),
+  project create (per user), API-key create (per user), invitation create
+  (per user + per org; each create sends real email), demo plan change (per
+  org) — PLUS, from the refinement iteration, member role change + removal
+  (one shared per-acting-user bucket,
+  `RATE_LIMIT_MEMBER_MUTATION_PER_USER_MAX`) and project update + delete
+  (one shared per-acting-user bucket,
+  `RATE_LIMIT_PROJECT_MUTATION_PER_USER_MAX`), both of which write a durable
+  audit event per call. All buckets are enforced in the services AFTER
+  permission checks so throttling never masks authorization. Only the revokes
+  (invitation, API key, session) remain deliberately unthrottled: a revoked
+  resource cannot be revoked twice, so their durable writes are capped by
+  creation — which is itself throttled. Tested:
+  `organization/mutation-throttle.test.ts` (incl. member buckets),
+  `projects/project-throttle.test.ts` (incl. update/delete),
+  `api-keys/api-key-create-throttle.test.ts`, `entitlements/plan-throttle.test.ts`,
+  `invitation.throttle.test.ts` (thresholds, user/org isolation, standard
+  envelope, permission-first regression).
 
 <a id="org-pr-033"></a>
 ### ORG-PR-033 — No structured-logger redaction backstop
@@ -537,6 +657,17 @@ Standards · Threats.
 - **Risk:** Latent secret leakage into logs on any future logging change.
 - **Remediation:** Add pino `redact` paths.
 - **Dependencies:** none. **Effort:** S. **Validation:** log-capture test confirms redaction. **Roadmap:** Phase 3. **Standards:** ASVS V7.1 (log content). **Threats:** T-LOG.
+- **Resolution (Sprint 19 — Closed):** every process logger is now built by
+  `lib/logging.ts — buildLoggerOptions` (the app default in `app.ts`), which
+  installs pino `redact` paths expanded from a curated sensitive-key list
+  (authorization, cookie, set-cookie, the CONFIGURED CSRF header name,
+  password/currentPassword/newPassword, token/refreshToken/invitationToken,
+  tokenHash/passwordHash, apiKey/apiKeySecret, secret/jwtSecret/smtpPassword,
+  `SMTP_PASSWORD`/`JWT_SECRET`) across header-serializer, body, config, error,
+  and one-level-nested shapes. Log-capture tests (`lib/logging.test.ts`, plus
+  the storm integration test) prove representative values never appear while
+  safe diagnostic fields survive. Redaction is a BACKSTOP: modules still must
+  not log bodies or credentials (unchanged policy).
 
 <a id="org-pr-034"></a>
 ### ORG-PR-034 — "Best-effort" last-used / auth-event writes are not isolated
@@ -741,6 +872,17 @@ Standards · Threats.
 - **Risk:** Low — fingerprinting, log-correlation spoofing, and a possible stuck SIGTERM past the orchestrator grace period.
 - **Remediation:** Use `resolveRequestId`; add a shutdown timeout; consider gating `/ready` detail.
 - **Dependencies:** none. **Effort:** S. **Validation:** tests for request-id sanitization and bounded shutdown. **Roadmap:** Phase 4. **Standards:** ASVS V7.3, V14. **Threats:** T-LOG, T-OPS.
+- **Resolution (Sprint 19 — Closed):** all three sub-items. (1) Inbound
+  `x-request-id` is sanitized centrally (`shared/request-id.ts —
+  resolveRequestId`, wired via `genReqId` with `requestIdHeader: false`):
+  accepted format `[A-Za-z0-9._-]{1,128}`; anything else (empty, overlong,
+  whitespace, CR/LF/NUL, control chars) is REPLACED with a generated id used
+  consistently across response header, logs, and error envelope
+  (`plugins/request-id.test.ts`). (2) Production `/ready` is coarse — ready /
+  not-ready only, no dependency inventory; dev/test keep detail; per-check
+  outcomes log server-side (`routes/readiness.ts`, `readiness.test.ts`).
+  (3) Shutdown is idempotent across repeated signals and bounded by a 10s
+  unref'd force-exit timer (`server.ts`).
 
 <a id="org-pr-053"></a>
 ### ORG-PR-053 — Two read paths skip the permission gate

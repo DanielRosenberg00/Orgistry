@@ -247,7 +247,9 @@ function addProductionIssue(
  * - `MAIL_FROM_EMAIL` values that are the shipped local-only default or on a
  *   reserved, non-routable domain;
  * - `WEB_DEMO_URL` values that are plain-HTTP or localhost (emailed links
- *   embed this origin).
+ *   embed this origin);
+ * - `RATE_LIMIT_FAILURE_MODE=open` (Sprint 19: sensitive limiters must fail
+ *   closed in production; unset derives to `closed`).
  */
 export function enforceProductionConfigSafety(
   env: {
@@ -258,11 +260,24 @@ export function enforceProductionConfigSafety(
     MAIL_FROM_EMAIL: string;
     SMTP_PASSWORD?: string;
     WEB_DEMO_URL: string;
+    RATE_LIMIT_FAILURE_MODE?: 'open' | 'closed';
   },
   ctx: z.RefinementCtx,
 ): void {
   if (env.NODE_ENV !== 'production') {
     return;
+  }
+
+  // Sprint 19 (ORG-PR-009): a production process must never silently disable
+  // its sensitive abuse controls on a Redis outage. Leaving the variable UNSET
+  // is fine (the default derives to 'closed' in production); an explicit
+  // 'open' is refused.
+  if (env.RATE_LIMIT_FAILURE_MODE === 'open') {
+    addProductionIssue(
+      ctx,
+      'RATE_LIMIT_FAILURE_MODE',
+      'RATE_LIMIT_FAILURE_MODE must not be "open" when NODE_ENV=production; sensitive rate limiters must fail closed when the limiter store is unavailable (leave it unset to use the production default "closed")',
+    );
   }
 
   for (const message of collectProductionSecretIssues(

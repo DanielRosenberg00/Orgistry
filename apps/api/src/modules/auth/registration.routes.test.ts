@@ -375,7 +375,7 @@ describe('public response equality matrix', () => {
 describe('rate limiting', () => {
   it('runs the per-email limit BEFORE the account lookup and answers 429 identically for all states', async () => {
     const lookups: string[] = [];
-    const rejectAll: RateLimiter = { consume: async () => false };
+    const rejectAll: RateLimiter = { consume: async () => 'limited' };
     const limited = await buildAuthTestApp({
       rateLimiter: rejectAll,
       registrationRateLimits: {
@@ -416,7 +416,7 @@ describe('rate limiting', () => {
     const recording: RateLimiter = {
       consume: async (key) => {
         keys.push(key);
-        return true;
+        return 'allowed';
       },
     };
     const recorded = await buildAuthTestApp({ rateLimiter: recording });
@@ -440,9 +440,9 @@ describe('rate limiting', () => {
     let calls = 0;
     const secondRejects: RateLimiter = {
       consume: async (key) => {
-        if (!key.startsWith('rl:register:email:')) return true;
+        if (!key.startsWith('rl:register:email:')) return 'allowed';
         calls += 1;
-        return calls <= 1;
+        return calls <= 1 ? 'allowed' : 'limited';
       },
     };
     const bounded = await buildAuthTestApp({
@@ -673,7 +673,7 @@ describe('POST /v1/auth/registration/complete', () => {
 
   it('throttles completion attempts per token and per IP', async () => {
     const limited = await buildAuthTestApp({
-      rateLimiter: { consume: async () => false },
+      rateLimiter: { consume: async () => 'limited' },
       registrationRateLimits: {
         windowSeconds: 60,
         requestPerIpMax: 1,

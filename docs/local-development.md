@@ -98,4 +98,16 @@ port-conflict handling, and [troubleshooting](./troubleshooting.md) for fixes.
   step. Edits are picked up directly by `tsx`, Vite, Vitest, and `tsc`.
 - Logs are structured JSON and include a `requestId` per request. Send an
   `x-request-id` header to correlate a client request through the logs and the
-  response.
+  response (it must match `[A-Za-z0-9._-]{1,128}`; anything else is replaced
+  by a server-generated id).
+- No reverse proxy is needed locally: the default `TRUST_PROXY=false` treats
+  the socket peer as the client IP, which is correct for direct
+  `localhost:3000` access. The `Strict-Transport-Security` header is emitted
+  only under `NODE_ENV=production` — never on local HTTP.
+- Rate limiters fail **open** locally by default (development/test derive
+  `RATE_LIMIT_FAILURE_MODE=open`), so a stopped Redis never blocks local auth.
+  The Sprint 19 `TRUST_PROXY`, `HSTS_MAX_AGE_SECONDS`, and `RATE_LIMIT_*` env
+  vars all have working defaults in `.env.example` — no changes needed for
+  local development. If local testing trips a `429`, raise the relevant
+  `RATE_LIMIT_*` value in `.env` (see
+  [troubleshooting](./troubleshooting.md)).

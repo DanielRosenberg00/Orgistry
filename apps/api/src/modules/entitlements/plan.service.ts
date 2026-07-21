@@ -18,6 +18,13 @@ import type {
   EntitlementService,
 } from './entitlement.service';
 import type { OrganizationPlanState, PlanActionContext } from './entitlement.types';
+import { rateLimitedError } from '../../lib/errors';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+  type RateLimiter,
+  type RateLimitFailureMode,
+} from '../../lib/rate-limit';
 
 /**
  * Plan & entitlements HTTP workflows (read plan / read entitlements / change
@@ -77,6 +84,22 @@ export interface PlanServiceOptions {
   accessControl: AccessControlRepository;
   /** Organization-level entitlement/quota/plan capability service. */
   entitlements: EntitlementService;
+  /** Redis-backed in production; a no-op limiter when omitted. */
+  rateLimiter?: RateLimiter;
+  /** Demo plan-change bucket (Sprint 19, ORG-PR-032; from `config.rateLimit.mutations`). */
+  rateLimits?: PlanMutationRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009): `open` allows,
+   * `closed` rejects with a generic 503. Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
+}
+
+/** Plan mutation buckets: each demo change rewrites entitlements + audit. */
+export interface PlanMutationRateLimits {
+  windowSeconds: number;
+  changePerOrgMax: number;
 }
 
 /** Build the public Plan DTO from a plan key using the fixed catalog metadata. */
@@ -110,7 +133,36 @@ function toEntitlementsResponse(
 }
 
 export function createPlanService(options: PlanServiceOptions): PlanService {
-  const { accessControl, entitlements } = options;
+  const {
+    accessControl,
+    entitlements,
+    rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
+  } = options;
+
+  const limits: PlanMutationRateLimits = options.rateLimits ?? {
+    windowSeconds: 60,
+    changePerOrgMax: Number.MAX_SAFE_INTEGER,
+  };
+
+  /**
+   * Consume one mutation rate-limit hit (Sprint 19, ORG-PR-032); throw the
+   * standard RATE_LIMITED envelope on exceed. Runs AFTER authentication and
+   * permission checks so throttling never masks an authorization result. No
+   * durable event per blocked attempt (bounded writes are the point); the 429
+   * stays visible in request logs. A limiter-store outage follows the
+   * configured failure mode (production: fail closed with a generic 503).
+   */
+  async function enforceMutationRateLimit(
+    key: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<void> {
+    const decision = await rateLimiter.consume(key, limit, windowSeconds);
+    if (!enforceStoreAvailability(decision, rateLimitFailureMode)) {
+      throw rateLimitedError();
+    }
+  }
 
   /** Resolve the actor (active membership + effective permissions) for a request. */
   async function actorFor(input: {
@@ -151,6 +203,14 @@ export function createPlanService(options: PlanServiceOptions): PlanService {
         requestId: input.ctx.requestId,
       });
       requirePermission(actor, PERMISSION_KEYS.planChangeDemo);
+
+      // AFTER the permission check, BEFORE the entitlement rewrite. Keyed per
+      // organization: the plan is org state, whoever flips it.
+      await enforceMutationRateLimit(
+        `rl:plan:change:org:${actor.organizationId}`,
+        limits.changePerOrgMax,
+        limits.windowSeconds,
+      );
 
       const ctx: PlanActionContext = {
         requestId: input.ctx.requestId,

@@ -6,6 +6,12 @@ import { buildApp } from '../../app';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import { createAuthService } from '../auth/auth.service';
 import { createDbAuthRepository } from '../auth/auth.repo';
+import { createDbRegistrationRepository } from '../auth/registration.repo';
+import { createRegistrationService } from '../auth/registration.service';
+import {
+  lastCompletionTokenFor,
+  registerTestUser,
+} from '../auth/testing/register-test-user';
 import { createOrganizationService } from '../organization/organization.service';
 import { createDbOrganizationRepository } from '../organization/organization.repo';
 import { createEntitlementService } from '../entitlements/entitlement.service';
@@ -58,21 +64,12 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
   }> {
     emailSeq += 1;
     const resolved = email ?? `inv.int.${emailSeq}@example.com`;
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: {
-        email: resolved,
-        password: 'a-strong-password-123',
-        displayName: 'Int User',
-      },
-    });
-    expect(response.statusCode).toBe(201);
-    return {
-      token: response.json().data.tokens.accessToken,
-      userId: response.json().data.user.id,
+    const result = await registerTestUser(app, mailer, {
       email: resolved,
-    };
+      password: 'a-strong-password-123',
+      displayName: 'Int User',
+    });
+    return { token: result.accessToken, userId: result.userId, email: resolved };
   }
 
   async function createTeamOrg(token: string): Promise<string> {
@@ -119,18 +116,31 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
       ttlSeconds: config.invitations.ttlSeconds,
       webBaseUrl: config.web.url,
     });
-    const authService = createAuthService({
-      repo: createDbAuthRepository(db.db),
+    // The invitation service collaborates with REGISTRATION now (Sprint 18):
+    // pre-validation on the request, acceptance inside the completion tx.
+    const registrationService = createRegistrationService({
+      repo: createDbRegistrationRepository(db.db),
+      mailer,
+      webBaseUrl: config.web.url,
+      completionTtlSeconds: config.registration.completionTtlSeconds,
       jwtSecret: config.auth.jwtSecret,
       accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
       sessionTtlSeconds: config.auth.sessionTtlSeconds,
       refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
       invitations: invitationService,
     });
+    const authService = createAuthService({
+      repo: createDbAuthRepository(db.db),
+      jwtSecret: config.auth.jwtSecret,
+      accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+      sessionTtlSeconds: config.auth.sessionTtlSeconds,
+      refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+    });
     app = buildApp({
       config,
       readinessProbes: [passingProbe('postgres')],
       authService,
+      registrationService,
       organizationService: createOrganizationService({ repo: orgRepo }),
       invitationService,
       logger: false,
@@ -146,7 +156,7 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
   beforeEach(async () => {
     mailer.messages.length = 0;
     await db.sql.unsafe(
-      'TRUNCATE invitations, projects, memberships, organizations, organization_plans, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
+      'TRUNCATE pending_registrations, invitations, projects, memberships, organizations, organization_plans, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
     );
   });
 
@@ -205,7 +215,9 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
     const orgId = await createTeamOrg(owner.token);
     const { id, rawToken } = await invite(owner.token, orgId, 'newbie@example.com');
 
-    const response = await app.inject({
+    // Step 1: the register request is enumeration-safe and only ACCEPTS —
+    // no account state yet.
+    const requested = await app.inject({
       method: 'POST',
       url: '/v1/auth/register',
       payload: {
@@ -215,8 +227,23 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
         invitationToken: rawToken,
       },
     });
-    expect(response.statusCode).toBe(201);
-    const newUserId = response.json().data.user.id;
+    expect(requested.statusCode).toBe(200);
+    expect(requested.json().data).toEqual({ accepted: true });
+    const preUsers = await db.sql`
+      SELECT id FROM users WHERE normalized_email = 'newbie@example.com'`;
+    expect(preUsers).toHaveLength(0);
+
+    // Step 2: completing via the emailed token creates the account, the
+    // personal (owner) workspace, AND the invited membership in ONE
+    // transaction, and the completion body reports the settled invitation.
+    const completed = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/registration/complete',
+      payload: { token: lastCompletionTokenFor(mailer, 'newbie@example.com') },
+    });
+    expect(completed.statusCode).toBe(201);
+    expect(completed.json().data.invitation).toEqual({ status: 'accepted' });
+    const newUserId = completed.json().data.user.id;
 
     // Personal (owner) workspace AND invited (member) membership both exist.
     const memberships = await db.sql`
@@ -227,5 +254,47 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
 
     const row = await db.sql`SELECT status FROM invitations WHERE id = ${id}`;
     expect(row[0].status).toBe('accepted');
+  });
+
+  it('answers a rejected invitation with the generic acceptance and stages nothing (DB-proven)', async () => {
+    // Refinement pass: invitation validation happens INSIDE the
+    // enumeration-safe boundary — a bad token answers exactly like every
+    // other registration and leaves no trace. The inspect endpoint is the
+    // invitation-feedback channel.
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/register',
+      payload: {
+        email: 'generic.reject@example.com',
+        password: 'a-strong-password-123',
+        displayName: 'Generic Reject',
+        invitationToken: 'not-a-real-invitation-token',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, data: { accepted: true } });
+    expect(response.headers['set-cookie']).toBeUndefined();
+
+    // Nothing was staged and no user exists for the rejected request.
+    const pending = await db.sql`
+      SELECT id FROM pending_registrations
+      WHERE normalized_email = 'generic.reject@example.com'`;
+    expect(pending).toHaveLength(0);
+    const users = await db.sql`
+      SELECT id FROM users WHERE normalized_email = 'generic.reject@example.com'`;
+    expect(users).toHaveLength(0);
+
+    // The internal record is anonymous and coarse — no token material.
+    const events = await db.sql<
+      { user_id: string | null; metadata: Record<string, unknown> }[]
+    >`
+      SELECT user_id, metadata FROM security_events
+      WHERE event_type = 'auth.registration_requested'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(events[0].user_id).toBeNull();
+    expect(events[0].metadata).toEqual({
+      outcome: 'invitation_rejected',
+      delivered: false,
+    });
   });
 });

@@ -198,11 +198,21 @@ export function createDbInvitationRepository(
       return row ?? null;
     },
 
+    async findInvitationById(invitationId: string) {
+      const [invitation] = await db
+        .select()
+        .from(schema.invitations)
+        .where(eq(schema.invitations.id, invitationId))
+        .limit(1);
+      return invitation ?? null;
+    },
+
     async acceptInvitation(
       params: AcceptInvitationParams,
     ): Promise<AcceptInvitationResult> {
-      // The acceptance body is shared with the registration transaction; here it
-      // runs in its own transaction for the existing-user accept endpoint.
+      // The acceptance body is shared with the registration-completion
+      // transaction; here it runs in its own transaction for the existing-user
+      // accept endpoint.
       return db.transaction((tx) => acceptInvitationWithinTransaction(tx, params));
     },
 

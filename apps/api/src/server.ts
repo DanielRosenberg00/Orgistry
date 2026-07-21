@@ -9,6 +9,8 @@ import { createDbEmailVerificationRepository } from './modules/auth/email-verifi
 import { createEmailVerificationService } from './modules/auth/email-verification.service';
 import { createDbPasswordRecoveryRepository } from './modules/auth/password-recovery.repo';
 import { createPasswordRecoveryService } from './modules/auth/password-recovery.service';
+import { createDbRegistrationRepository } from './modules/auth/registration.repo';
+import { createRegistrationService } from './modules/auth/registration.service';
 import { createDbOrganizationRepository } from './modules/organization/organization.repo';
 import { createOrganizationService } from './modules/organization/organization.service';
 import { createMemberService } from './modules/organization/member.service';
@@ -129,6 +131,26 @@ async function main(): Promise<void> {
     rateLimits: config.rateLimit.passwordRecovery,
   });
 
+  // Verification-first registration (Sprint 18). Public request + completion;
+  // shares the account mailer and the Redis limiter. Completion creates the
+  // account (user + personal workspace + Owner membership + session + refresh
+  // token) inside its repository transaction and issues the authenticated
+  // session — the initial request never does.
+  const registrationService = createRegistrationService({
+    repo: createDbRegistrationRepository(dbClient.db),
+    mailer: accountMailer,
+    webBaseUrl: config.web.url,
+    completionTtlSeconds: config.registration.completionTtlSeconds,
+    jwtSecret: config.auth.jwtSecret,
+    accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+    sessionTtlSeconds: config.auth.sessionTtlSeconds,
+    refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+    rateLimiter: createRedisRateLimiter(redis),
+    rateLimits: config.rateLimit.registration,
+    // Invitation collaborator (same instance as the invitation routes).
+    invitations: invitationService,
+  });
+
   const authService = createAuthService({
     repo: createDbAuthRepository(dbClient.db),
     jwtSecret: config.auth.jwtSecret,
@@ -139,9 +161,7 @@ async function main(): Promise<void> {
     // outage disables rate limiting but never affects auth correctness.
     rateLimiter: createRedisRateLimiter(redis),
     rateLimits: config.rateLimit.auth,
-    // Registration-with-invitation collaborator (same instance as the routes).
-    invitations: invitationService,
-    // Best-effort post-registration verification email (same instance as the
+    // Best-effort post-email-change verification email (same instance as the
     // verification routes).
     emailVerification: emailVerificationService,
   });
@@ -200,6 +220,7 @@ async function main(): Promise<void> {
     authService,
     emailVerificationService,
     passwordRecoveryService,
+    registrationService,
     organizationService,
     memberService,
     organizationRbacService,

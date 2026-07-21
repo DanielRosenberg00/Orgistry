@@ -116,9 +116,21 @@ describe('loadConfig', () => {
       windowSeconds: 60,
       loginPerIpMax: 10,
       loginPerEmailMax: 5,
-      registerPerIpMax: 5,
       refreshPerSessionMax: 60,
       refreshPerIpMax: 120,
+    });
+  });
+
+  it('exposes the verification-first registration knobs with sane defaults', () => {
+    const config = loadConfig(baseEnv());
+    expect(config.registration.completionTtlSeconds).toBe(86_400);
+    expect(config.rateLimit.registration).toMatchObject({
+      windowSeconds: 60,
+      requestPerIpMax: 5,
+      requestPerEmailMax: 3,
+      completePerIpMax: 10,
+      completePerTokenMax: 5,
+      existingAccountNoticePerEmailMax: 1,
     });
   });
 

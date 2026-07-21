@@ -98,12 +98,18 @@ export async function acceptInvitationWithinTransaction(
 ): Promise<AcceptInvitationResult> {
   const now = new Date();
 
-  // 1. Lookup — lock the invitation by token hash so two concurrent acceptances
-  //    of the same token serialize.
+  // 1. Lookup — lock the invitation row so two concurrent acceptances of the
+  //    same invitation serialize. The selector is either the presented token's
+  //    hash (existing-user accept) or the stable invitation ID a pending
+  //    registration stored at request time (Sprint 18 completion).
+  const lookup =
+    'tokenHash' in params.selector
+      ? eq(schema.invitations.tokenHash, params.selector.tokenHash)
+      : eq(schema.invitations.id, params.selector.invitationId);
   const [invitation] = await tx
     .select()
     .from(schema.invitations)
-    .where(eq(schema.invitations.tokenHash, params.tokenHash))
+    .where(lookup)
     .for('update')
     .limit(1);
   if (!invitation) {

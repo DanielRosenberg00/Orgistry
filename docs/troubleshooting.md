@@ -57,11 +57,12 @@ host port (e.g. `5433`) in `infra/docker-compose.yml` and update
   **fail-closed**: if SMTP delivery fails, no invitation is persisted and no
   event is recorded. Start Mailpit (`pnpm infra:up`) and confirm
   `localhost:1025` is reachable.
-- Registration still succeeds when Mailpit is down — the post-registration
-  verification email is **best-effort** by design. The account simply starts
-  unverified with no email delivered; use the **Resend email** action in the
-  web demo banner (or `POST /v1/auth/email-verification/request`) once Mailpit
-  is back.
+- A registration request still returns the generic `{ accepted: true }` when
+  Mailpit is down — on the public, enumeration-safe register endpoint a mail
+  failure never alters the response — but the completion email cannot be
+  delivered, so the account cannot be created until Mailpit is back. Submit
+  the register form again to get a fresh completion email (each request
+  supersedes prior unused pending generations).
 - An explicit verification resend fails with an error while Mailpit is down;
   the previously issued verification link (if any) stays usable.
 - Can't see an email you expect: open <http://localhost:8025> and check the

@@ -1,22 +1,14 @@
 import {
   type EmailVerificationTokenRow,
-  type MembershipRow,
-  type OrganizationRow,
   type RefreshTokenRow,
-  ROLE_IDS,
   type SessionRow,
   type UserRow,
 } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
 import {
   createInMemoryOrgStore,
-  provisionDefaultOrganizationPlan,
   type InMemoryOrgStore,
 } from '../../organization/testing/in-memory-org-store';
-import {
-  applyInvitationAcceptanceInStore,
-  validateInvitationForAcceptanceInStore,
-} from '../../invitations/testing/invitation-store-acceptance';
 import { emailAlreadyRegisteredError } from '../auth.errors';
 import type {
   AuthRepository,
@@ -26,8 +18,6 @@ import type {
   NewRefreshToken,
   NewSecurityEvent,
   NewSession,
-  NewUser,
-  RegisterAccountParams,
   RotateRefreshTokenParams,
   RotateRefreshTokenResult,
 } from '../auth.types';
@@ -111,149 +101,10 @@ export function createInMemoryAuthRepository(options?: {
       return users.find((user) => user.id === id) ?? null;
     },
 
-    async insertUser(values: NewUser) {
-      if (users.some((user) => user.normalizedEmail === values.normalizedEmail)) {
-        throw emailAlreadyRegisteredError();
-      }
-      const now = new Date();
-      const user: UserRow = {
-        id: createId('user'),
-        email: values.email,
-        normalizedEmail: values.normalizedEmail,
-        passwordHash: values.passwordHash,
-        displayName: values.displayName,
-        status: 'active',
-        emailVerifiedAt: null,
-        createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
-      };
-      users.push(user);
-      return user;
-    },
-
     async insertSession(values: NewSession) {
       const session = makeSession(values);
       sessions.push(session);
       return session;
-    },
-
-    // Mirrors the DB repo's transactional `registerAccount`: it validates the
-    // uniqueness invariants BEFORE mutating any array, so a rejected
-    // registration leaves no partial state — the same atomic guarantee the
-    // database transaction provides.
-    async registerAccount(params: RegisterAccountParams) {
-      if (
-        users.some(
-          (user) => user.normalizedEmail === params.user.normalizedEmail,
-        )
-      ) {
-        throw emailAlreadyRegisteredError();
-      }
-      if (
-        refreshTokens.some(
-          (token) => token.tokenHash === params.refreshToken.tokenHash,
-        )
-      ) {
-        // Surfaces the refresh-token unique constraint, used to prove atomic
-        // rollback when a later step of registration fails.
-        throw new Error('Refresh token hash already exists.');
-      }
-
-      const now = new Date();
-      const user: UserRow = {
-        id: createId('user'),
-        email: params.user.email,
-        normalizedEmail: params.user.normalizedEmail,
-        passwordHash: params.user.passwordHash,
-        displayName: params.user.displayName,
-        status: 'active',
-        emailVerifiedAt: null,
-        createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
-      };
-
-      // (Sprint 9) Validate the invitation BEFORE mutating any array, mirroring
-      // the DB registration transaction: a bad/revoked/expired/quota-filled
-      // invitation throws here, so no account rows are ever pushed. Application
-      // happens after the commit below, with no intervening await (atomic).
-      const invitationToAccept = params.invitationAcceptance
-        ? validateInvitationForAcceptanceInStore(orgStore, {
-            tokenHash: params.invitationAcceptance.tokenHash,
-            acceptingUserId: user.id,
-            acceptingUserNormalizedEmail: params.user.normalizedEmail,
-            maxMembers: params.invitationAcceptance.maxMembers,
-          })
-        : null;
-
-      let slug = params.personalWorkspace.slugBase;
-      for (let suffix = 2; orgStore.organizations.some((o) => o.slug === slug); suffix += 1) {
-        slug = `${params.personalWorkspace.slugBase}-${suffix}`;
-      }
-      const organization: OrganizationRow = {
-        id: createId('org'),
-        name: params.personalWorkspace.name,
-        slug,
-        type: 'personal',
-        status: 'active',
-        createdByUserId: user.id,
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-      };
-      const membership: MembershipRow = {
-        id: createId('mem'),
-        userId: user.id,
-        organizationId: organization.id,
-        roleId: ROLE_IDS.owner,
-        status: 'active',
-        invitedByUserId: null,
-        joinedAt: now,
-        removedAt: null,
-        removedByUserId: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-      const session = makeSession({
-        userId: user.id,
-        ipAddress: params.session.ipAddress,
-        userAgent: params.session.userAgent,
-        expiresAt: params.session.expiresAt,
-      });
-      const refreshToken: RefreshTokenRow = {
-        id: createId('rtok'),
-        sessionId: session.id,
-        tokenHash: params.refreshToken.tokenHash,
-        familyId: params.refreshToken.familyId,
-        parentTokenId: null,
-        replacementTokenId: null,
-        usedAt: null,
-        expiresAt: params.refreshToken.expiresAt,
-        revokedAt: null,
-        revokedReason: null,
-        createdAt: now,
-      };
-
-      // Commit: all validations passed, so apply every row together.
-      users.push(user);
-      orgStore.organizations.push(organization);
-      orgStore.memberships.push(membership);
-      // Default plan state, exactly as the database provisioning seam writes it.
-      provisionDefaultOrganizationPlan(orgStore, organization.id, user.id);
-      sessions.push(session);
-      refreshTokens.push(refreshToken);
-
-      // (Sprint 9) Accept the invitation in the SAME synchronous commit, so the
-      // invited membership + acceptance + events land atomically with the account.
-      if (invitationToAccept) {
-        applyInvitationAcceptanceInStore(orgStore, invitationToAccept, {
-          acceptingUserId: user.id,
-          requestId: params.invitationAcceptance?.eventContext.requestId ?? null,
-        });
-      }
-
-      return { user, organization, membership, session, refreshToken };
     },
 
     async findSessionById(id) {

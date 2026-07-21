@@ -20,10 +20,12 @@ pnpm dev:web         # web only  -> http://localhost:5173
 ```
 
 The web demo (`apps/web-demo`) is an authenticated admin UI and a thin official
-consumer of the Orgistry APIs. Open <http://localhost:5173>, register an account
-(auto-provisions a personal organization and signs you in), and create a team
-organization from the switcher to exercise multi-org flows. Invitation emails land
-in Mailpit (<http://localhost:8025>). The backend's `CORS_ORIGINS` must include the
+consumer of the Orgistry APIs. Open <http://localhost:5173> and register an
+account — registration is verification-first: a completion email lands in
+Mailpit (<http://localhost:8025>), and following its link creates the account
+(email-verified), provisions your personal organization, and signs you in.
+Then create a team organization from the switcher to exercise multi-org
+flows. Invitation emails also land in Mailpit. The backend's `CORS_ORIGINS` must include the
 web origin so the refresh-cookie/logout flows (`credentials: include`) work. Web
 checks: `pnpm --filter @orgistry/web-demo test` (jsdom smoke tests) and
 `pnpm --filter @orgistry/web-demo build`. See [`web-demo.md`](./web-demo.md).
@@ -85,7 +87,7 @@ pnpm infra:reset     # stop and delete volumes (wipes local data)
 | --- | --- | --- |
 | PostgreSQL | 5432 | durable store |
 | Redis | 6379 | readiness probe; auth + external-API rate limiting |
-| Mailpit | 1025 / 8025 | SMTP / web UI (http://localhost:8025); account email delivery (invitations + email verification) with the default `MAIL_DRIVER=mailpit` |
+| Mailpit | 1025 / 8025 | SMTP / web UI (http://localhost:8025); account email delivery (registration completion, invitations, email verification, password recovery) with the default `MAIL_DRIVER=mailpit` |
 
 See the [runbook](./runbook.md) for service details, data resets, and
 port-conflict handling, and [troubleshooting](./troubleshooting.md) for fixes.

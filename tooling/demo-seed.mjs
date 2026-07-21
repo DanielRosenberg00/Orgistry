@@ -75,33 +75,84 @@ function log(step, message) {
   console.log(`[${step}] ${message}`);
 }
 
-async function ensureOwnerSession() {
-  // Register provisions the account + a personal workspace atomically. If the
-  // demo owner already exists, registration is a CONFLICT and we log in instead.
-  const registered = await apiCall('POST', '/v1/auth/register', {
-    auth: false,
-    body: { email: OWNER.email, password: OWNER.password, displayName: OWNER.displayName },
-  });
+/**
+ * Recover the newest registration-completion token Mailpit received for an
+ * address. Registration is verification-first (Sprint 18): the API only ever
+ * answers `{ accepted: true }`, and the completion token travels exclusively
+ * in the emailed link — so the seed reads it from Mailpit's API, exactly as a
+ * human operator would read their mailbox.
+ */
+async function fetchCompletionTokenFromMailpit(email) {
+  const search = await fetch(
+    `${MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
+  ).catch(() => null);
+  if (!search || !search.ok) {
+    throw new Error(
+      `Cannot reach Mailpit at ${MAILPIT_URL} to read the registration email. Is it running (\`pnpm infra:up\`)?`,
+    );
+  }
+  const { messages = [] } = await search.json();
+  // NEWEST first, explicitly: a shared Mailpit may hold stale messages from
+  // earlier runs, and every re-request supersedes older links — only the most
+  // recent completion email carries a usable token.
+  const newestFirst = [...messages].sort(
+    (a, b) => new Date(b.Created).getTime() - new Date(a.Created).getTime(),
+  );
+  for (const summary of newestFirst) {
+    const detail = await fetch(`${MAILPIT_URL}/api/v1/message/${summary.ID}`);
+    if (!detail.ok) continue;
+    const message = await detail.json();
+    const match = (message.Text ?? '').match(
+      /\/auth\/complete-registration#token=([^\s&]+)/,
+    );
+    if (match) {
+      return decodeURIComponent(match[1]);
+    }
+  }
+  throw new Error(
+    `No registration-completion email found in Mailpit for ${email}. ` +
+      'If this address already has an account with a different password, no completion email is ever sent — reset the demo database or recover the password instead.',
+  );
+}
 
-  if (registered.ok) {
-    accessToken = registered.data.tokens.accessToken;
-    log('auth', `Registered demo owner ${OWNER.email} (personal workspace provisioned).`);
+async function ensureOwnerSession() {
+  // Login first: if the demo owner already exists this is the whole flow.
+  const loggedIn = await apiCall('POST', '/v1/auth/login', {
+    auth: false,
+    body: { email: OWNER.email, password: OWNER.password },
+  });
+  if (loggedIn.ok) {
+    accessToken = loggedIn.data.tokens.accessToken;
+    log('auth', `Logged in existing demo owner ${OWNER.email}.`);
     return;
   }
-
-  if (registered.code !== 'CONFLICT' && registered.code !== 'EMAIL_ALREADY_REGISTERED') {
-    throw new Error(`Owner registration failed: ${registered.code} — ${registered.message}`);
+  if (loggedIn.code !== 'INVALID_CREDENTIALS') {
+    throw new Error(`Owner login failed: ${loggedIn.code} — ${loggedIn.message}`);
   }
 
-  const loggedIn = expectOk(
-    await apiCall('POST', '/v1/auth/login', {
+  // Verification-first registration (Sprint 18): request -> generic accepted,
+  // completion email lands in Mailpit -> complete -> authenticated session +
+  // personal workspace, exactly the flow a real user drives.
+  expectOk(
+    await apiCall('POST', '/v1/auth/register', {
       auth: false,
-      body: { email: OWNER.email, password: OWNER.password },
+      body: { email: OWNER.email, password: OWNER.password, displayName: OWNER.displayName },
     }),
-    'Owner login',
+    'Owner registration request',
   );
-  accessToken = loggedIn.tokens.accessToken;
-  log('auth', `Logged in existing demo owner ${OWNER.email}.`);
+  const completionToken = await fetchCompletionTokenFromMailpit(OWNER.email);
+  const completed = expectOk(
+    await apiCall('POST', '/v1/auth/registration/complete', {
+      auth: false,
+      body: { token: completionToken },
+    }),
+    'Owner registration completion',
+  );
+  accessToken = completed.tokens.accessToken;
+  log(
+    'auth',
+    `Registered demo owner ${OWNER.email} via email completion (personal workspace provisioned).`,
+  );
 }
 
 async function ensureTeamOrganization() {

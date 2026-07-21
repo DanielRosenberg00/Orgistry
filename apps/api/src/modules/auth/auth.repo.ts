@@ -1,11 +1,6 @@
 import type { Database } from '@orgistry/db';
 import { schema } from '@orgistry/db';
 import { and, desc, eq, gt, inArray, isNull, lt, ne, or } from 'drizzle-orm';
-import {
-  insertOrganizationWithOwnerMembership,
-  resolveUniqueSlug,
-} from '../organization/organization.provisioning';
-import { acceptInvitationWithinTransaction } from '../invitations/invitation.acceptance';
 import { emailAlreadyRegisteredError } from './auth.errors';
 import type {
   AuthRepository,
@@ -15,8 +10,6 @@ import type {
   NewRefreshToken,
   NewSecurityEvent,
   NewSession,
-  NewUser,
-  RegisterAccountParams,
   RotateRefreshTokenParams,
   RotateRefreshTokenResult,
 } from './auth.types';
@@ -55,113 +48,6 @@ export function createDbAuthRepository(db: Database): AuthRepository {
         .where(eq(schema.users.id, id))
         .limit(1);
       return user ?? null;
-    },
-
-    async insertUser(values: NewUser) {
-      try {
-        const [user] = await db
-          .insert(schema.users)
-          .values({
-            email: values.email,
-            normalizedEmail: values.normalizedEmail,
-            passwordHash: values.passwordHash,
-            displayName: values.displayName,
-          })
-          .returning();
-        return user;
-      } catch (error) {
-        // The unique index on normalized_email is the authoritative guard for
-        // the concurrent-registration race; surface the same public conflict.
-        if (isUniqueViolation(error)) {
-          throw emailAlreadyRegisteredError();
-        }
-        throw error;
-      }
-    },
-
-    registerAccount(params: RegisterAccountParams) {
-      return db.transaction(async (tx) => {
-        // 1. User. The unique index on normalized_email is the authoritative
-        //    guard; a violation rolls back the whole transaction.
-        let user;
-        try {
-          [user] = await tx
-            .insert(schema.users)
-            .values({
-              email: params.user.email,
-              normalizedEmail: params.user.normalizedEmail,
-              passwordHash: params.user.passwordHash,
-              displayName: params.user.displayName,
-            })
-            .returning();
-        } catch (error) {
-          if (isUniqueViolation(error)) {
-            throw emailAlreadyRegisteredError();
-          }
-          throw error;
-        }
-
-        // 2. Personal workspace: organization + active Owner membership. Slug is
-        //    resolved to a unique value inside the same transaction.
-        const slug = await resolveUniqueSlug(
-          tx,
-          params.personalWorkspace.slugBase,
-        );
-        const { organization, membership } =
-          await insertOrganizationWithOwnerMembership(tx, {
-            type: 'personal',
-            name: params.personalWorkspace.name,
-            slug,
-            createdByUserId: user.id,
-            ownerUserId: user.id,
-          });
-
-        // 3. Session.
-        const [session] = await tx
-          .insert(schema.sessions)
-          .values({
-            userId: user.id,
-            ipAddress: params.session.ipAddress,
-            userAgent: params.session.userAgent,
-            expiresAt: params.session.expiresAt,
-          })
-          .returning();
-
-        // 4. First refresh token of a new family (hash-only).
-        const [refreshToken] = await tx
-          .insert(schema.refreshTokens)
-          .values({
-            sessionId: session.id,
-            familyId: params.refreshToken.familyId,
-            tokenHash: params.refreshToken.tokenHash,
-            parentTokenId: null,
-            expiresAt: params.refreshToken.expiresAt,
-          })
-          .returning();
-
-        // 5. (Sprint 9) Optionally accept an invitation IN THIS TRANSACTION, so
-        //    the invited membership + invitation acceptance commit together with
-        //    the new account, or the WHOLE registration rolls back. A revoked /
-        //    expired / quota-filled invitation (a race after the pre-check) throws
-        //    here, leaving no user, session, workspace, membership, or acceptance.
-        if (params.invitationAcceptance) {
-          await acceptInvitationWithinTransaction(tx, {
-            tokenHash: params.invitationAcceptance.tokenHash,
-            acceptingUserId: user.id,
-            acceptingUserNormalizedEmail: params.user.normalizedEmail,
-            maxMembers: params.invitationAcceptance.maxMembers,
-            ctx: {
-              actorUserId: user.id,
-              actorMembershipId: null,
-              requestId: params.invitationAcceptance.eventContext.requestId,
-              ipAddress: params.invitationAcceptance.eventContext.ipAddress,
-              userAgent: params.invitationAcceptance.eventContext.userAgent,
-            },
-          });
-        }
-
-        return { user, organization, membership, session, refreshToken };
-      });
     },
 
     async insertSession(values: NewSession) {

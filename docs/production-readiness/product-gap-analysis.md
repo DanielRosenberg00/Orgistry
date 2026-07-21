@@ -11,7 +11,7 @@ not implemented**, **Explicitly deferred**, **No longer applicable**.
 
 | Capability | Status | Evidence | Divergence / production impact | Findings |
 | --- | --- | --- | --- | --- |
-| Registration | Implemented | `auth.routes.ts POST /v1/auth/register`; Argon2id (`password.ts`) | Enumeration oracle on register — throttled + evented since S17, 409 still distinguishable | ORG-PR-030 (open, advanced) |
+| Registration | Implemented (verification-first, S18) | `registration.routes.ts POST /v1/auth/register` + `/v1/auth/registration/complete`; `pending_registrations`; Argon2id (`password.ts`) | Enumeration oracle removed (S18): generic acceptance for all account states, account created only via emailed completion token; residual timing side channel documented | ORG-PR-030 (closed, S18) |
 | Login | Implemented | `POST /v1/auth/login`; uniform error + dummy-hash timing | Fail-open limits under Redis outage | ORG-PR-009 |
 | Logout | Implemented | `POST /v1/auth/logout`; revokes session + refresh tokens | — | — |
 | Refresh / rotation | Implemented | `auth.repo.ts rotateRefreshToken` (txn + `FOR UPDATE`) | Benign double-refresh forces logout | ORG-PR-050 |
@@ -55,10 +55,10 @@ divergences worth recording:
    verification shipped in Sprint 16 (advisory; ORG-PR-024/048 closed);
    password reset, password change, and email change shipped in Sprint 17
    (ORG-PR-004/039 closed — see
-   [credential-management.md](../credential-management.md)). The remaining
-   lifecycle divergences are registration de-enumeration (ORG-PR-030, open —
-   materially advanced) and the deliberately absent account
-   deletion/export (DG-3).
+   [credential-management.md](../credential-management.md)); verification-first
+   registration shipped in Sprint 18 (ORG-PR-030 closed — see
+   [auth-foundation.md](../auth-foundation.md)). The remaining lifecycle
+   divergence is the deliberately absent account deletion/export (DG-3).
 2. **Organization lifecycle is modeled but inert.** `archived`/`suspended` states
    exist with no transition endpoint; the resolver already blocks non-active orgs.
 3. **API keys are read-only and non-rotatable.** No rotation/update/reveal; the

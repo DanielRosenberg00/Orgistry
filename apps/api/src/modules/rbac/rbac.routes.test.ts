@@ -6,6 +6,7 @@ import {
 } from '@orgistry/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { registerTestUser } from '../auth/testing/register-test-user';
 import {
   buildOrganizationTestApp,
   type OrganizationTestContext,
@@ -24,17 +25,12 @@ let emailSeq = 0;
 
 async function register(displayName = 'RBAC User'): Promise<string> {
   emailSeq += 1;
-  const response = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: {
-      email: `rbac.user.${emailSeq}@example.com`,
-      password: 'a-strong-password-123',
-      displayName,
-    },
+  const result = await registerTestUser(app, ctx.mailer, {
+    email: `rbac.user.${emailSeq}@example.com`,
+    password: 'a-strong-password-123',
+    displayName,
   });
-  expect(response.statusCode).toBe(201);
-  return response.json().data.tokens.accessToken;
+  return result.accessToken;
 }
 
 function authHeader(t: string): Record<string, string> {

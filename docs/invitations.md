@@ -23,8 +23,15 @@ Two facts to anchor everything below:
 - **Invitations create organization memberships. They do NOT create user
   sessions by themselves.** Existing-user acceptance returns organization +
   membership context; the caller is already authenticated. Registration with an
-  invitation creates the normal auth session through the **existing** registration
-  flow, exactly as a token-less registration does.
+  invitation goes through the normal registration flow — since Sprint 18 that
+  flow is verification-first and two-step: the invitation token is validated
+  INTERNALLY at the registration request (every private failure returns the
+  same generic `{ accepted: true }` as any other registration — no
+  `INVITATION_*` error escapes the public register endpoint; the INSPECT
+  endpoint is the invitation-feedback channel), its stable id (never the
+  token) is stored with the pending registration, and acceptance happens at
+  registration completion, which is also what creates the session (see
+  [auth-foundation.md](auth-foundation.md)).
 - **Raw invitation tokens are never persisted and never logged; token hashes are
   never exposed.** Public inspection returns only safe onboarding context.
 
@@ -58,7 +65,7 @@ Two facts to anchor everything below:
 | `DELETE /v1/organizations/:organizationId/invitations/:invitationId` | Bearer (user) | `invitations.revoke` | Revoke a pending, non-expired invitation. |
 | `POST /v1/invitations/inspect` | none | — | Safe public onboarding context for an acceptable token. |
 | `POST /v1/invitations/accept` | Bearer (user) | — | Existing user joins; creates the membership. |
-| `POST /v1/auth/register` (extended) | none | — | Optional `invitationToken` joins the org during registration. |
+| `POST /v1/auth/register` (extended) | none | — | Optional `invitationToken` is validated internally at the registration request — private failures return the same generic `{ accepted: true }` (no `INVITATION_*` error escapes; use inspect for feedback); the invitation is accepted at registration completion (`POST /v1/auth/registration/complete`; Sprint 18). |
 
 The raw token travels in the **request body** for inspect/accept (never the URL
 path), so it never reaches access logs or `Referer` headers — the same
@@ -86,7 +93,9 @@ apps/api/src/modules/invitations/
   testing/                                     in-memory repo, test app
 apps/api/src/modules/mail/                     shared account mailer (drivers, serialization,
                                                in-memory test mailer) — Sprint 16
-apps/api/src/modules/auth/                     register() integration (optional guard)
+apps/api/src/modules/auth/registration.*       verification-first registration integration
+                                               (internal request-time validation +
+                                               completion-time acceptance) — Sprint 18
 apps/api/src/modules/entitlements/            getMaxMembers + reservation quota
 ```
 
@@ -115,9 +124,12 @@ route (validate body, org id from path)
   `MAIL_DRIVER` (Mailpit locally, authenticated SMTPS in production, in-memory
   in tests) — the service and the fail-closed ordering are unchanged whichever
   driver is active. See [email-and-verification.md](email-and-verification.md).
-- **A new acceptance path** (e.g. a future flow): resolve the invitation by token
-  hash, then call `repo.acceptInvitation` — the single transactional seam that
-  enforces every invariant. Do not re-implement acceptance.
+- **A new acceptance path** (e.g. a future flow): resolve the invitation
+  through the shared acceptance seam — its selector accepts a token hash OR a
+  stable invitation id (the id form is what registration completion uses,
+  since the pending registration never stores the token) — the single
+  transactional seam that enforces every invariant. Do not re-implement
+  acceptance.
 - **Never** branch on role name for authorization; check a permission key.
 
 ### Local email delivery (Mailpit) and token transport
@@ -125,8 +137,9 @@ route (validate body, org id from path)
 With the default `MAIL_DRIVER=mailpit`, invitation email is delivered for real
 over SMTP to the local **Mailpit** container defined in
 `infra/docker-compose.yml` (`MAILPIT_HOST` : `MAILPIT_SMTP_PORT`, default
-`localhost:1025`). The transport (`apps/api/src/modules/mail/`) is a small,
-zero-dependency SMTP client over Node's `net`/`tls` sockets — no worker/queue.
+`localhost:1025`). The transport (`apps/api/src/modules/mail/`) is the shared
+account-mailer boundary (nodemailer-backed since Sprint 16 — see
+[email-and-verification.md](email-and-verification.md)) — no worker/queue.
 
 To see an invitation email locally:
 
@@ -228,26 +241,42 @@ path; both callers below reuse it.
   invitation accepted, record both `invitation.accepted` and
   `membership.created_from_invitation`. Membership creation and acceptance cannot
   diverge.
-- **Registration with invitation**: ONE transaction. `registerAccount` creates
-  the user, the personal workspace, the session, and the refresh token, and then
-  runs the SAME shared acceptance body — all in that single transaction. If
-  acceptance fails (a revoked/expired/quota-filled invitation, e.g. a race after
-  the pre-check), the whole transaction rolls back: no user, no personal
-  workspace, no session, no membership, no acceptance. The session/refresh result
-  is assembled only after the transaction commits, so **no session is ever issued
-  for a failed registration-with-invitation**. A cheap pre-check
-  (`prepareForRegistration`) runs first to fail obviously-bad tokens fast and to
-  resolve the plan's `max_members` ceiling the transaction needs; the in-transaction
-  acceptance is the authoritative guard.
+- **Registration with invitation (rewritten in Sprint 18)**: registration is
+  now verification-first and two-step. At the **registration request**
+  (`POST /v1/auth/register`) the invitation is validated INTERNALLY — a
+  rejected invitation (unknown token, lifecycle, email mismatch, quota)
+  answers the same generic acceptance as every other registration, stages
+  nothing, mutates nothing, and sends nothing; precise invitation feedback
+  belongs exclusively to the INSPECT endpoint — and a VALID invitation's
+  **stable id**, never the token or its hash, is stored with the pending
+  registration. At **registration
+  completion** (`POST /v1/auth/registration/complete`) one transaction creates
+  the user, personal workspace, and session, then re-runs the SAME shared
+  acceptance body — resolved by invitation id this time (the seam's selector
+  accepts a token hash OR an invitation id) — under a row lock, INSIDE A
+  SAVEPOINT. If the invitation has become unavailable (revoked, expired,
+  accepted, quota-filled), ONLY the acceptance rolls back: the account,
+  workspace, and session still commit, and the response reports
+  `invitation: { status: 'unavailable' }` — never silently dropped. The
+  refresh cookie is set only after the transaction commits, so no session is
+  ever issued for a failed completion. See
+  [auth-foundation.md](auth-foundation.md) for the full flow.
 
 ### Rejected alternatives
 
 - **Two-transaction registration** (create the account in one transaction, accept
-  the invitation in a second afterwards). Rejected: a race in the gap could leave
-  a new user/session/personal workspace without the invited membership. The
-  single-transaction approach above eliminates that window at the cost of a
-  narrow, deliberate dependency: `auth.repo` imports the shared acceptance seam
-  (the same pattern by which it already imports the org-provisioning seam).
+  the invitation in a second afterwards). Rejected at the time: a race in the gap
+  could leave a new user/session/personal workspace without the invited
+  membership. **Sprint 18 revision:** the fail-together behavior is no longer a
+  product invariant. Verification-first registration re-checks the invitation at
+  completion inside a SAVEPOINT within the one completion transaction: an
+  invitation that became unavailable rolls back only the acceptance, the proven
+  user's account/workspace/session still commit, and the outcome is reported
+  explicitly (`invitation: { status: 'unavailable' }`). Rationale: the user has
+  proven the mailbox and set a password; destroying the account because a third
+  party revoked an invitation would punish the proven user. There is still no
+  unreported gap — the re-check happens inside the same transaction, not
+  afterwards.
 - **Returning the raw token in the create response** (as API keys do for secrets).
   Invitations are delivered by email; returning the token would put a redeemable
   secret in a response body and tempt logging. Tests recover the token from the
@@ -334,10 +363,14 @@ member-centric surface; the two are equivalent for Owner/Admin today.
 - **Entitlements/quotas**: the entitlement service gained `getMaxMembers` and
   `requireMemberReservationQuota`; acceptance reuses the existing active-member
   quota boundary. No plan/quota model change.
-- **Registration**: `registerRequestSchema` gained an optional `invitationToken`.
-  The auth service takes an OPTIONAL registration-invitation guard (it is unset in
-  auth-only contexts, so token-less registration is byte-for-byte unchanged). The
-  personal workspace is always created by the registration transaction.
+- **Registration**: `registerRequestSchema` carries an optional
+  `invitationToken`. Since Sprint 18 the integration lives in the registration
+  module (`apps/api/src/modules/auth/registration.*`): the request validates
+  the token internally (rejections collapse to the generic acceptance —
+  `resolveRequestInvitation` is the single translation point) and stages the
+  stable invitation id for valid ones; completion re-runs the shared
+  acceptance seam (selector: token hash OR invitation id) inside a savepoint.
+  The personal workspace is always created by the completion transaction.
 - **Mailpit / local mailer**: `InvitationMailer` is the seam; the runtime
   transport (`createMailpitInvitationMailer`) delivers over SMTP to the local
   Mailpit container (`MAILPIT_*` config), viewable in the Mailpit web UI.

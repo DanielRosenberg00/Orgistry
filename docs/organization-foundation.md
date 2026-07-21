@@ -23,6 +23,17 @@ projects, API keys, organization audit logs, or any workspace UI. See
 > helper builds on. The remaining §E limitations (invitations, projects,
 > entitlements, quotas, API keys, user-facing audit log, workspace UI) still hold.
 
+> **Sprint 18 update.** Registration is now verification-first, so the
+> transaction described in "How personal workspace creation works during
+> registration" runs at registration **completion**
+> (`POST /v1/auth/registration/complete`, in
+> `apps/api/src/modules/auth/registration.*`) rather than at
+> `POST /v1/auth/register`, and the created user is email-verified. The
+> provisioning primitives and the single-transaction guarantee — user +
+> personal workspace + Owner membership + session + refresh token commit or
+> roll back together — are unchanged. See
+> [`auth-foundation.md`](auth-foundation.md).
+
 ## A. Developer Documentation
 
 ### What was implemented
@@ -86,7 +97,9 @@ runs a **single database transaction**:
 
 If any step fails, the whole transaction rolls back — so a registered user can
 never exist without a personal workspace. The access token is signed and the
-`auth.registration_succeeded` event is written after the transaction commits.
+success security event (`auth.registration_succeeded` then; since Sprint 18,
+`auth.registration_completion_succeeded`) is written after the transaction
+commits.
 
 ### Where the code lives & how to extend it safely
 
@@ -213,10 +226,12 @@ and the partial index, so those flows can be added without a redesign.
 
 ## D. Integration Notes
 
-- **Registration ↔ organization.** `auth.repo.ts` imports the provisioning
-  primitives from the organization module and runs them inside the registration
-  transaction. Row-construction rules stay in one place (the organization
-  module); atomicity is owned by the registration flow.
+- **Registration ↔ organization.** The registration flow imports the
+  provisioning primitives from the organization module and runs them inside
+  the registration transaction (originally `auth.repo.ts`; since Sprint 18 the
+  registration-completion transaction in `registration.repo.ts`).
+  Row-construction rules stay in one place (the organization module);
+  atomicity is owned by the registration flow.
 - **Authenticated routes ↔ current user.** Organization routes resolve the
   caller via `OrganizationAuthenticator.authenticate(token, ctx)` (the auth
   service), then pass the resolved `userId` into the organization service. The

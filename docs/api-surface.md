@@ -29,7 +29,8 @@ defined under `apps/api/src/routes` and `apps/api/src/modules/*`.
 
 | Method | Path | Auth | Permission | Purpose / notes |
 | --- | --- | --- | --- | --- |
-| POST | `/v1/auth/register` | none | — | Register; provisions personal workspace atomically; sets refresh cookie. Optional `invitationToken` also joins the inviting org. |
+| POST | `/v1/auth/register` | none | — | Request registration (verification-first, Sprint 18). Validates and rate-limits per IP + per email digest BEFORE any lookup, then **always** returns `200 { accepted: true }` — for new, existing, disabled, and soft-deleted accounts AND for every private failure of an optional `invitationToken` (unknown/expired/revoked/accepted, email mismatch, quota) alike; only `VALIDATION_ERROR` and `RATE_LIMITED` are explicit. Creates NO user, session, or cookie; never returns `EMAIL_ALREADY_REGISTERED` or any `INVITATION_*` error (invitation feedback lives on `/v1/invitations/inspect`). Eligible new emails get a completion email; rejected invitations stage and send nothing. |
+| POST | `/v1/auth/registration/complete` | none | — | Complete registration by raw token possession. Body `{ token }` (never a URL). One transaction creates the email-verified user + personal workspace + Owner membership + session, and accepts a stored invitation where applicable; refresh cookie set after commit. Returns `201 { user, tokens, invitation }` (`invitation`: null / `{status:'accepted'}` / `{status:'unavailable'}`); errors: `REGISTRATION_TOKEN_INVALID` 404, `…_EXPIRED` 410, `…_USED` 409. |
 | POST | `/v1/auth/login` | none | — | Login; creates session; sets refresh cookie. |
 | GET | `/v1/auth/me` | Bearer | — | Current authenticated user. |
 | POST | `/v1/auth/refresh` | Cookie+CSRF | — | Rotate refresh token; returns a fresh access token only. |

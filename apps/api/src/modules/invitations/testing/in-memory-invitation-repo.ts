@@ -181,14 +181,18 @@ export function createInMemoryInvitationRepository(
       return { invitation, role: requireRole(invitation.roleId), organization };
     },
 
+    async findInvitationById(invitationId: string) {
+      return store.invitations.find((inv) => inv.id === invitationId) ?? null;
+    },
+
     // Synchronous validate-then-apply (no await between) -> atomic under Node's
     // single-threaded loop, mirroring the DB transaction. Shares the validate/
-    // apply helpers with the in-memory auth repo's registration flow.
+    // apply helpers with the in-memory registration repo's completion flow.
     async acceptInvitation(
       params: AcceptInvitationParams,
     ): Promise<AcceptInvitationResult> {
       const invitation = validateInvitationForAcceptanceInStore(store, {
-        tokenHash: params.tokenHash,
+        selector: params.selector,
         acceptingUserId: params.acceptingUserId,
         acceptingUserNormalizedEmail: params.acceptingUserNormalizedEmail,
         maxMembers: params.maxMembers,

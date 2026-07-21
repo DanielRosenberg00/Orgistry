@@ -45,6 +45,34 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > recommended next work is a **focused account-lifecycle follow-up that
 > closes ORG-PR-030** (verification-first registration) **before Sprint 18 —
 > Edge and Application Security Hardening**.
+>
+> **Post-audit status (Sprint 18, 2026-07-20): Sprint 18 is COMPLETE** in its
+> repository scope. **ORG-PR-030 is closed**: public registration is now
+> verification-first — the request endpoint answers one contract-identical
+> generic acceptance for every post-validation account state (no
+> duplicate-email error, no authentication state, no account creation), and
+> accounts are created only by the emailed single-use completion token
+> (created email-verified, with the personal workspace, Owner membership,
+> session, and refresh token in one transaction). Invitation-based
+> registration is preserved under the same model, with a documented
+> completion-time invitation-unavailable policy. Closure is proven by a
+> public response-equality test matrix plus DB-backed issuance- and
+> completion-concurrency tests; a residual timing side channel is documented
+> and accepted (see the finding's Resolution). See
+> [docs/auth-foundation.md](../auth-foundation.md) and
+> [sprint-18-artifact-package.md](sprint-18-artifact-package.md). Four P1
+> blockers remain open (ORG-PR-001/002/005/006); the repository is still
+> **not ready for staging or production**. Recommended next: **Sprint 19 —
+> Edge and Application Security Hardening** (the roadmap's edge-hardening
+> sprint, renumbered after this inserted account-lifecycle sprint).
+> A **refinement pass (2026-07-21)** corrected the remaining Sprint 18
+> invitation contract — private invitation-validation failures on public
+> registration now return the same generic acceptance (proven by a ten-row
+> equality matrix) instead of explicit `INVITATION_*` errors — added the
+> web-demo invitation landing/registration flow, and runtime-validated the
+> demo seed. See the refinement record in
+> [sprint-18-artifact-package.md](sprint-18-artifact-package.md) and the
+> ORG-PR-030 refinement note in the findings register.
 
 ## Audit context
 
@@ -75,6 +103,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-15-artifact-package.md](sprint-15-artifact-package.md) | The Sprint 15 closing artifact (production config guard). |
 | [sprint-16-artifact-package.md](sprint-16-artifact-package.md) | The Sprint 16 closing artifact (production email + email verification). |
 | [sprint-17-artifact-package.md](sprint-17-artifact-package.md) | The Sprint 17 closing artifact (password recovery + credential management). |
+| [sprint-18-artifact-package.md](sprint-18-artifact-package.md) | The Sprint 18 closing artifact (verification-first registration; ORG-PR-030 closure). |
 
 ## Source-of-truth hierarchy
 

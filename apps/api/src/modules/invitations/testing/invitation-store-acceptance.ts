@@ -15,6 +15,7 @@ import {
 } from '../invitation.errors';
 import { INVITATION_EVENT_TYPES } from '../invitation.events';
 import { assertAcceptable } from '../invitation.lifecycle';
+import type { InvitationSelector } from '../invitation.types';
 import type { InMemoryOrgStore } from '../../organization/testing/in-memory-org-store';
 
 /**
@@ -32,7 +33,8 @@ const INVITATION_TARGET_TYPE = 'invitation';
 const MEMBERSHIP_TARGET_TYPE = 'membership';
 
 export interface StoreAcceptanceParams {
-  tokenHash: string;
+  /** Lookup key: presented-token hash OR stable invitation ID (Sprint 18). */
+  selector: InvitationSelector;
   acceptingUserId: string;
   acceptingUserNormalizedEmail: string;
   maxMembers: number;
@@ -48,8 +50,11 @@ export function validateInvitationForAcceptanceInStore(
   params: StoreAcceptanceParams,
 ): InvitationRow {
   const now = new Date();
-  const invitation = store.invitations.find(
-    (inv) => inv.tokenHash === params.tokenHash,
+  const selector = params.selector;
+  const invitation = store.invitations.find((inv) =>
+    'tokenHash' in selector
+      ? inv.tokenHash === selector.tokenHash
+      : inv.id === selector.invitationId,
   );
   if (!invitation) {
     throw invitationInvalidError();

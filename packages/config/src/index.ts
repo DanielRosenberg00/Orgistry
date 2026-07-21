@@ -68,6 +68,11 @@ export interface Config {
     /** Raw reset token lifetime in seconds. Short-lived by design. */
     readonly ttlSeconds: number;
   };
+  /** Verification-first registration behavior knobs (Sprint 18). */
+  readonly registration: {
+    /** Raw completion-token (and pending-registration) lifetime in seconds. */
+    readonly completionTtlSeconds: number;
+  };
   readonly auth: {
     readonly jwtSecret: string;
     readonly cookieSecure: boolean;
@@ -97,12 +102,26 @@ export interface Config {
       readonly windowSeconds: number;
       readonly loginPerIpMax: number;
       readonly loginPerEmailMax: number;
-      readonly registerPerIpMax: number;
-      readonly registerPerEmailMax: number;
       readonly refreshPerSessionMax: number;
       readonly refreshPerIpMax: number;
       readonly changePasswordPerUserMax: number;
       readonly changeEmailPerUserMax: number;
+    };
+    /**
+     * Verification-first registration buckets (Sprint 18; the request buckets
+     * date from Sprint 17). Shares the auth fixed window. Request is public
+     * (per IP + per email digest, BEFORE any account lookup); completion is
+     * public (per IP + per token-derived internal key). The notice bucket is
+     * INTERNAL: exceeding it silently skips the existing-account guidance
+     * email and never surfaces as an error.
+     */
+    readonly registration: {
+      readonly windowSeconds: number;
+      readonly requestPerIpMax: number;
+      readonly requestPerEmailMax: number;
+      readonly completePerIpMax: number;
+      readonly completePerTokenMax: number;
+      readonly existingAccountNoticePerEmailMax: number;
     };
     /**
      * Email-verification buckets (Sprint 16). Shares the auth fixed window:
@@ -202,6 +221,9 @@ function toConfig(env: Env): Config {
     passwordRecovery: {
       ttlSeconds: env.PASSWORD_RESET_TTL_SECONDS,
     },
+    registration: {
+      completionTtlSeconds: env.REGISTRATION_COMPLETION_TTL_SECONDS,
+    },
     auth: {
       jwtSecret: env.JWT_SECRET,
       cookieSecure: env.COOKIE_SECURE,
@@ -225,12 +247,19 @@ function toConfig(env: Env): Config {
         windowSeconds: env.RATE_LIMIT_AUTH_WINDOW_SECONDS,
         loginPerIpMax: env.RATE_LIMIT_LOGIN_PER_IP_MAX,
         loginPerEmailMax: env.RATE_LIMIT_LOGIN_PER_EMAIL_MAX,
-        registerPerIpMax: env.RATE_LIMIT_REGISTER_PER_IP_MAX,
-        registerPerEmailMax: env.RATE_LIMIT_REGISTER_PER_EMAIL_MAX,
         refreshPerSessionMax: env.RATE_LIMIT_REFRESH_PER_SESSION_MAX,
         refreshPerIpMax: env.RATE_LIMIT_REFRESH_PER_IP_MAX,
         changePasswordPerUserMax: env.RATE_LIMIT_CHANGE_PASSWORD_PER_USER_MAX,
         changeEmailPerUserMax: env.RATE_LIMIT_CHANGE_EMAIL_PER_USER_MAX,
+      },
+      registration: {
+        windowSeconds: env.RATE_LIMIT_AUTH_WINDOW_SECONDS,
+        requestPerIpMax: env.RATE_LIMIT_REGISTER_PER_IP_MAX,
+        requestPerEmailMax: env.RATE_LIMIT_REGISTER_PER_EMAIL_MAX,
+        completePerIpMax: env.RATE_LIMIT_REGISTRATION_COMPLETE_PER_IP_MAX,
+        completePerTokenMax: env.RATE_LIMIT_REGISTRATION_COMPLETE_PER_TOKEN_MAX,
+        existingAccountNoticePerEmailMax:
+          env.RATE_LIMIT_REGISTRATION_NOTICE_PER_EMAIL_MAX,
       },
       emailVerification: {
         windowSeconds: env.RATE_LIMIT_AUTH_WINDOW_SECONDS,

@@ -137,22 +137,37 @@ export interface AcceptInvitationInput {
 }
 
 /**
- * The narrow port the auth module uses for registration-with-invitation. The
- * invitation service implements it; defining the shape here (and a matching one
- * in the auth module) keeps auth free of any invitation import.
+ * The narrow port the registration module uses for invitation-carrying
+ * registrations (Sprint 18). The invitation service implements it; defining
+ * the shape here (and a matching one in the registration module) keeps the
+ * registration workflow free of any invitation import.
  */
 export interface RegistrationInvitationGuard {
   /**
-   * Pre-resolve a raw token for registration: validate (lifecycle, email match,
-   * quota) so an obviously-bad token fails BEFORE the account is provisioned, and
-   * return the token hash + the organization's `max_members` ceiling the
-   * registration transaction needs to accept the invitation ATOMICALLY. Throws
-   * the precise invitation error (or `QUOTA_EXCEEDED`) without mutating anything.
+   * Pre-validate a raw token at REGISTRATION-REQUEST time: lifecycle, email
+   * match, and quota, so an obviously-bad token fails BEFORE anything is
+   * staged. Throws the precise invitation error (or `QUOTA_EXCEEDED`) without
+   * mutating anything — these outcomes depend only on the token + submitted
+   * email, never on account state, so surfacing them creates no
+   * account-existence oracle. Returns the STABLE invitation ID (the only
+   * invitation reference a pending registration may persist — never the token
+   * or its hash) plus the organization display name, which the public inspect
+   * endpoint already treats as safe to show a token holder.
    */
   prepareForRegistration(
     rawToken: string,
     normalizedEmail: string,
-  ): Promise<{ tokenHash: string; maxMembers: number }>;
+  ): Promise<{ invitationId: string; organizationName: string }>;
+  /**
+   * Resolve the context the COMPLETION transaction needs to accept the stored
+   * invitation: the plan's `max_members` ceiling. Returns null when the
+   * invitation reference no longer resolves (the completion then reports the
+   * invitation as unavailable). Deliberately does NOT pre-validate lifecycle —
+   * the acceptance transaction re-validates authoritatively under a row lock.
+   */
+  resolveCompletionContext(
+    invitationId: string,
+  ): Promise<{ maxMembers: number } | null>;
 }
 
 export interface InvitationService extends RegistrationInvitationGuard {
@@ -465,7 +480,7 @@ export function createInvitationService(
         context.invitation.organizationId,
       );
       const result = await invitations.acceptInvitation({
-        tokenHash,
+        selector: { tokenHash },
         acceptingUserId: input.userId,
         acceptingUserNormalizedEmail: normalized,
         maxMembers,
@@ -490,8 +505,8 @@ export function createInvitationService(
       if (!context) {
         throw invitationInvalidError();
       }
-      // Early, clean failures before account provisioning. The registration
-      // transaction re-validates everything authoritatively under a row lock.
+      // Early, clean failures before anything is staged. The completion-time
+      // acceptance re-validates everything authoritatively under a row lock.
       assertAcceptable(context.invitation, clock.now());
       if (context.invitation.invitedEmailNormalized !== normalizedEmail) {
         throw invitationEmailMismatchError();
@@ -499,10 +514,24 @@ export function createInvitationService(
       await entitlements.requireMemberAdditionQuota(
         context.invitation.organizationId,
       );
+      // Only the STABLE ID crosses into the registration module (the pending
+      // registration must never persist the token or its hash) plus the
+      // organization name the public inspect surface already discloses.
+      return {
+        invitationId: context.invitation.id,
+        organizationName: context.organization.name,
+      };
+    },
+
+    async resolveCompletionContext(invitationId) {
+      const invitation = await invitations.findInvitationById(invitationId);
+      if (!invitation) {
+        return null;
+      }
       const maxMembers = await entitlements.getMaxMembers(
-        context.invitation.organizationId,
+        invitation.organizationId,
       );
-      return { tokenHash, maxMembers };
+      return { maxMembers };
     },
   };
 }

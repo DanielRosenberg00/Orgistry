@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
+import { registerTestUser } from '../auth/testing/register-test-user';
 import {
   buildOrganizationTestApp,
   type OrganizationTestContext,
@@ -30,18 +31,12 @@ async function registerUser(displayName = 'Test User'): Promise<{
   userId: string;
 }> {
   userSeq += 1;
-  const response = await ctx.app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: {
-      email: `user${userSeq}@example.com`,
-      password: 'a-strong-password-123',
-      displayName,
-    },
+  const result = await registerTestUser(ctx.app, ctx.mailer, {
+    email: `user${userSeq}@example.com`,
+    password: 'a-strong-password-123',
+    displayName,
   });
-  expect(response.statusCode).toBe(201);
-  const body = response.json().data;
-  return { token: body.tokens.accessToken, userId: body.user.id };
+  return { token: result.accessToken, userId: result.userId };
 }
 
 function authHeader(token: string): Record<string, string> {

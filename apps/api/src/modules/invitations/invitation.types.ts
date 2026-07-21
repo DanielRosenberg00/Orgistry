@@ -76,10 +76,23 @@ export interface ListInvitationsParams {
   cursor: { createdAtMs: number; id: string } | null;
 }
 
-/** Inputs for accepting an invitation (resolved by token hash). */
+/**
+ * How the acceptance transaction resolves its invitation row:
+ *  - `tokenHash` — the classic token-bearing path (existing-user accept): the
+ *    caller presented the raw token and the hash is the lookup key;
+ *  - `invitationId` — the Sprint 18 registration-completion path: the pending
+ *    registration stored the stable invitation ID at request time (never the
+ *    token or its hash), so completion re-resolves the row by ID.
+ * Both paths run the IDENTICAL validation and mutation sequence.
+ */
+export type InvitationSelector =
+  | { tokenHash: string }
+  | { invitationId: string };
+
+/** Inputs for accepting an invitation (resolved via the selector). */
 export interface AcceptInvitationParams {
-  /** SHA-256 hash of the presented raw token. */
-  tokenHash: string;
+  /** Lookup key for the invitation row (see `InvitationSelector`). */
+  selector: InvitationSelector;
   /** The account accepting the invitation. */
   acceptingUserId: string;
   /** The accepting account's normalized email (for the email-match invariant). */
@@ -127,6 +140,14 @@ export interface InvitationRepository {
   findContextByTokenHash(
     tokenHash: string,
   ): Promise<InvitationContextView | null>;
+
+  /**
+   * Resolve an invitation by its stable row ID (the reference a pending
+   * registration stores — Sprint 18). Returns null when unknown. Read-only:
+   * lifecycle is NOT validated here; completion re-validates under the row
+   * lock inside the acceptance transaction.
+   */
+  findInvitationById(invitationId: string): Promise<InvitationRow | null>;
 
   /**
    * Accept an invitation transactionally: lock the invitation by token hash,

@@ -4,13 +4,19 @@ import {
   type AuthTestContext,
   buildAuthTestApp,
 } from './testing/build-auth-test-app';
+import {
+  registerTestUser,
+  type RegisterTestUserResult,
+} from './testing/register-test-user';
 
 /**
  * End-to-end secure session lifecycle through `app.inject`, backed by the
  * in-memory repository: refresh issuance, the HttpOnly refresh cookie, refresh
  * rotation + reuse detection, logout, CSRF enforcement, and session
- * listing/revocation. DB-backed persistence is covered in the integration
- * suite.
+ * listing/revocation. Registration is verification-first (Sprint 18), so the
+ * first session — and its refresh cookie — is issued by the COMPLETION
+ * endpoint, driven here through the shared `registerTestUser` helper.
+ * DB-backed persistence is covered in the integration suite.
  */
 
 const CREDENTIALS = {
@@ -35,15 +41,21 @@ afterEach(async () => {
 
 /* ----------------------------- cookie helpers ---------------------------- */
 
+function firstSetCookie(raw: string | string[] | undefined): string {
+  return Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '');
+}
+
 function setCookieHeader(response: LightMyRequestResponse): string {
-  const raw = response.headers['set-cookie'];
-  return Array.isArray(raw) ? raw[0] : (raw ?? '');
+  return firstSetCookie(response.headers['set-cookie']);
+}
+
+function cookieValueFrom(raw: string | string[] | undefined): string {
+  const match = new RegExp(`${cookieName}=([^;]*)`).exec(firstSetCookie(raw));
+  return match ? decodeURIComponent(match[1]) : '';
 }
 
 function cookieValue(response: LightMyRequestResponse): string {
-  const header = setCookieHeader(response);
-  const match = new RegExp(`${cookieName}=([^;]*)`).exec(header);
-  return match ? decodeURIComponent(match[1]) : '';
+  return cookieValueFrom(response.headers['set-cookie']);
 }
 
 function cookieWasCleared(response: LightMyRequestResponse): boolean {
@@ -56,12 +68,15 @@ function cookieHeaderFor(token: string): string {
 
 /* ------------------------------- requests -------------------------------- */
 
-function register(email = CREDENTIALS.email) {
-  return ctx.app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: { ...CREDENTIALS, email },
-  });
+/** Full verification-first registration; the refresh cookie comes from the
+ *  COMPLETION response (`setCookie`), not from `POST /register`. */
+function register(email = CREDENTIALS.email): Promise<RegisterTestUserResult> {
+  return registerTestUser(ctx.app, ctx.mailer, { ...CREDENTIALS, email });
+}
+
+/** Register and return just the raw refresh-cookie value. */
+async function registerCookie(email = CREDENTIALS.email): Promise<string> {
+  return cookieValueFrom((await register(email)).setCookie);
 }
 
 function login(email = CREDENTIALS.email) {
@@ -97,11 +112,10 @@ function logout(token: string | null, withCsrf = true) {
 /* ----------------------------- 5.1 / 5.2 --------------------------------- */
 
 describe('refresh issuance + cookie', () => {
-  it('register sets an HttpOnly, SameSite=Lax, path-scoped refresh cookie', async () => {
-    const response = await register();
-    const cookie = setCookieHeader(response);
+  it('registration completion sets an HttpOnly, SameSite=Lax, path-scoped refresh cookie', async () => {
+    const result = await register();
+    const cookie = firstSetCookie(result.setCookie);
 
-    expect(response.statusCode).toBe(201);
     expect(cookie).toContain(`${cookieName}=`);
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('SameSite=Lax');
@@ -117,12 +131,12 @@ describe('refresh issuance + cookie', () => {
   });
 
   it('stores the refresh token hash-only and never returns it in JSON', async () => {
-    const response = await register();
-    const raw = cookieValue(response);
+    const result = await register();
+    const raw = cookieValueFrom(result.setCookie);
 
     expect(raw.length).toBeGreaterThan(20);
-    // The raw token never appears in the JSON body.
-    expect(JSON.stringify(response.json())).not.toContain(raw);
+    // The raw token never appears in the completion JSON body.
+    expect(JSON.stringify(result.completion)).not.toContain(raw);
     // Persistence holds a SHA-256 hash, not the raw token.
     const stored = ctx.repo.refreshTokens[0];
     expect(stored.tokenHash).toMatch(/^[0-9a-f]{64}$/);
@@ -135,7 +149,7 @@ describe('refresh issuance + cookie', () => {
 
 describe('refresh rotation', () => {
   it('requires the CSRF header', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     const response = await refresh(raw, false);
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe('CSRF_REQUIRED');
@@ -160,7 +174,7 @@ describe('refresh rotation', () => {
   });
 
   it('fails for an expired token', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     ctx.repo.refreshTokens[0].expiresAt = new Date(Date.now() - 1000);
     const response = await refresh(raw);
     expect(response.statusCode).toBe(401);
@@ -168,7 +182,7 @@ describe('refresh rotation', () => {
   });
 
   it('rotates a valid token: new access token + new cookie, old token consumed', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     const original = ctx.repo.refreshTokens[0];
 
     const response = await refresh(raw);
@@ -194,7 +208,7 @@ describe('refresh rotation', () => {
   });
 
   it('writes a refresh_token_rotated security event on success', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     await refresh(raw);
     const event = ctx.repo.securityEvents.find(
       (e) => e.eventType === 'auth.refresh_token_rotated',
@@ -205,7 +219,7 @@ describe('refresh rotation', () => {
   });
 
   it('does not let concurrent refreshes mint two valid successors', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
 
     const [a, b] = await Promise.all([refresh(raw), refresh(raw)]);
     const codes = [a.statusCode, b.statusCode].sort();
@@ -221,7 +235,7 @@ describe('refresh rotation', () => {
 
 describe('refresh token reuse detection', () => {
   it('revokes the family + session, clears the cookie, and issues no access token', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     const familyId = ctx.repo.refreshTokens[0].familyId;
     const sessionId = ctx.repo.sessions[0].id;
 
@@ -258,7 +272,7 @@ describe('refresh token reuse detection', () => {
 
 describe('logout', () => {
   it('revokes server-side state, clears the cookie, and writes an event', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     const sessionId = ctx.repo.sessions[0].id;
 
     const response = await logout(raw);
@@ -282,14 +296,14 @@ describe('logout', () => {
   });
 
   it('requires the CSRF header', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     const response = await logout(raw, false);
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe('CSRF_REQUIRED');
   });
 
   it('is safe to call repeatedly', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     await logout(raw);
     const second = await logout(null); // cookie already cleared client-side
     expect(second.statusCode).toBe(200);
@@ -297,7 +311,7 @@ describe('logout', () => {
   });
 
   it('makes a subsequent refresh fail', async () => {
-    const raw = cookieValue(await register());
+    const raw = await registerCookie();
     await logout(raw);
     const response = await refresh(raw);
     expect(response.statusCode).toBe(401);
@@ -344,11 +358,11 @@ describe('session list', () => {
   });
 
   it('does not expose token hashes or family internals', async () => {
-    const response = await register();
+    const reg = await register();
     const list = await ctx.app.inject({
       method: 'GET',
       url: '/v1/auth/sessions',
-      headers: { authorization: `Bearer ${accessToken(response)}` },
+      headers: { authorization: `Bearer ${reg.accessToken}` },
     });
     const raw = JSON.stringify(list.json());
     expect(raw).not.toContain('tokenHash');
@@ -393,7 +407,7 @@ describe('session revocation', () => {
     const response = await ctx.app.inject({
       method: 'DELETE',
       url: `/v1/auth/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${accessToken(reg)}` },
+      headers: { authorization: `Bearer ${reg.accessToken}` },
     });
 
     expect(response.statusCode).toBe(200);
@@ -422,7 +436,7 @@ describe('session revocation', () => {
     const response = await ctx.app.inject({
       method: 'DELETE',
       url: `/v1/auth/sessions/${ctx.repo.sessions[0].id}`,
-      headers: { authorization: `Bearer ${accessToken(other)}` },
+      headers: { authorization: `Bearer ${other.accessToken}` },
     });
 
     // 404 (not 403) so other users' session ids cannot be probed.
@@ -432,13 +446,13 @@ describe('session revocation', () => {
 
   it('makes refresh fail after the session is revoked', async () => {
     const reg = await register();
-    const raw = cookieValue(reg);
+    const raw = cookieValueFrom(reg.setCookie);
     const sessionId = ctx.repo.sessions[0].id;
 
     await ctx.app.inject({
       method: 'DELETE',
       url: `/v1/auth/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${accessToken(reg)}` },
+      headers: { authorization: `Bearer ${reg.accessToken}` },
     });
 
     const response = await refresh(raw);

@@ -210,6 +210,32 @@ export const ERROR_CODES = {
    * Single-use invariant: a token never resets a password twice. 409.
    */
   PASSWORD_RESET_TOKEN_USED: 'PASSWORD_RESET_TOKEN_USED',
+
+  // ----- Verification-first registration (Sprint 18) -----
+  // These three codes describe COMPLETION-TOKEN validity only — never account
+  // existence or user state. A token whose staged email has been taken by an
+  // account created through another path reports REGISTRATION_TOKEN_INVALID,
+  // indistinguishable from an unknown token. Status mapping mirrors the other
+  // token families: unknown 404, expired 410, consumed/invalidated 409. Note
+  // that PUBLIC REGISTRATION ITSELF never returns a duplicate-email error —
+  // `EMAIL_ALREADY_REGISTERED` remains only for the AUTHENTICATED email-change
+  // flow, where the caller has re-proved the account password.
+  /**
+   * The presented registration-completion token does not resolve to a usable
+   * pending registration. Returned (404) when the token is unknown, malformed,
+   * or its staged registration can no longer be completed — the token is a
+   * high-entropy secret, so an attacker without one learns nothing.
+   */
+  REGISTRATION_TOKEN_INVALID: 'REGISTRATION_TOKEN_INVALID',
+  /** The registration-completion token has passed its `expires_at`. 410. */
+  REGISTRATION_TOKEN_EXPIRED: 'REGISTRATION_TOKEN_EXPIRED',
+  /**
+   * The registration-completion token was already consumed by a successful
+   * completion, or was invalidated when a newer registration request for the
+   * same email superseded it. Single-use invariant: a token never creates two
+   * accounts, and only the newest emailed link stays usable. 409.
+   */
+  REGISTRATION_TOKEN_USED: 'REGISTRATION_TOKEN_USED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

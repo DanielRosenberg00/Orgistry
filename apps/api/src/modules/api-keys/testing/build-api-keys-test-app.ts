@@ -26,6 +26,11 @@ import {
 } from '../api-key.authenticator';
 import { createExternalProjectsService } from '../external-projects.service';
 import { createInMemoryApiKeyRepository } from './in-memory-api-key-repo';
+import {
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../../mail/testing/in-memory-account-mailer';
+import { createRegistrationTestKit } from '../../auth/testing/registration-test-kit';
 
 /**
  * Build a fully wired app with the auth, organization, project, AND API key
@@ -56,6 +61,7 @@ export interface ApiKeysTestContext {
   app: FastifyInstance;
   authRepo: InMemoryAuthRepository;
   orgStore: InMemoryOrgStore;
+  mailer: InMemoryAccountMailer;
   config: Config;
 }
 
@@ -75,6 +81,12 @@ export async function buildApiKeysTestApp(
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+  });
+  const mailer = createInMemoryAccountMailer();
+  const { registrationService } = createRegistrationTestKit({
+    config,
+    authRepo,
+    mailer,
   });
   const organizationService = createOrganizationService({ repo: orgRepo });
   const entitlementService = createEntitlementService({
@@ -109,6 +121,7 @@ export async function buildApiKeysTestApp(
     config,
     readinessProbes: [passingProbe('postgres'), passingProbe('redis')],
     authService,
+    registrationService,
     organizationService,
     projectService,
     apiKeyService,
@@ -117,5 +130,5 @@ export async function buildApiKeysTestApp(
     logger: false,
   });
   await app.ready();
-  return { app, authRepo, orgStore, config };
+  return { app, authRepo, orgStore, mailer, config };
 }

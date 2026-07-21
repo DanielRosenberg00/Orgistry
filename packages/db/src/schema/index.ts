@@ -12,6 +12,7 @@ export {
   refreshTokens,
   emailVerificationTokens,
   passwordResetTokens,
+  pendingRegistrations,
   securityEvents,
   type UserStatus,
   type SecurityActorType,
@@ -24,6 +25,8 @@ export {
   type EmailVerificationTokenInsert,
   type PasswordResetTokenRow,
   type PasswordResetTokenInsert,
+  type PendingRegistrationRow,
+  type PendingRegistrationInsert,
   type SecurityEventRow,
   type SecurityEventInsert,
 } from './auth';

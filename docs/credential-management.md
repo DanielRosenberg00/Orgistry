@@ -179,12 +179,14 @@ expansion for no enforcement benefit).
    access token alone cannot probe other accounts' emails here).
 4. In ONE transaction (`auth.repo.ts — changeEmail`): update `email` +
    `normalized_email`, clear `email_verified_at`, and invalidate every unused
-   email-verification token. A duplicate normalized email surfaces the same
-   409 `EMAIL_ALREADY_REGISTERED` as registration — an intentionally accepted
-   disclosure for this authenticated, password-re-proved flow.
+   email-verification token. A duplicate normalized email surfaces
+   409 `EMAIL_ALREADY_REGISTERED` — an intentionally accepted disclosure for
+   this authenticated, password-re-proved flow (since Sprint 18 this is the
+   ONLY surface that returns that code).
 5. After commit: best-effort send of the standard verification email to the
-   NEW address (`sendEmailChangeVerificationEmail` — the same never-throw
-   contract as the post-registration email). The account remains fully usable
+   NEW address (`sendEmailChangeVerificationEmail`, a never-throw contract;
+   since Sprint 18 this is the only trigger for a verification email —
+   registration no longer sends one). The account remains fully usable
    under the advisory-verification policy.
 
 **Mail-failure consistency:** the email change commits before the verification
@@ -208,39 +210,35 @@ schema.
 
 ## Registration de-enumeration (ORG-PR-030) — design note
 
-**Selected behavior:** public registration KEEPS its `409
-EMAIL_ALREADY_REGISTERED` conflict, now wrapped in two new controls:
+**Sprint 17 selected behavior (superseded):** public registration kept its
+`409 EMAIL_ALREADY_REGISTERED` conflict, wrapped in two bounding controls — a
+per-normalized-email-digest rate limit (`RATE_LIMIT_REGISTER_PER_EMAIL_MAX`,
+counted before the lookup, identical for known and unknown addresses) and a
+durable, anonymous `auth.registration_duplicate_email` probe event. Full
+closure was explicitly deferred because the synchronous contract returned a
+live session (`201 { user, tokens }` + refresh cookie), so a duplicate could
+not be answered indistinguishably without a verification-first registration
+redesign.
 
-- a per-normalized-email-digest rate limit (`RATE_LIMIT_REGISTER_PER_EMAIL_MAX`,
-  counted before the lookup, identical for known and unknown addresses), which
-  bounds how fast any address can be probed regardless of the attacker's IP
-  pool;
-- a durable `auth.registration_duplicate_email` security event making
-  enumeration attempts visible. Attribution is honest: the caller is
-  unauthenticated and unproven, so the event carries an **anonymous actor, a
-  null user id, and coarse `{ reason: 'duplicate_email' }` metadata** — never
-  the email, an email digest, or the existing account's id (a probe must not
-  read as an action by, or a reference to, the victim). Request context rides
-  on the event row's standard sanitized IP/UA/request-id fields.
-
-**What was removed:** unthrottled, unobserved probing. **What remains:** a
-patient attacker within the rate limit still learns from the 409 that an
-address is registered.
-
-**Why full closure was not implemented:** the registration contract returns a
-live session (`201 { user, tokens }` + refresh cookie) synchronously. A
-duplicate cannot be answered indistinguishably without either fabricating
-credentials (forbidden, and absurd) or converting registration into a
-verification-required, email-first architecture — a product redesign the
-sprint explicitly rules out. The strongest safe posture inside the current
-architecture is throttle + observe, which is what shipped.
-
-**Status: ORG-PR-030 is materially advanced, not closed.** The residual
-disclosure is recorded in the findings register; full closure is tied to a
-future deliberate registration redesign. The public password-recovery flow, by
-contrast, is fully enumeration-safe (identical response for every input), and
-login hardening is unchanged. Invitation email-match enforcement and
-invitation-token registration are unchanged and re-covered by tests.
+**Sprint 18 closure:** that redesign shipped. Registration is now
+verification-first: `POST /v1/auth/register` always returns
+`200 { accepted: true }` for every account state (and every internal
+failure), creates no user, session, or cookie, and never returns
+`EMAIL_ALREADY_REGISTERED` — that code now exists only on the authenticated
+change-email flow (the intentionally accepted disclosure on this
+password-re-proved surface). Accounts are created only when the emailed
+completion token is redeemed. The per-email-digest register limit survives
+(moved to `config.rateLimit.registration`, still counted before any lookup);
+the `auth.registration_duplicate_email` event is retired in favor of the
+always-anonymous `auth.registration_requested` event (historical rows keep
+the old name). The enumeration oracle is **closed**; the residual is a
+bounded response-timing difference on the request path (Argon2id equalized by
+pre-lookup hashing; the new-email path still performs one insert and one
+mailer hand-off), bounded by the pre-lookup rate limits. The authoritative
+design — pending registrations, completion transaction, invitation policy,
+invariants — lives in [auth-foundation.md](auth-foundation.md). The public
+password-recovery flow remains fully enumeration-safe, and login hardening is
+unchanged.
 
 ## Contracts and invariants (must not change without deliberate review)
 
@@ -316,7 +314,9 @@ invitation-token registration are unchanged and re-covered by tests.
   limits bound how fast the signal can be sampled.
 - Rate limits still fail open when Redis is unavailable (system-wide policy;
   see [security-model.md](security-model.md)).
-- Registration retains the throttled, evented 409 disclosure described above.
+- Registration's 409 disclosure is closed as of Sprint 18 (verification-first
+  flow; see [auth-foundation.md](auth-foundation.md)); a bounded timing
+  residual remains on the register request path.
 - External SMTP delivery remains unvalidated (ORG-PR-002); locally, recovery
   emails are observable in Mailpit.
 

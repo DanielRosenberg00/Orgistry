@@ -24,6 +24,8 @@ export type {
   EmailVerificationTokenInsert,
   PasswordResetTokenRow,
   PasswordResetTokenInsert,
+  PendingRegistrationRow,
+  PendingRegistrationInsert,
   SecurityEventInsert,
 } from './schema/auth';
 

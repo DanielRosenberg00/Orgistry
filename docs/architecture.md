@@ -89,7 +89,9 @@ PostgreSQL via Drizzle ORM. Tables (all with prefixed string IDs, e.g. `user_`,
 `org_`, `prj_`):
 
 - **Auth**: `users`, `sessions`, `refresh_tokens` (hash-only, family-tracked),
-  `email_verification_tokens`, `security_events`.
+  `email_verification_tokens`, `password_reset_tokens`, `pending_registrations`
+  (hash-only staged verification-first registrations; one usable generation
+  per email), `security_events`.
 - **Organization/RBAC**: `roles` (4 fixed), `organizations`, `memberships`
   (partial-unique on active `(user, org)`), `permissions` (catalog),
   `role_permissions` (matrix).
@@ -105,7 +107,11 @@ drift is caught by `pnpm db:check` (see [validation](./validation.md)).
 
 ## Authentication and session model
 
-Argon2id passwords; short-lived JWT access tokens; an opaque, hash-only refresh
+Verification-first registration: `POST /v1/auth/register` is enumeration-safe
+(always `200 { accepted: true }`) and creates nothing; the account — created
+already email-verified — plus its personal workspace and first session exist
+only once the emailed completion token is redeemed. Argon2id passwords;
+short-lived JWT access tokens; an opaque, hash-only refresh
 token delivered only via an HttpOnly SameSite=Lax cookie. Refresh rotates
 transactionally with reuse detection that revokes the whole token family and
 session. Cookie-backed mutations require a custom CSRF header; auth surfaces are
@@ -114,8 +120,10 @@ Redis rate-limited (fail-open). Full detail in the [security model](./security-m
 
 ## Organization and membership model
 
-Registration provisions the user's **personal workspace** (organization + active
-Owner membership) atomically with the account/session. Authenticated users create
+Registration **completion** provisions the user's **personal workspace**
+(organization + active Owner membership) atomically with the account and first
+session (the initial registration request creates nothing — see
+[auth-foundation.md](./auth-foundation.md)). Authenticated users create
 team organizations and see only orgs where they hold an active membership.
 Authorization keys on the organization **ID**, never the slug. A reusable
 organization-context resolver is the seam every org-scoped route builds on.
@@ -158,8 +166,9 @@ Single-use, expiring, hash-only-token invitations for one email to join one org
 with one fixed role. Reservation quota (`active members + pending ≥ max_members`),
 fail-closed email send before persistence, email-match enforcement on acceptance,
 and a single transactional acceptance seam shared by existing-user accept and
-registration-with-invitation. Invitations create memberships, never sessions. See
-[invitations](./invitations.md).
+registration completion (which re-checks the invitation in a savepoint and
+reports an unavailable one rather than failing the account). Invitations create
+memberships, never sessions. See [invitations](./invitations.md).
 
 ## Audit log read model
 

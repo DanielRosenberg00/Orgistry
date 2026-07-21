@@ -95,9 +95,32 @@ Phase 6: End-to-End Verification & Security Review
 - *(original Sprint 17 plan)* Password reset, password/email
   change, register de-enumeration. Closes ORG-PR-004, 039, 030. Deps: Sprint 16.
   Exit: reset/change integration tests incl. expiry/reuse/enumeration.
+- **Sprint 18 — Verification-first registration (EXECUTED 2026-07-20;
+  COMPLETE).** The focused account-lifecycle follow-up the Sprint 17
+  sequencing note required. Public registration redesigned to
+  verification-first: generic contract-identical acceptance for every
+  post-validation account state, pending-registration staging
+  (`pending_registrations`, hash-only token + Argon2id password hash,
+  advisory-lock-serialized single-usable-generation issuance), account
+  creation only via the emailed single-use completion token (account created
+  email-verified, with workspace/membership/session/refresh token in one
+  transaction), invitation registration preserved with a documented
+  completion-time invitation-unavailable policy. **Closed: ORG-PR-030.** Exit
+  criterion met: public response-equality matrix + DB-backed issuance- and
+  completion-concurrency tests
+  (`registration.routes.test.ts`, `registration.integration.test.ts`). A
+  refinement pass (2026-07-21) additionally made invitation-carrying
+  registration fully generic (no `INVITATION_*` errors escape the public
+  register endpoint; ten-row equality matrix in
+  `invitation.routes.test.ts`), added the web-demo invitation
+  landing/registration flow, and runtime-validated the demo seed. See
+  [sprint-18-artifact-package.md](sprint-18-artifact-package.md). This sprint
+  was INSERTED before the edge-hardening sprint below, which renumbers to
+  Sprint 19 in execution order.
 
 ### Phase 3 — Security & data-integrity hardening (largely parallelizable)
-- **Sprint 18 — Edge & app-security hardening.** Security headers, `trustProxy`,
+- **Sprint 19 (roadmap "Sprint 18") — Edge & app-security hardening.
+  RECOMMENDED NEXT.** Security headers, `trustProxy`,
   global/edge rate limiting, throttle `invitations/inspect`, per-actor mutation
   limits, bound pre-auth external writes, logger redaction, request-id
   sanitization. Closes ORG-PR-010, 011, 012, 013, 032, 033, 052. Exit: header/

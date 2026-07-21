@@ -100,15 +100,25 @@ pnpm validate:integration    # db:reset:test + test:integration
   permissions, role→permission matrix, and plan catalog exactly (no drift from
   the `@orgistry/contracts` source of truth).
 - `/ready` reports healthy only when PostgreSQL **and** Redis are reachable.
-- The auth, organization, member, projects, entitlements, and invitations
-  routes behave correctly against a real database (transactional invariants,
-  tenant isolation, quota enforcement).
+- The auth, registration, organization, member, projects, entitlements, and
+  invitations routes behave correctly against a real database (transactional
+  invariants, tenant isolation, quota enforcement).
 - The credential lifecycle (Sprint 17) holds at the SQL layer: hash-only reset
   tokens, `FOR UPDATE`-serialized reset completion (two concurrent completions
   can never both succeed), session + refresh-token revocation in the same
   transaction as the password swap, the keep-current-session password-change
   policy, and the email-change verification reset
   (`password-recovery.integration.test.ts`).
+- The verification-first registration lifecycle (Sprint 18) holds at the SQL
+  layer: advisory-lock-serialized issuance leaving exactly one usable pending
+  generation per email, `FOR UPDATE`-serialized completion (exactly one of any
+  set of concurrent completions succeeds), the one-transaction creation of the
+  email-verified user + personal workspace + session, and the savepoint-scoped
+  invitation re-check (`registration.integration.test.ts`; the route-level
+  suite is `registration.routes.test.ts`, the invitation-state public
+  equality matrix lives in `invitation.routes.test.ts`, and the web demo's
+  registration flows — plain and invitation-aware — are covered by
+  `registration.test.tsx` and `invitation-registration.test.tsx`).
 
 ### Integration tests skip safely
 

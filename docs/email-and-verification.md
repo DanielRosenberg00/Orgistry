@@ -10,8 +10,9 @@ ORG-PR-024, ORG-PR-048).
 ## The account-mailer boundary
 
 One narrow seam delivers every account email (organization invitations, email
-verification; future password-recovery and security notifications belong here
-too). Feature modules own **what** is sent — they render a plain-text
+verification, password recovery — Sprint 17 — and the Sprint 18 registration
+completion and existing-account guidance emails; future security notifications
+belong here too). Feature modules own **what** is sent — they render a plain-text
 `AccountEmail { to, subject, text }` — and the mailer owns **how**: sender
 identity, transport, timeout.
 
@@ -25,6 +26,7 @@ identity, transport, timeout.
 | In-memory test driver (captures messages) | `apps/api/src/modules/mail/testing/in-memory-account-mailer.ts` |
 | Invitation rendering (migrated onto the boundary) | `apps/api/src/modules/invitations/invitation.mailer.ts` |
 | Verification rendering + link construction | `apps/api/src/modules/auth/email-verification.email.ts` |
+| Registration completion + existing-account guidance rendering (Sprint 18) | `apps/api/src/modules/auth/registration.email.ts` |
 
 ### Driver selection
 
@@ -91,16 +93,22 @@ multiple providers (all out of scope).
   creation (unchanged from Sprint 9).
 - **Explicit verification request/resend** — fail-closed: a delivery failure
   surfaces as an error and the previous token generation stays usable.
-- **Post-registration verification email** — **best-effort**: registration,
-  personal-workspace creation, session issuance, and invitation acceptance
-  have already committed; a delivery failure is recorded as a sanitized
-  `auth.email_verification_requested` event with `delivered: false` and the
-  user resends later. Email problems can never roll back a registration.
-- **Post-email-change verification email (Sprint 17)** — **best-effort**, same
-  contract as the post-registration send (`trigger: 'email_change'`): the
-  email change has already committed (verification cleared, old tokens
-  invalidated inside that transaction), so a failed send only means the user
-  resends later. See [credential-management.md](credential-management.md).
+- **Post-registration verification email — RETIRED in Sprint 18.**
+  Registration no longer sends a verification email at all: registration is
+  verification-first, completing the emailed registration token IS the
+  mailbox proof, and users are created email-verified. The registration
+  request instead sends a **completion** email under the persist-then-send
+  convention (the pending registration commits before the mailer sees the
+  message), and — for existing active accounts — a throttled, neutral
+  **guidance** email. A mail failure never alters the generic public
+  response. The full design lives in
+  [auth-foundation.md](auth-foundation.md).
+- **Post-email-change verification email (Sprint 17)** — **best-effort**
+  (`trigger: 'email_change'`): the email change has already committed
+  (verification cleared, old tokens invalidated inside that transaction), so
+  a failed send only means the user resends later. Since Sprint 18 this is
+  the only flow that triggers a verification email. See
+  [credential-management.md](credential-management.md).
 - **Password-recovery request email (Sprint 17)** — the OPPOSITE ordering:
   **persist-and-commit before send**. Every emailed reset token was durably
   committed (sibling invalidation + insert, under the per-user issuance
@@ -121,6 +129,12 @@ multiple providers (all out of scope).
   endpoint cannot surface anything.
 
 ## Email verification lifecycle
+
+> **Sprint 18 note.** New accounts are created **email-verified**: completing
+> the emailed registration token is the mailbox proof, so registration never
+> issues a verification token or email. This lifecycle is therefore reached
+> mainly after an authenticated **email change** (which clears verification
+> for the new address) — the mechanics below are unchanged.
 
 ### Endpoints
 
@@ -241,20 +255,26 @@ Lookup is by the unique `token_hash` index; TTL comes from
   on the current-user contract (plus `users.email_verified_at`); any gate
   must be added server-side as a deliberate, documented change.
 
-### Registration integration
+### Registration integration (rewritten for Sprint 18)
 
-- **Normal registration** — the account is created UNVERIFIED
-  (`email_verified_at` null); the first verification email is sent
-  automatically, best-effort, after the registration transaction commits.
-- **Invited new-user registration / invitation acceptance** — unchanged
-  transaction boundaries; the invited membership commits with the account.
-  Receiving an invitation is **not** treated as proof of email ownership: the
-  invited account also starts unverified and verifies through the same flow.
+- **Normal registration** — verification-first: `POST /v1/auth/register`
+  stages a pending registration and emails a completion link; the account is
+  created at `POST /v1/auth/registration/complete` with `email_verified_at`
+  set — completing the emailed token IS the mailbox proof. Registration never
+  sends a verification email (the `sendInitialVerificationEmail` port no
+  longer exists; the auth service's email-verification port covers only the
+  post-email-change send). See [auth-foundation.md](auth-foundation.md).
+- **Invited new-user registration / invitation acceptance** — the invitation
+  is validated internally at the registration request (private failures
+  return the generic acceptance and send nothing) and accepted at
+  registration completion (re-checked inside a savepoint; see
+  [invitations.md](invitations.md)). The completed invited account is
+  verified like any other completed account.
 - **Existing invited users** — invitation accept never touches verification
   state.
-- **Seeded demo users** — the demo seed drives the real registration API, so
-  demo users also start unverified (the banner simply shows in the demo; the
-  advisory policy means nothing is blocked).
+- **Seeded demo users** — the demo seed drives the real registration API
+  (including reading the completion link from the Mailpit API), so demo users
+  are created verified like any completed registration.
 - **Email change (Sprint 17)** — an authenticated email change clears
   `email_verified_at` and invalidates all outstanding verification tokens in
   the SAME transaction that swaps the address, then best-effort issues a fresh
@@ -311,8 +331,11 @@ contains the raw token, the hash, the verification URL, or provider data.
 - Tests inspect delivery via the in-memory driver and recover raw tokens from
   the captured email link — the recipient's channel. No production HTTP
   contract exposes tokens for tests' convenience.
-- Local manual flow: `pnpm infra:up`, register in the web demo, open the
-  message in the Mailpit UI (http://localhost:8025), follow the link.
+- Local manual flow: `pnpm infra:up`, register in the web demo and complete
+  via the Mailpit completion link (the account is created verified), then
+  change your email on the Account security page: a verification email for
+  the new address lands in the Mailpit UI (http://localhost:8025) — follow
+  the link.
 
 ## External provider validation
 
@@ -327,6 +350,7 @@ operator has credentials:
    `MAIL_FROM_EMAIL` on a domain with SPF/DKIM configured at the provider,
    and an https `WEB_DEMO_URL`.
 2. Start the API, register with a test-inbox address you control, and confirm
-   the verification email arrives externally and its link completes.
+   the registration-completion email arrives externally and its link
+   completes (creating the account).
 3. Record the provider name, timestamp, and message-id as evidence in the
    findings register — then, and only then, close ORG-PR-002.

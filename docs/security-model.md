@@ -43,7 +43,8 @@ omits production concerns (see [known limitations](./known-limitations.md)).
   origin allow-list denies. The CSRF defense is never on the auth-correctness
   path.
 - **Rate limits.** Redis-backed fixed-window limiters protect auth surfaces
-  (login per-IP/per-email, register per-IP/per-email-digest, refresh
+  (login per-IP/per-email, registration request per-IP/per-email-digest and
+  completion per-IP/per-token-digest, refresh
   per-session/per-IP, email-verification request per-user/per-IP and
   completion per-IP, password-recovery request per-IP/per-email-digest and
   completion per-IP/per-token-digest, password/email change per-user) and the
@@ -168,14 +169,54 @@ omits production concerns (see [known limitations](./known-limitations.md)).
 - **Shared password policy.** One `newPasswordSchema` (contracts) is parsed by
   registration, reset completion, and password change; the policy cannot
   drift between routes.
-- **Registration de-enumeration (partial).** Public registration still returns
-  `409 EMAIL_ALREADY_REGISTERED`, now behind a per-email-digest rate limit and
-  a durable `auth.registration_duplicate_email` probe event (anonymous actor,
-  null user id, coarse reason only — no email, digest, or victim reference in
-  the event). Full response uniformity requires a verification-first
-  registration redesign and is deliberately deferred — see
-  [credential-management.md](credential-management.md) (ORG-PR-030 remains
-  open, materially advanced).
+- **Registration de-enumeration — closed by Sprint 18.** The Sprint 17
+  posture (throttled, evented `409`) was an accepted interim; the
+  verification-first registration redesign it pointed to has since shipped —
+  see the next section.
+
+## Verification-first registration (Sprint 18)
+
+- **Enumeration-safe request, like recovery.** `POST /v1/auth/register`
+  always returns the same `200 { accepted: true }` — for eligible new emails,
+  existing active accounts (verified or not), disabled accounts, soft-deleted
+  accounts, EVERY private invitation-validation failure (unknown token,
+  expired/revoked/accepted lifecycle, email mismatch, quota — a rejected
+  invitation stages nothing, mutates nothing, and sends nothing; the
+  invitation-INSPECT endpoint is the sole invitation-feedback channel), and
+  every internal failure (lookup/persist/mail) — and never returns
+  `EMAIL_ALREADY_REGISTERED` or any `INVITATION_*` error (the former survives
+  only on the authenticated change-email flow). Rate limits (per IP, per
+  email digest) are applied BEFORE any account lookup, and the Argon2id hash
+  is computed before anything state-dependent so the CPU cost is identical on
+  all paths.
+- **No auth state before mailbox proof.** The request creates no user,
+  session, access token, refresh cookie, organization, or membership. An
+  eligible new email stages a hash-only `pending_registrations` row (Argon2id
+  password hash, SHA-256 completion-token hash, optional stable invitation id
+  — never the invitation token) with issuance serialized per email by an
+  advisory lock, so exactly one usable generation exists per email (partial
+  unique index as the structural backstop).
+- **Completion creates everything, transactionally.**
+  `POST /v1/auth/registration/complete` (token in the body; per-IP and
+  per-token-digest throttles) locks the pending row `FOR UPDATE` and, in one
+  transaction, creates the user **email-verified at creation** (the emailed
+  token is the mailbox proof — registration sends no verification email), the
+  personal workspace + Owner membership, and the session + first refresh
+  token (hash-only), and accepts a stored invitation where applicable
+  (re-checked inside a savepoint; an unavailable invitation is reported, not
+  fatal). The refresh cookie is set only after commit; exactly one of any set
+  of concurrent completions succeeds.
+- **Existing accounts get guidance, not tokens.** An attempt against an
+  existing active address sends a throttled, neutral guidance email (sign in
+  / use recovery; ignore if not you) — never a reset or verification token.
+  Disabled/soft-deleted accounts get nothing. Registration security events
+  are always anonymous and never reference the victim's user id.
+- **Residual timing channel, honestly.** Response timing on the register
+  request is not fully equalized: the new-email path still performs one
+  insert and one mailer hand-off. This is bounded by the pre-lookup per-IP
+  and per-email-digest limits and documented in
+  [auth-foundation.md](auth-foundation.md), the authoritative design
+  reference for this flow.
 
 ## Invitations
 
@@ -200,11 +241,13 @@ omits production concerns (see [known limitations](./known-limitations.md)).
 
 ## Known non-production limitations
 
-This model omits, by design: OAuth/MFA/password reset, externally validated
+This model omits, by design: OAuth/MFA/passkeys, externally validated
 production email delivery (the production SMTP adapter exists but has never
 sent through a real provider), verification **enforcement** (the flag is
-advisory), database RLS, audit retention enforcement/export, custom roles,
-resource-level permissions, and hardened concurrency on quota checks. Rate limiting and quotas
+advisory), cleanup/retention jobs for consumed or expired token and
+pending-registration rows, database RLS, audit retention enforcement/export,
+custom roles, resource-level permissions, and hardened concurrency on quota
+checks. Rate limiting and quotas
 accept fail-open and race-window trade-offs respectively. See
 [known limitations](./known-limitations.md) for the full list. Do not treat
 Orgistry as a hardened, certified system.

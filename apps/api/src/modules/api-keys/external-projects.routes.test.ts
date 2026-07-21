@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ApiKeyRow } from '@orgistry/db';
 import { generateApiKeySecret, parseApiKey } from './api-key-secret';
 import { API_KEY_SECURITY_EVENT_TYPES } from './api-key.events';
+import { registerTestUser } from '../auth/testing/register-test-user';
 import {
   buildApiKeysTestApp,
   type ApiKeysTestContext,
@@ -36,20 +37,12 @@ afterEach(async () => {
 
 async function registerUser(): Promise<{ token: string; userId: string }> {
   emailSeq += 1;
-  const response = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: {
-      email: `ext.user.${emailSeq}@example.com`,
-      password: 'a-strong-password-123',
-      displayName: 'Ext User',
-    },
+  const result = await registerTestUser(app, ctx.mailer, {
+    email: `ext.user.${emailSeq}@example.com`,
+    password: 'a-strong-password-123',
+    displayName: 'Ext User',
   });
-  expect(response.statusCode).toBe(201);
-  return {
-    token: response.json().data.tokens.accessToken,
-    userId: response.json().data.user.id,
-  };
+  return { token: result.accessToken, userId: result.userId };
 }
 
 function userAuth(token: string): Record<string, string> {

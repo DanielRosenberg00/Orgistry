@@ -20,6 +20,11 @@ import { createProjectService } from '../../projects/project.service';
 import { createInMemoryProjectRepository } from '../../projects/testing/in-memory-project-repo';
 import { createAuditService } from '../audit.service';
 import { createInMemoryAuditRepository } from './in-memory-audit-repo';
+import {
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../../mail/testing/in-memory-account-mailer';
+import { createRegistrationTestKit } from '../../auth/testing/registration-test-kit';
 
 /**
  * Build a fully wired app with the auth, organization, plan, project, AND audit
@@ -40,6 +45,7 @@ export interface AuditTestContext {
   app: FastifyInstance;
   authRepo: InMemoryAuthRepository;
   orgStore: InMemoryOrgStore;
+  mailer: InMemoryAccountMailer;
   config: Config;
 }
 
@@ -56,6 +62,12 @@ export async function buildAuditTestApp(): Promise<AuditTestContext> {
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+  });
+  const mailer = createInMemoryAccountMailer();
+  const { registrationService } = createRegistrationTestKit({
+    config,
+    authRepo,
+    mailer,
   });
   const organizationService = createOrganizationService({ repo: orgRepo });
   const entitlementService = createEntitlementService({
@@ -80,6 +92,7 @@ export async function buildAuditTestApp(): Promise<AuditTestContext> {
     config,
     readinessProbes: [passingProbe('postgres'), passingProbe('redis')],
     authService,
+    registrationService,
     organizationService,
     planService,
     projectService,
@@ -87,5 +100,5 @@ export async function buildAuditTestApp(): Promise<AuditTestContext> {
     logger: false,
   });
   await app.ready();
-  return { app, authRepo, orgStore, config };
+  return { app, authRepo, orgStore, mailer, config };
 }

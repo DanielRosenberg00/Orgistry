@@ -22,6 +22,8 @@ import {
   createInMemoryAccountMailer,
   type InMemoryAccountMailer,
 } from '../../mail/testing/in-memory-account-mailer';
+import { createRegistrationTestKit } from '../../auth/testing/registration-test-kit';
+import type { InMemoryRegistrationRepository } from '../../auth/testing/in-memory-registration-repo';
 
 /**
  * Build a fully wired app with the auth, organization, member, entitlement, AND
@@ -40,6 +42,7 @@ import {
 export interface InvitationsTestContext {
   app: FastifyInstance;
   authRepo: InMemoryAuthRepository;
+  registrationRepo: InMemoryRegistrationRepository;
   orgStore: InMemoryOrgStore;
   mailer: InMemoryAccountMailer;
   config: Config;
@@ -77,6 +80,13 @@ export async function buildInvitationsTestApp(
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+  });
+  // The SAME invitation service instance backs the invitation routes AND the
+  // registration flow's invitation collaborator, mirroring server.ts.
+  const { registrationService, registrationRepo } = createRegistrationTestKit({
+    config,
+    authRepo,
+    mailer,
     invitations: invitationService,
   });
   const organizationService = createOrganizationService({ repo: orgRepo });
@@ -86,11 +96,12 @@ export async function buildInvitationsTestApp(
     config,
     readinessProbes: [passingProbe('postgres'), passingProbe('redis')],
     authService,
+    registrationService,
     organizationService,
     memberService,
     invitationService,
     logger: false,
   });
   await app.ready();
-  return { app, authRepo, orgStore, mailer, config };
+  return { app, authRepo, registrationRepo, orgStore, mailer, config };
 }

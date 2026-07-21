@@ -6,12 +6,15 @@ import {
   type AuthTestContext,
   type BuildAuthTestAppOptions,
 } from './testing/build-auth-test-app';
+import { registerTestUser } from './testing/register-test-user';
 
 /**
- * Authenticated credential mutations (Sprint 17): password change, email
- * change, and the registration duplicate-email behavior, exercised through
- * `app.inject` over the in-memory repositories. DB-backed persistence is
- * covered in `password-recovery.integration.test.ts`.
+ * Authenticated credential mutations (Sprint 17): password change and email
+ * change, exercised through `app.inject` over the in-memory repositories.
+ * Registration is verification-first (Sprint 18): accounts are minted through
+ * the shared `registerTestUser` helper and arrive already verified, so
+ * unverified states are staged explicitly where a test needs one. DB-backed
+ * persistence is covered in `password-recovery.integration.test.ts`.
  */
 
 const REGISTER_BODY = {
@@ -33,8 +36,6 @@ function authLimits(
     windowSeconds: 60,
     loginPerIpMax: HUGE,
     loginPerEmailMax: HUGE,
-    registerPerIpMax: HUGE,
-    registerPerEmailMax: HUGE,
     refreshPerSessionMax: HUGE,
     refreshPerIpMax: HUGE,
     changePasswordPerUserMax: HUGE,
@@ -43,22 +44,33 @@ function authLimits(
   };
 }
 
+/** All registration buckets effectively unlimited except the overrides. */
+function registrationLimits(
+  overrides: Partial<
+    import('./registration.service').RegistrationRateLimits
+  > = {},
+): import('./registration.service').RegistrationRateLimits {
+  return {
+    windowSeconds: 60,
+    requestPerIpMax: HUGE,
+    requestPerEmailMax: HUGE,
+    completePerIpMax: HUGE,
+    completePerTokenMax: HUGE,
+    existingAccountNoticePerEmailMax: HUGE,
+    ...overrides,
+  };
+}
+
 async function setup(
   options: BuildAuthTestAppOptions = {},
 ): Promise<AuthTestContext & { accessToken: string; userId: string }> {
   const ctx = await buildAuthTestApp(options);
-  const response = await ctx.app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: REGISTER_BODY,
-  });
-  expect(response.statusCode).toBe(201);
-  const body = response.json();
-  return {
-    ...ctx,
-    accessToken: body.data.tokens.accessToken,
-    userId: body.data.user.id,
-  };
+  const { accessToken, userId } = await registerTestUser(
+    ctx.app,
+    ctx.mailer,
+    REGISTER_BODY,
+  );
+  return { ...ctx, accessToken, userId };
 }
 
 function changePassword(
@@ -323,14 +335,13 @@ describe('POST /v1/auth/change-email', () => {
 
   it('rejects a duplicate normalized email with the registration conflict', async () => {
     const ctx = await setup();
-    await ctx.app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: {
-        ...REGISTER_BODY,
-        email: NEW_EMAIL_NORMALIZED,
-        displayName: 'Occupant',
-      },
+    // A COMPLETED registration occupies the target address. The authenticated
+    // change-email flow keeps the explicit 409 (unlike public registration,
+    // the caller here is already signed in — there is nothing to de-enumerate).
+    await registerTestUser(ctx.app, ctx.mailer, {
+      ...REGISTER_BODY,
+      email: NEW_EMAIL_NORMALIZED,
+      displayName: 'Occupant',
     });
 
     const response = await changeEmail(ctx, ctx.accessToken, {
@@ -344,12 +355,8 @@ describe('POST /v1/auth/change-email', () => {
 
   it('changes the email, clears verification, and reissues a verification generation', async () => {
     const ctx = await setup();
-    // Verify the ORIGINAL address first so the clearing is observable.
-    await ctx.app.inject({
-      method: 'POST',
-      url: '/v1/auth/email-verification/complete',
-      payload: { token: ctx.mailer.lastLinkToken()! },
-    });
+    // A completed registration is already verified, so the clearing below is
+    // observable without any extra verification step.
     expect(ctx.repo.users[0].emailVerifiedAt).toBeInstanceOf(Date);
     const mailsBefore = ctx.mailer.messages.length;
 
@@ -389,6 +396,16 @@ describe('POST /v1/auth/change-email', () => {
 
   it('invalidates outstanding old-address verification tokens even when the new email fails to send', async () => {
     const ctx = await setup();
+    // Registration issues no verification token any more, so stage an
+    // outstanding OLD-address token explicitly: simulate the unverified state
+    // and request a verification email for the current address.
+    ctx.repo.users.find((u) => u.id === ctx.userId)!.emailVerifiedAt = null;
+    const issued = await ctx.app.inject({
+      method: 'POST',
+      url: '/v1/auth/email-verification/request',
+      headers: { authorization: `Bearer ${ctx.accessToken}` },
+    });
+    expect(issued.statusCode).toBe(200);
     const oldVerificationToken = ctx.mailer.lastLinkToken()!;
     ctx.mailer.failNext = true;
 
@@ -480,43 +497,52 @@ describe('POST /v1/auth/change-email', () => {
 });
 
 describe('registration duplicate-email behavior (de-enumeration posture)', () => {
-  it('registers a new email normally', async () => {
+  it('accepts a new email with the generic acknowledgement', async () => {
     const ctx = await buildAuthTestApp();
     const response = await ctx.app.inject({
       method: 'POST',
       url: '/v1/auth/register',
       payload: REGISTER_BODY,
     });
-    expect(response.statusCode).toBe(201);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, data: { accepted: true } });
   });
 
-  it('returns the documented 409 conflict for an existing normalized email and records the probe', async () => {
+  it('answers an existing normalized email with the IDENTICAL acceptance and records the probe anonymously', async () => {
     const ctx = await setup();
+    const pendingBefore = ctx.registrationRepo.pendingRegistrations.length;
     const response = await ctx.app.inject({
       method: 'POST',
       url: '/v1/auth/register',
-      payload: { ...REGISTER_BODY, email: `  ${REGISTER_BODY.email.toUpperCase()} ` },
+      payload: {
+        ...REGISTER_BODY,
+        email: `  ${REGISTER_BODY.email.toUpperCase()} `,
+      },
     });
 
-    // The residual disclosure is deliberate and documented (see
-    // docs/credential-management.md): registration returns a live session, so
-    // a duplicate cannot be faked as success without fabricating credentials.
-    expect(response.statusCode).toBe(409);
-    expect(response.json().error.code).toBe('EMAIL_ALREADY_REGISTERED');
-    // No account was touched, no session issued.
+    // Verification-first registration retired the old 409: a duplicate gets
+    // the SAME generic acceptance as an eligible address — no
+    // EMAIL_ALREADY_REGISTERED, no user, no tokens, no cookie, no pending row.
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, data: { accepted: true } });
     expect(ctx.repo.users).toHaveLength(1);
     expect(response.headers['set-cookie']).toBeUndefined();
+    expect(ctx.registrationRepo.pendingRegistrations).toHaveLength(
+      pendingBefore,
+    );
+    // The existing account gets at most a neutral guidance notice — never a
+    // completion token.
+    expect(ctx.mailer.lastLinkToken()).toBeNull();
 
     // The probe is durably recorded — but the caller is UNAUTHENTICATED, so
     // it must never read as an action by (or a reference to) the existing
-    // account: anonymous actor, null user id, coarse reason only.
-    const probe = ctx.repo.securityEvents.find(
-      (e) => e.eventType === 'auth.registration_duplicate_email',
-    );
+    // account: anonymous actor, null user id, coarse outcome only.
+    const probe = ctx.repo.securityEvents
+      .filter((e) => e.eventType === 'auth.registration_requested')
+      .at(-1);
     expect(probe).toBeTruthy();
     expect(probe!.userId).toBeNull();
     expect(probe!.actorType).toBe('anonymous');
-    expect(probe!.metadata).toEqual({ reason: 'duplicate_email' });
     // No email, email fragment, or digest of it anywhere on the event.
     const serialized = JSON.stringify(probe);
     expect(serialized).not.toContain(REGISTER_BODY.email);
@@ -528,7 +554,7 @@ describe('registration duplicate-email behavior (de-enumeration posture)', () =>
   it('rate limits repeated probing of one email regardless of IP bucket headroom', async () => {
     const ctx = await setup({
       rateLimiter: createInMemoryRateLimiter(),
-      rateLimits: authLimits({ registerPerEmailMax: 2 }),
+      registrationRateLimits: registrationLimits({ requestPerEmailMax: 2 }),
     });
 
     const probe = () =>
@@ -537,9 +563,12 @@ describe('registration duplicate-email behavior (de-enumeration posture)', () =>
         url: '/v1/auth/register',
         payload: { ...REGISTER_BODY, displayName: 'Prober' },
       });
-    // The setup registration consumed one slot; one probe sees the conflict,
-    // then the per-email bucket closes even though the IP bucket has headroom.
-    expect((await probe()).statusCode).toBe(409);
+    // The setup registration consumed one slot; one probe gets the generic
+    // acceptance, then the per-email bucket closes even though the IP bucket
+    // has headroom.
+    const first = await probe();
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ ok: true, data: { accepted: true } });
     const limited = await probe();
     expect(limited.statusCode).toBe(429);
     expect(limited.json().error.code).toBe('RATE_LIMITED');
@@ -548,12 +577,12 @@ describe('registration duplicate-email behavior (de-enumeration posture)', () =>
   it('counts the per-email bucket identically for unknown emails (no oracle)', async () => {
     const ctx = await buildAuthTestApp({
       rateLimiter: createInMemoryRateLimiter(),
-      rateLimits: authLimits({ registerPerEmailMax: 1 }),
+      registrationRateLimits: registrationLimits({ requestPerEmailMax: 1 }),
     });
 
-    // The first registration consumes the only slot for this address; a
-    // second attempt is limited BEFORE the duplicate conflict is reached —
-    // same shape as for a never-registered address.
+    // The first request consumes the only slot for this address; a second
+    // attempt is limited BEFORE any account or pending-registration state is
+    // consulted — same shape as for a never-registered address.
     expect(
       (
         await ctx.app.inject({
@@ -562,7 +591,7 @@ describe('registration duplicate-email behavior (de-enumeration posture)', () =>
           payload: REGISTER_BODY,
         })
       ).statusCode,
-    ).toBe(201);
+    ).toBe(200);
     const limited = await ctx.app.inject({
       method: 'POST',
       url: '/v1/auth/register',

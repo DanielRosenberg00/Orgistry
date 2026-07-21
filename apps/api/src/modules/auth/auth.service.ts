@@ -19,7 +19,6 @@ import type {
   ChangePasswordResponse,
   LoginRequest,
   RefreshResponse,
-  RegisterRequest,
   SessionListResponse,
   SessionSummary,
 } from '@orgistry/contracts';
@@ -33,10 +32,8 @@ import {
 import { AppError } from '../../lib/errors';
 import type { RateLimiter } from '../../lib/rate-limit';
 import { createNoopRateLimiter } from '../../lib/rate-limit';
-import { personalWorkspaceSlugBase } from '../organization/organization.provisioning';
 import {
   currentPasswordIncorrectError,
-  emailAlreadyRegisteredError,
   emailUnchangedError,
   invalidCredentialsError,
   passwordUnchangedError,
@@ -50,10 +47,8 @@ import {
 } from './security-events';
 import type {
   AuthRepository,
+  EmailChangeVerification,
   NewSecurityEvent,
-  RegisterAccountParams,
-  RegistrationEmailVerification,
-  RegistrationInvitations,
   RequestContext,
 } from './auth.types';
 
@@ -65,14 +60,15 @@ const REVOKE_REASONS = {
   passwordChanged: 'password_changed',
 } as const;
 
-/** Per-bucket auth rate limits (from `config.rateLimit.auth`). */
+/**
+ * Per-bucket auth rate limits (from `config.rateLimit.auth`). Registration
+ * buckets moved to the registration service in Sprint 18
+ * (`config.rateLimit.registration`).
+ */
 export interface AuthRateLimits {
   windowSeconds: number;
   loginPerIpMax: number;
   loginPerEmailMax: number;
-  registerPerIpMax: number;
-  /** Keyed on a digest of the normalized email — bounds duplicate probing. */
-  registerPerEmailMax: number;
   refreshPerSessionMax: number;
   refreshPerIpMax: number;
   changePasswordPerUserMax: number;
@@ -90,20 +86,16 @@ export interface AuthServiceOptions {
   rateLimiter?: RateLimiter;
   rateLimits?: AuthRateLimits;
   /**
-   * Registration-with-invitation collaborator (Sprint 9). OPTIONAL: when absent
-   * (or when a registration omits `invitationToken`), registration is unchanged.
+   * Post-email-change verification-email collaborator (Sprint 17). OPTIONAL
+   * and best-effort: see `EmailChangeVerification` — it never throws, so it
+   * can never fail a committed email change. (Registration no longer sends a
+   * verification email: a verification-first account is created verified.)
    */
-  invitations?: RegistrationInvitations;
-  /**
-   * Post-registration verification-email collaborator (Sprint 16). OPTIONAL and
-   * best-effort: see `RegistrationEmailVerification` — it never throws, so it
-   * can never fail a committed registration.
-   */
-  emailVerification?: RegistrationEmailVerification;
+  emailVerification?: EmailChangeVerification;
   clock?: Clock;
 }
 
-/** Result of register/login: the JSON response plus the out-of-band cookie. */
+/** Result of login: the JSON response plus the out-of-band cookie. */
 export interface SessionIssueResult {
   response: AuthSessionResponse;
   /** Raw refresh token for the HttpOnly cookie. NEVER goes into JSON. */
@@ -126,10 +118,6 @@ export interface ListSessionsInput {
 }
 
 export interface AuthService {
-  register(
-    input: RegisterRequest,
-    ctx: RequestContext,
-  ): Promise<SessionIssueResult>;
   login(input: LoginRequest, ctx: RequestContext): Promise<SessionIssueResult>;
   authenticate(accessToken: string, ctx: RequestContext): Promise<AuthUser>;
   refresh(rawRefreshToken: string, ctx: RequestContext): Promise<RefreshResult>;
@@ -182,13 +170,12 @@ function getDummyHash(): Promise<string> {
   return dummyHashPromise;
 }
 
-/** Friendly default name for a user's auto-provisioned personal workspace. */
-function personalWorkspaceName(displayName: string): string {
-  return `${displayName}'s Workspace`;
-}
-
-/** Map a persistence row to the public, secret-free user DTO. */
-function toAuthUser(user: UserRow): AuthUser {
+/**
+ * Map a persistence row to the public, secret-free user DTO. Exported: the
+ * registration-completion service (Sprint 18) returns the same shape, and one
+ * mapper keeps the boundary identical.
+ */
+export function toAuthUser(user: UserRow): AuthUser {
   return {
     id: user.id,
     email: user.email,
@@ -228,7 +215,6 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
     sessionTtlSeconds,
     refreshTokenTtlSeconds,
     rateLimiter = createNoopRateLimiter(),
-    invitations,
     emailVerification,
     clock = systemClock,
   } = options;
@@ -239,8 +225,6 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
     windowSeconds: 60,
     loginPerIpMax: Number.MAX_SAFE_INTEGER,
     loginPerEmailMax: Number.MAX_SAFE_INTEGER,
-    registerPerIpMax: Number.MAX_SAFE_INTEGER,
-    registerPerEmailMax: Number.MAX_SAFE_INTEGER,
     refreshPerSessionMax: Number.MAX_SAFE_INTEGER,
     refreshPerIpMax: Number.MAX_SAFE_INTEGER,
     changePasswordPerUserMax: Number.MAX_SAFE_INTEGER,
@@ -414,148 +398,6 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
   }
 
   return {
-    async register(input, ctx) {
-      if (ctx.ipAddress) {
-        await enforceRateLimit(
-          `rl:register:ip:${ctx.ipAddress}`,
-          limits.registerPerIpMax,
-          'register_per_ip',
-          ctx,
-        );
-      }
-
-      const normalizedEmail = normalizeEmail(input.email);
-
-      // Per-email bucket (Sprint 17 registration anti-enumeration): counted
-      // BEFORE the user lookup and identical for existing and unknown emails,
-      // so the limiter itself is not an existence oracle. It bounds how fast
-      // one address can be probed through registration regardless of the
-      // caller's IP pool. The email is hashed into the key (no raw email in
-      // Redis), matching the login limiter's construction.
-      await enforceRateLimit(
-        `rl:register:email:${hashOpaqueToken(normalizedEmail)}`,
-        limits.registerPerEmailMax,
-        'register_per_email',
-        ctx,
-      );
-
-      // Friendly pre-check; the unique index is the authoritative guard for the
-      // concurrent case (the repo maps a violation to the same conflict error).
-      // The 409 still discloses that the address is registered — an accepted
-      // residual of the current synchronous registration contract (register
-      // returns a live session, so a duplicate cannot be faked as success).
-      // See the registration de-enumeration note in docs/credential-management.md;
-      // the durable event below makes such probing visible to review.
-      //
-      // Event attribution: the caller is UNAUTHENTICATED and unproven, so the
-      // event is anonymous with a null user id (`user_id` is attribution — a
-      // probe must never read as an action by the account owner) and carries
-      // no email or email-derived value. Request context (IP/UA/request id)
-      // rides on the event row's standard sanitized fields.
-      const existing = await repo.findUserByNormalizedEmail(normalizedEmail);
-      if (existing) {
-        await writeSecurityEvent({
-          userId: null,
-          sessionId: null,
-          actorType: 'anonymous',
-          eventType: SECURITY_EVENT_TYPES.registrationDuplicateEmail,
-          metadata: { reason: 'duplicate_email' },
-          ctx,
-        });
-        throw emailAlreadyRegisteredError();
-      }
-
-      // Registration-with-invitation (Sprint 9): pre-resolve the invitation
-      // BEFORE provisioning. This fails fast on an obviously-bad token (unknown,
-      // expired, revoked, email mismatch, quota) and yields the token hash + plan
-      // ceiling the registration transaction needs to accept it ATOMICALLY. The
-      // authoritative re-validation happens inside that transaction.
-      let invitationAcceptance:
-        | RegisterAccountParams['invitationAcceptance']
-        | null = null;
-      if (input.invitationToken && invitations) {
-        const prepared = await invitations.prepareForRegistration(
-          input.invitationToken,
-          normalizedEmail,
-        );
-        invitationAcceptance = {
-          tokenHash: prepared.tokenHash,
-          maxMembers: prepared.maxMembers,
-          eventContext: {
-            requestId: ctx.requestId,
-            ipAddress: ctx.ipAddress,
-            userAgent: ctx.userAgent,
-          },
-        };
-      }
-
-      const passwordHash = await hashPassword(input.password);
-
-      // Registration is transactional: user + personal workspace (organization
-      // + active Owner membership) + session + first refresh token are created
-      // atomically by the repository. A failure in any step rolls everything
-      // back, so a registered user always has a personal workspace.
-      const now = clock.epochMillis();
-      const rawRefreshToken = generateOpaqueToken();
-      const account = await repo.registerAccount({
-        user: {
-          email: input.email,
-          normalizedEmail,
-          passwordHash,
-          displayName: input.displayName,
-        },
-        personalWorkspace: {
-          name: personalWorkspaceName(input.displayName),
-          slugBase: personalWorkspaceSlugBase(input.displayName),
-        },
-        session: {
-          ipAddress: ctx.ipAddress,
-          userAgent: ctx.userAgent,
-          expiresAt: new Date(now + sessionTtlSeconds * 1000),
-        },
-        refreshToken: {
-          tokenHash: hashOpaqueToken(rawRefreshToken),
-          familyId: createId('rtok'),
-          expiresAt: new Date(now + refreshTokenTtlSeconds * 1000),
-        },
-        // Sprint 9: when present, the invitation is accepted INSIDE this same
-        // transaction. A failed acceptance rolls the whole registration back, so
-        // the session/refresh result below is only built for a fully valid state.
-        invitationAcceptance,
-      });
-
-      const result = await buildSessionIssueResult(
-        account.user,
-        account.session,
-        rawRefreshToken,
-      );
-      // Written AFTER the provisioning transaction commits, consistent with the
-      // module's event strategy (login/refresh/logout all emit post-operation).
-      // The tradeoff is deliberate: the security event is a best-effort audit
-      // record, not part of the account invariant, so it must never be able to
-      // roll back a successful registration. The account is fully durable before
-      // this runs.
-      await writeSecurityEvent({
-        userId: account.user.id,
-        sessionId: account.session.id,
-        actorType: 'user',
-        eventType: SECURITY_EVENT_TYPES.registrationSucceeded,
-        ctx,
-      });
-      // Sprint 16: automatic first verification email. BEST-EFFORT and
-      // post-commit by design — the collaborator never throws, so an email
-      // provider outage cannot fail (or roll back) a registration that has
-      // already durably succeeded. The new user starts UNVERIFIED either way
-      // and can resend from the authenticated endpoint.
-      if (emailVerification) {
-        await emailVerification.sendInitialVerificationEmail(
-          { id: account.user.id, email: account.user.email },
-          ctx,
-        );
-      }
-      return result;
-    },
-
     async login(input, ctx) {
       const normalizedEmail = normalizeEmail(input.email);
 

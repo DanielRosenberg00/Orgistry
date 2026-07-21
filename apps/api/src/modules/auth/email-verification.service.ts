@@ -92,21 +92,14 @@ export interface EmailVerificationService {
     ctx: RequestContext,
   ): Promise<EmailVerificationCompleteResponse>;
   /**
-   * BEST-EFFORT initial verification email after registration. Never throws:
-   * a delivery failure is recorded as a security event and the user can
-   * resend later. Called AFTER the registration transaction commits, so email
-   * problems can never roll back an account.
-   */
-  sendInitialVerificationEmail(
-    user: { id: string; email: string },
-    ctx: RequestContext,
-  ): Promise<void>;
-  /**
    * BEST-EFFORT verification email after an authenticated email change
-   * (Sprint 17). Same never-throw contract as the registration email: the
-   * change is already committed (verification cleared, old tokens
-   * invalidated), so a delivery failure only means the user resends later.
-   * `user.email` is the NEW, committed address.
+   * (Sprint 17). Never throws: the change is already committed (verification
+   * cleared, old tokens invalidated), so a delivery failure only means the
+   * user resends later. `user.email` is the NEW, committed address.
+   *
+   * (The post-REGISTRATION variant was retired in Sprint 18: a
+   * verification-first account is created email-verified, so registration
+   * never sends a verification email.)
    */
   sendEmailChangeVerificationEmail(
     user: { id: string; email: string },
@@ -225,7 +218,7 @@ export function createEmailVerificationService(
 
   /**
    * BEST-EFFORT issue + send for flows whose triggering operation has already
-   * committed (registration, email change). Never throws: the committed
+   * committed (the authenticated email change). Never throws: the committed
    * operation must stay usable through any email outage. A failed delivery is
    * recorded (coarse, token-free) and the user can resend from the
    * authenticated endpoint.
@@ -233,7 +226,7 @@ export function createEmailVerificationService(
   async function sendBestEffortVerificationEmail(
     user: { id: string; email: string },
     ctx: RequestContext,
-    trigger: 'registration' | 'email_change',
+    trigger: 'email_change',
   ): Promise<void> {
     try {
       await issueAndSendVerificationEmail(user);
@@ -346,10 +339,6 @@ export function createEmailVerificationService(
           // Indistinguishable on purpose: account state is never disclosed.
           throw emailVerificationTokenInvalidError();
       }
-    },
-
-    async sendInitialVerificationEmail(user, ctx) {
-      await sendBestEffortVerificationEmail(user, ctx, 'registration');
     },
 
     async sendEmailChangeVerificationEmail(user, ctx) {

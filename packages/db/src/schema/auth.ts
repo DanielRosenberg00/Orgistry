@@ -1,4 +1,5 @@
 import { createId } from '@orgistry/shared';
+import { sql } from 'drizzle-orm';
 import {
   index,
   jsonb,
@@ -208,6 +209,81 @@ export const passwordResetTokens = pgTable(
   ],
 );
 
+/**
+ * Pending registrations (Sprint 18 — verification-first registration).
+ *
+ * A public registration request no longer creates a user. It stages the
+ * submitted profile here — with the password ALREADY hashed (Argon2id) and the
+ * emailed completion token stored ONLY as a SHA-256 hash — and the account is
+ * created exclusively by the completion endpoint after raw-token proof.
+ *
+ * Lifecycle mirrors the other token tables — the two terminal timestamps have
+ * DISTINCT meanings and are never overloaded:
+ *  - `used_at`        — the pending registration was CONSUMED by a successful
+ *    completion (the account now exists);
+ *  - `invalidated_at` — the generation was RETIRED unused (superseded by a
+ *    newer registration request for the same normalized email, or retired as
+ *    a sibling when another generation completed).
+ *
+ * A generation is usable only while `used_at IS NULL AND invalidated_at IS
+ * NULL AND expires_at > now()`. The partial unique index below enforces the
+ * one-usable-generation-per-normalized-email invariant structurally (issuance
+ * invalidates every prior unused generation — expired or not — in the same
+ * transaction that inserts the replacement, serialized by an advisory lock on
+ * the normalized email).
+ *
+ * `invitation_id` is the OPTIONAL stable reference to a pending invitation
+ * supplied at request time. Deliberately the row id, never the invitation
+ * token or its hash — no invitation secret material is persisted here. The
+ * invitation lifecycle is re-checked authoritatively at completion.
+ *
+ * The row stores NO request metadata (no IP, no user agent, no URL) — the
+ * security-events seam owns sanitized request context. Consumed and expired
+ * rows are retained for now; a cleanup sweep can later delete on
+ * `expires_at` (indexed below) without any schema change.
+ */
+export const pendingRegistrations = pgTable(
+  'pending_registrations',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId('preg')),
+    // Email as the user typed it (becomes `users.email` at completion).
+    email: text('email').notNull(),
+    // Lowercased/trimmed email; lifecycle and replacement key on this.
+    normalizedEmail: text('normalized_email').notNull(),
+    // Argon2id encoded hash, computed BEFORE staging. The raw password is
+    // never persisted anywhere.
+    passwordHash: text('password_hash').notNull(),
+    displayName: text('display_name').notNull(),
+    // SHA-256 of the raw completion token; the raw value is emailed, never stored.
+    tokenHash: text('token_hash').notNull(),
+    // Stable reference to the invitation supplied at request time (never the
+    // invitation token or its hash). Null for plain registrations. Deliberately
+    // carries no foreign key (the invitations schema module already imports
+    // this one — same convention as `security_events.organization_id`);
+    // completion treats an unresolvable reference as invitation-unavailable.
+    invitationId: text('invitation_id'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    invalidatedAt: timestamp('invalidated_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // Lookup of a presented completion token by hash (the completion path).
+    uniqueIndex('uq_pending_registrations_token_hash').on(table.tokenHash),
+    // Replacement + sibling invalidation scan by normalized email.
+    index('ix_pending_registrations_normalized_email').on(table.normalizedEmail),
+    // Structural one-usable-generation guard. Partial so historical (used or
+    // invalidated) rows never block a new generation.
+    uniqueIndex('uq_pending_registrations_usable_email')
+      .on(table.normalizedEmail)
+      .where(sql`used_at IS NULL AND invalidated_at IS NULL`),
+    // Future retention/cleanup sweeps scan by expiry.
+    index('ix_pending_registrations_expires_at').on(table.expiresAt),
+  ],
+);
+
 export const securityEvents = pgTable(
   'security_events',
   {
@@ -249,5 +325,7 @@ export type EmailVerificationTokenInsert =
   typeof emailVerificationTokens.$inferInsert;
 export type PasswordResetTokenRow = typeof passwordResetTokens.$inferSelect;
 export type PasswordResetTokenInsert = typeof passwordResetTokens.$inferInsert;
+export type PendingRegistrationRow = typeof pendingRegistrations.$inferSelect;
+export type PendingRegistrationInsert = typeof pendingRegistrations.$inferInsert;
 export type SecurityEventRow = typeof securityEvents.$inferSelect;
 export type SecurityEventInsert = typeof securityEvents.$inferInsert;

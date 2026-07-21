@@ -39,7 +39,7 @@ column now carries later per-item updates (e.g. Sprint 15). Owner types:
 | ID | Action | Findings | Sprint | Evidence to close | Owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | LC-3.1 | Password recovery flow | ORG-PR-004 | 17 | reset integration tests (expiry/reuse/enum) | Eng | **Done (S17)** — route + live-DB suites cover expiry, reuse, concurrency, enumeration, revocation |
-| LC-3.2 | Email verification + register de-enumeration | ORG-PR-024, 030 | 16/17 | verification tests; no register oracle | Eng | Open — advanced (S16/S17): verification done; register oracle throttled + evented but the 409 remains distinguishable (needs verification-first registration redesign) |
+| LC-3.2 | Email verification + register de-enumeration | ORG-PR-024, 030 | 16/17/18 | verification tests; no register oracle | Eng | **Done (S18)** — verification lifecycle (S16) + verification-first registration (S18): the register oracle is removed (contract-identical generic acceptance for all account states, proven by an equality-matrix test); a residual timing side channel is documented in the findings register |
 | LC-3.3 | Global/edge rate limiting + bound pre-auth writes + throttle inspect | ORG-PR-012, 013, 032 | 18 | limiter tests; load test bounds writes | SecEng | Open |
 | LC-3.4 | Rate-limit fail-closed option + alerting | ORG-PR-009 | 18/23 | fail-closed test + alert | SecEng/Ops | Open |
 | LC-3.5 | Observability: metrics/tracing/dashboards/alerts | ORG-PR-007 | 23 | dashboard + synthetic-failure alert | Ops | Open |

@@ -24,19 +24,26 @@ These are intentional non-goals, not bugs:
   Enforcement is a future, deliberate change (the extension point is the
   `emailVerified` field on the current-user contract plus
   `users.email_verified_at`).
-- **Registration de-enumeration is partial.** Public registration still
-  returns a distinguishable `409` for an existing email; Sprint 17 bounded it
-  with a per-email-digest rate limit and a durable probe event. Full response
-  uniformity requires a verification-first registration redesign (ORG-PR-030
-  remains open, materially advanced). The password-recovery request endpoint,
-  by contrast, is fully enumeration-safe — including under internal account
-  lookup, persistence, mail, and security-event failures. Two accepted consequences
-  of that design: recovery-request security events are anonymous and not
-  account-linked (the event schema has no subject field, and actor
-  attribution is never overloaded), and the request path has a documented
-  residual **timing** difference (existing accounts trigger a synchronous
-  email send) bounded by rate limits — see
-  [credential-management.md](credential-management.md).
+- **The registration enumeration oracle is closed (Sprint 18), with a timing
+  residual.** Public registration is verification-first:
+  `POST /v1/auth/register` returns the identical `200 { accepted: true }` for
+  every account state, every private invitation-validation failure (no
+  `INVITATION_*` error escapes this endpoint — invitation feedback lives on
+  the dedicated inspect surface), and every internal failure; it creates no
+  account or session and never returns `EMAIL_ALREADY_REGISTERED`; an account
+  exists only after the emailed completion token is redeemed (ORG-PR-030
+  closed with this residual documented). The residual: response **timing** on the
+  register request is not fully equalized — the Argon2id cost is equalized by
+  hashing before the account lookup, but the new-email path still performs
+  one insert and one mailer hand-off — bounded by the pre-lookup per-IP and
+  per-email-digest rate limits; see
+  [auth-foundation.md](auth-foundation.md). The password-recovery request
+  endpoint is likewise fully enumeration-safe — including under internal
+  account lookup, persistence, mail, and security-event failures — with the
+  same class of documented timing residual bounded by rate limits, and its
+  request security events are anonymous and not account-linked (the event
+  schema has no subject field, and actor attribution is never overloaded) —
+  see [credential-management.md](credential-management.md).
 - **Production email delivery is unproven.** Sprint 16 added a production
   SMTP adapter (nodemailer transport; fail-closed config; see
   [email-and-verification.md](email-and-verification.md)), and production can
@@ -56,7 +63,10 @@ These are intentional non-goals, not bugs:
   templates/CMS, and notification preferences.
 - **No background processing.** No workers, queues, schedulers, or cron. Anything
   that would need a background job (e.g. expiry sweeps, retention deletion) is
-  instead derived on read or simply not performed.
+  instead derived on read or simply not performed. In particular there is no
+  cleanup scheduler for consumed/expired token rows, including the Sprint 18
+  `pending_registrations` table — rows accumulate; the `expires_at` index
+  exists to support a future sweep.
 - **No PostgreSQL row-level security (RLS).** Tenant isolation is enforced in the
   application layer (every query is scoped by the route organization ID), not by
   database policies.

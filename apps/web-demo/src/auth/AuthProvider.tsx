@@ -4,6 +4,8 @@ import type {
   AuthSessionResponse,
   AuthUser,
   CurrentUserResponse,
+  RegisterAcceptedResponse,
+  RegistrationCompleteResponse,
 } from '@orgistry/contracts';
 import {
   api,
@@ -93,14 +95,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [adoptSession],
   );
 
+  // Sprint 18 (verification-first): the registration REQUEST never returns a
+  // session — the backend answers a generic acceptance and (where the address
+  // can be used) emails a completion link. No auth state is touched here. An
+  // optional raw invitation token travels ONLY in this request body.
   const register = useCallback(
-    async (input: { email: string; password: string; displayName: string }) => {
-      const session = await api.post<AuthSessionResponse>(
-        '/v1/auth/register',
-        input,
+    async (input: {
+      email: string;
+      password: string;
+      displayName: string;
+      invitationToken?: string;
+    }) => {
+      await api.post<RegisterAcceptedResponse>('/v1/auth/register', input, {
+        authenticated: false,
+      });
+    },
+    [],
+  );
+
+  // Consume the emailed completion token: the backend creates the account and
+  // issues the session (and refresh cookie) only here. The token arrives from
+  // transient component memory and travels only in this request body.
+  const completeRegistration = useCallback(
+    async (token: string) => {
+      const completion = await api.post<RegistrationCompleteResponse>(
+        '/v1/auth/registration/complete',
+        { token },
         { authenticated: false, cookieAuth: true },
       );
-      adoptSession(session);
+      adoptSession(completion);
+      return {
+        invitationUnavailable: completion.invitation?.status === 'unavailable',
+      };
     },
     [adoptSession],
   );
@@ -128,7 +154,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ status, user, login, register, logout, refreshUser }}
+      value={{
+        status,
+        user,
+        login,
+        register,
+        completeRegistration,
+        logout,
+        refreshUser,
+      }}
     >
       {children}
     </AuthContext.Provider>

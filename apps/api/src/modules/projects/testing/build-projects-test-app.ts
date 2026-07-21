@@ -17,6 +17,11 @@ import { createEntitlementService } from '../../entitlements/entitlement.service
 import { createInMemoryEntitlementRepository } from '../../entitlements/testing/in-memory-plan-repo';
 import { createProjectService } from '../project.service';
 import { createInMemoryProjectRepository } from './in-memory-project-repo';
+import {
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../../mail/testing/in-memory-account-mailer';
+import { createRegistrationTestKit } from '../../auth/testing/registration-test-kit';
 
 /**
  * Build a fully wired app with the auth, organization, and project services over
@@ -37,6 +42,7 @@ export interface ProjectsTestContext {
   app: FastifyInstance;
   authRepo: InMemoryAuthRepository;
   orgStore: InMemoryOrgStore;
+  mailer: InMemoryAccountMailer;
   config: Config;
 }
 
@@ -54,6 +60,12 @@ export async function buildProjectsTestApp(): Promise<ProjectsTestContext> {
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
   });
+  const mailer = createInMemoryAccountMailer();
+  const { registrationService } = createRegistrationTestKit({
+    config,
+    authRepo,
+    mailer,
+  });
   const organizationService = createOrganizationService({ repo: orgRepo });
   // The entitlement service enforces the max_projects quota on project create,
   // reading plan state and counting active projects from the same shared store.
@@ -70,10 +82,11 @@ export async function buildProjectsTestApp(): Promise<ProjectsTestContext> {
     config,
     readinessProbes: [passingProbe('postgres'), passingProbe('redis')],
     authService,
+    registrationService,
     organizationService,
     projectService,
     logger: false,
   });
   await app.ready();
-  return { app, authRepo, orgStore, config };
+  return { app, authRepo, orgStore, mailer, config };
 }

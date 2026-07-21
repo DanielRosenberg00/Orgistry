@@ -14,6 +14,8 @@ import { registerEmailVerificationRoutes } from './modules/auth/email-verificati
 import type { EmailVerificationService } from './modules/auth/email-verification.service';
 import { registerPasswordRecoveryRoutes } from './modules/auth/password-recovery.routes';
 import type { PasswordRecoveryService } from './modules/auth/password-recovery.service';
+import { registerRegistrationRoutes } from './modules/auth/registration.routes';
+import type { RegistrationService } from './modules/auth/registration.service';
 import { registerOrganizationRoutes } from './modules/organization/organization.routes';
 import type { OrganizationService } from './modules/organization/organization.service';
 import { registerMemberRoutes } from './modules/organization/member.routes';
@@ -60,6 +62,14 @@ export interface BuildAppOptions {
    * registration does not depend on `authService`.
    */
   passwordRecoveryService?: PasswordRecoveryService;
+  /**
+   * Verification-first registration service backing `POST /v1/auth/register`
+   * and `POST /v1/auth/registration/complete` (Sprint 18). Both routes are
+   * PUBLIC (the request endpoint is enumeration-safe; completion is
+   * authorized by raw-token possession), so wiring does not depend on
+   * `authService`.
+   */
+  registrationService?: RegistrationService;
   /**
    * Organization service backing the `/v1/organizations` routes. Requires
    * `authService` (the routes are Bearer-authenticated through it); registered
@@ -175,6 +185,15 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   if (options.passwordRecoveryService) {
     registerPasswordRecoveryRoutes(app, {
       service: options.passwordRecoveryService,
+    });
+  }
+  // Verification-first registration routes (Sprint 18). Public like password
+  // recovery; the completion route sets the refresh cookie, so it shares the
+  // centralized cookie attributes.
+  if (options.registrationService) {
+    registerRegistrationRoutes(app, {
+      service: options.registrationService,
+      refreshCookie: config.auth.refreshCookie,
     });
   }
   if (options.authService) {

@@ -42,7 +42,13 @@ Concretely, the sprint added:
 - per-domain API hooks built on shared cursor pagination (`src/hooks/`);
 - shared loading / empty / error / permission UI components (`src/components/`);
 - seven admin pages plus login/register and the public email-verification
-  completion page (`src/pages/`);
+  completion page (`src/pages/`); Sprint 18 reworked the register page into a
+  generic check-email state (it never authenticates) and added the public
+  registration-completion page (`CompleteRegistrationPage`, `/auth/complete-registration`)
+  and the public invitation landing page (`InvitationPage`,
+  `/invitations/accept` — the target of the invitation email: inspects the
+  token, accepts directly when signed in, or hands transient invitation
+  context to the register page for the verification-first invited flow);
 - an advisory unverified-email banner with resend
   (`src/components/EmailVerificationBanner.tsx`; Sprint 16);
 - password-recovery pages and an authenticated account-security surface
@@ -82,7 +88,9 @@ apps/web-demo/src
 │   ├── EmailVerificationBanner.tsx  advisory unverified banner + resend (Sprint 16)
 │   ├── QueryStates.tsx       LoadingState / EmptyState / QueryBoundary / LoadMore
 │   └── PermissionNote.tsx    UX-only "you can't do this" hint
-├── pages/                    Login, Register, VerifyEmail (public completion),
+├── pages/                    Login, Register (check-email state; Sprint 18),
+│                             CompleteRegistration (public; Sprint 18),
+│                             VerifyEmail (public completion),
 │                             ForgotPassword, ResetPassword (public; Sprint 17),
 │                             Overview, Members, Invitations, Projects, Plan,
 │                             ApiKeys, Audit, AccountSecurity, NotFound
@@ -107,15 +115,19 @@ pnpm dev:api         # API only  -> http://localhost:3000
 pnpm dev:web         # web only  -> http://localhost:5173
 ```
 
-Open <http://localhost:5173>, register an account (this auto-provisions a
-personal organization and signs you in; a verification email is sent
-best-effort and an advisory unverified banner appears until you follow it),
-then create a **team** organization from the switcher to exercise the
-multi-org flow. Invitation and verification emails land in Mailpit at
-<http://localhost:8025>; the verification link opens `/auth/verify-email` with
-the token in the URL fragment (never sent to any server), which captures it,
-scrubs the fragment from the URL, submits it in a POST body, never persists
-it, and refreshes the current user on success.
+Open <http://localhost:5173> and register an account. Registration is
+verification-first (Sprint 18): the register page shows a generic check-email
+state (identical copy for every account state — it never authenticates), a
+"Complete your Orgistry registration" email lands in Mailpit at
+<http://localhost:8025>, and following its
+`/auth/complete-registration#token=…` link creates the account
+(email-verified), provisions your personal organization, and signs you in.
+Then create a **team** organization from the switcher to exercise the
+multi-org flow. Invitation (and, after an email change, verification) emails
+also land in Mailpit; both the completion and verification links carry their
+token in the URL fragment (never sent to any server) — the page captures it,
+scrubs the fragment from the URL, submits it in a POST body, and never
+persists it.
 
 Configuration (all optional, with local-dev defaults in `src/config.ts`):
 
@@ -291,18 +303,27 @@ boundary; changing one is a reviewed decision.
 8. **Raw API key secret is shown once and never persisted.** It exists only in
    short-lived component state immediately after creation, then is unrecoverable.
 9. **Raw invitation tokens are not exposed by the admin UI.** Delivery is
-   out-of-band (Mailpit locally); the UI points operators there.
+   out-of-band (Mailpit locally); the UI points operators there. On the
+   RECIPIENT side (the invitation landing page, Sprint 18 refinement) the
+   token from the emailed link is captured once into transient memory, the
+   token-bearing URL is immediately scrubbed from history, it travels only in
+   POST bodies (`inspect`/`accept`/`register`), rides between the landing and
+   register pages only in transient router state (scrubbed again on capture),
+   is dropped from memory as soon as the registration request is accepted,
+   and is never rendered, stored, or logged.
 10. **API envelopes are the frontend/backend boundary.** All success/error parsing
     is centralized in the API client.
 11. **Selected organization id is client context, not tenant authority.** The
     backend re-resolves membership for the route org on every request.
-12. **Emailed tokens (verification + password reset) are transient.** Captured
-    once from the URL fragment, scrubbed from history immediately, held only in
-    component memory, submitted only in a POST body, never placed in a query
-    string, browser storage, or the DOM (Sprint 16/17).
-13. **The forgot-password flow is enumeration-neutral.** One generic
-    confirmation regardless of account existence; the UI never adds copy that
-    would distinguish the two.
+12. **Emailed tokens (verification + password reset + registration
+    completion) are transient.** Captured once from the URL fragment, scrubbed
+    from history immediately, held only in component memory, submitted only in
+    a POST body, never placed in a query string, browser storage, or the DOM
+    (Sprint 16/17/18).
+13. **The forgot-password and registration flows are enumeration-neutral.**
+    One generic confirmation regardless of account existence; the UI never
+    adds copy that would distinguish account states. The register page never
+    authenticates — only the completion page adopts a session.
 14. **Passwords never persist in the client.** Password fields are cleared
     after every submission; no password ever reaches storage, context, or a
     query key.
@@ -314,8 +335,8 @@ boundary; changing one is a reviewed decision.
 ### How auth connects to the API client
 
 The access token lives inside the API client. `AuthProvider` drives it: it calls
-`refreshAccessToken()` at boot and on login/register stores the token via the
-client. The client injects `Authorization: Bearer <token>` on authenticated
+`refreshAccessToken()` at boot and on login (and registration completion —
+registration itself returns no token) stores the token via the client. The client injects `Authorization: Bearer <token>` on authenticated
 requests and runs single-flight refresh on `401`. When refresh is unrecoverable,
 the client invokes a session-expired callback the provider registered, which
 clears auth state and the query cache.
@@ -352,7 +373,9 @@ internals beyond the envelope fields are surfaced.
 
 | Page | Endpoint(s) |
 | --- | --- |
-| Login / Register | `POST /v1/auth/login`, `POST /v1/auth/register`, `POST /v1/auth/refresh`, `GET /v1/auth/me`, `POST /v1/auth/logout` |
+| Login / Register | `POST /v1/auth/login`, `POST /v1/auth/register` (accepted-only; check-email state; optional `invitationToken` in the body from transient router state), `POST /v1/auth/refresh`, `GET /v1/auth/me`, `POST /v1/auth/logout` |
+| Complete registration (public) | `POST /v1/auth/registration/complete` (fragment token → body; adopts the returned session) |
+| Invitation landing (public) | `POST /v1/invitations/inspect` (query token → body; safe context only), `POST /v1/invitations/accept` (signed-in existing user) |
 | Forgot / Reset password | `POST /v1/auth/password-recovery/request`, `POST /v1/auth/password-recovery/complete` |
 | Account security | `POST /v1/auth/change-password`, `POST /v1/auth/change-email`, `POST /v1/auth/email-verification/request`, `GET /v1/auth/me` (refresh after email change) |
 | Organization switcher | `GET /v1/organizations`, `POST /v1/organizations` |
@@ -386,9 +409,10 @@ id.
 - **No backend contract workaround was introduced.** Sprint 11 consumes the
   existing APIs unchanged (no backend files modified; `pnpm db:generate` reports no
   schema drift).
-- **Page-level compromises.** Invitation acceptance/onboarding UI is out of scope
-  (the backend `inspect`/`accept` endpoints exist but the admin demo does not
-  build a redemption screen). Audit metadata is shown as compact JSON of the
+- **Page-level compromises.** *(Historical — resolved in Sprint 18:)* the
+  invitation onboarding UI, originally out of scope here, now exists as the
+  public `/invitations/accept` landing page (inspect → accept or invited
+  registration). Audit metadata is shown as compact JSON of the
   already-sanitized DTO. Pagination is load-more (no page-number UI).
 
 ---

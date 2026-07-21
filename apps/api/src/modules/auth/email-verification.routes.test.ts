@@ -7,13 +7,18 @@ import {
   type AuthTestContext,
   type BuildAuthTestAppOptions,
 } from './testing/build-auth-test-app';
+import { registerTestUser } from './testing/register-test-user';
 
 /**
  * End-to-end email-verification behavior through `app.inject`, backed by the
  * in-memory repositories and the in-memory account mailer. Raw tokens are
  * recovered ONLY from the captured email link — exactly the recipient's
- * channel; the API never returns them. DB-backed persistence and the
- * FOR-UPDATE race are covered in `email-verification.integration.test.ts`.
+ * channel; the API never returns them. Registration is verification-first
+ * (Sprint 18), so a completed account arrives ALREADY verified and no
+ * verification email is ever sent automatically; suites that need an
+ * unverified user stage the post-email-change state explicitly via
+ * `makeUnverified`. DB-backed persistence and the FOR-UPDATE race are covered
+ * in `email-verification.integration.test.ts`.
  */
 
 const REGISTER_BODY = {
@@ -22,22 +27,29 @@ const REGISTER_BODY = {
   displayName: 'Verify Me',
 };
 
+type SetupContext = AuthTestContext & { accessToken: string; userId: string };
+
 async function setup(
   options: BuildAuthTestAppOptions = {},
-): Promise<AuthTestContext & { accessToken: string; userId: string }> {
+): Promise<SetupContext> {
   const ctx = await buildAuthTestApp(options);
-  const response = await ctx.app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: REGISTER_BODY,
-  });
-  expect(response.statusCode).toBe(201);
-  const body = response.json();
-  return {
-    ...ctx,
-    accessToken: body.data.tokens.accessToken,
-    userId: body.data.user.id,
-  };
+  const { accessToken, userId } = await registerTestUser(
+    ctx.app,
+    ctx.mailer,
+    REGISTER_BODY,
+  );
+  return { ...ctx, accessToken, userId };
+}
+
+/**
+ * Simulate the one remaining unverified state (post-email-change) directly:
+ * clear the user's verification timestamp and drop the registration emails so
+ * message assertions start from a clean capture.
+ */
+function makeUnverified(ctx: SetupContext): void {
+  const user = ctx.repo.users.find((u) => u.id === ctx.userId)!;
+  user.emailVerifiedAt = null;
+  ctx.mailer.messages.length = 0;
 }
 
 function requestVerification(
@@ -74,67 +86,32 @@ function me(
 }
 
 describe('registration integration', () => {
-  it('sends the first verification email automatically and starts unverified', async () => {
+  it('a completed registration is already verified and gets NO verification email', async () => {
     const ctx = await setup();
 
-    expect(ctx.mailer.messages).toHaveLength(1);
-    const email = ctx.mailer.messages[0];
-    expect(email.to).toBe(REGISTER_BODY.email);
-    expect(email.subject).toContain('Verify');
-    // The link carries the token in the URL FRAGMENT — never a query string,
-    // so the token can never reach a web server, proxy log, or Referer.
-    expect(email.text).toContain(
-      `${ctx.config.web.url}/auth/verify-email#token=`,
-    );
-    expect(email.text).not.toContain('?token=');
-    expect(ctx.verificationRepo.tokens).toHaveLength(1);
-    expect(
-      ctx.repo.users.find((u) => u.id === ctx.userId)?.emailVerifiedAt,
-    ).toBeNull();
-  });
+    // Completion proved mailbox control, so the account is born verified…
+    const user = ctx.repo.users.find((u) => u.id === ctx.userId)!;
+    expect(user.emailVerifiedAt).toBeInstanceOf(Date);
+    const meResponse = await me(ctx, ctx.accessToken);
+    expect(meResponse.json().data.user.emailVerified).toBe(true);
 
-  it('stores only the token hash — never the raw token', async () => {
-    const ctx = await setup();
-    const rawToken = ctx.mailer.lastLinkToken();
-    expect(rawToken).toBeTruthy();
-
-    const [record] = ctx.verificationRepo.tokens;
-    expect(record.tokenHash).toBe(hashEmailVerificationToken(rawToken!));
-    expect(record.tokenHash).not.toBe(rawToken);
-    expect(JSON.stringify(ctx.verificationRepo.tokens)).not.toContain(rawToken);
-  });
-
-  it('registration succeeds even when the verification email fails to deliver', async () => {
-    const ctx = await buildAuthTestApp();
-    ctx.mailer.failNext = true;
-
-    const response = await ctx.app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: REGISTER_BODY,
-    });
-
-    expect(response.statusCode).toBe(201);
-    expect(ctx.mailer.messages).toHaveLength(0);
+    // …no verification token was minted and no verification email was sent —
+    // only the registration-completion email exists.
     expect(ctx.verificationRepo.tokens).toHaveLength(0);
-    // The failure is recorded safely (no token material in the event).
-    const requested = ctx.repo.securityEvents.filter(
-      (event) => event.eventType === 'auth.email_verification_requested',
-    );
-    expect(requested).toHaveLength(1);
-    expect(requested[0].metadata).toMatchObject({ delivered: false });
-    // Resend remains available.
-    const login = await ctx.app.inject({
-      method: 'POST',
-      url: '/v1/auth/login',
-      payload: { email: REGISTER_BODY.email, password: REGISTER_BODY.password },
-    });
-    const resend = await requestVerification(
-      ctx,
-      login.json().data.tokens.accessToken,
-    );
-    expect(resend.statusCode).toBe(200);
-    expect(ctx.mailer.messages).toHaveLength(1);
+    for (const email of ctx.mailer.messages) {
+      expect(email.text).not.toContain('/auth/verify-email');
+    }
+  });
+
+  it('a request after registration reports already verified without sending', async () => {
+    const ctx = await setup();
+    const sentBefore = ctx.mailer.messages.length;
+
+    const response = await requestVerification(ctx, ctx.accessToken);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual({ sent: false, alreadyVerified: true });
+    expect(ctx.mailer.messages).toHaveLength(sentBefore);
   });
 });
 
@@ -147,6 +124,7 @@ describe('POST /v1/auth/email-verification/request', () => {
 
   it('issues a fresh token and emails the current user only', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
     const response = await requestVerification(ctx, ctx.accessToken);
 
     expect(response.statusCode).toBe(200);
@@ -154,13 +132,35 @@ describe('POST /v1/auth/email-verification/request', () => {
       ok: true,
       data: { sent: true, alreadyVerified: false },
     });
-    // Registration email + explicit request email, both to the stored address.
-    expect(ctx.mailer.messages).toHaveLength(2);
-    expect(ctx.mailer.messages[1].to).toBe(REGISTER_BODY.email);
+    expect(ctx.mailer.messages).toHaveLength(1);
+    const email = ctx.mailer.messages[0];
+    expect(email.to).toBe(REGISTER_BODY.email);
+    expect(email.subject).toContain('Verify');
+    // The link carries the token in the URL FRAGMENT — never a query string,
+    // so the token can never reach a web server, proxy log, or Referer.
+    expect(email.text).toContain(
+      `${ctx.config.web.url}/auth/verify-email#token=`,
+    );
+    expect(email.text).not.toContain('?token=');
+    expect(ctx.verificationRepo.tokens).toHaveLength(1);
+  });
+
+  it('stores only the token hash — never the raw token', async () => {
+    const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
+    const rawToken = ctx.mailer.lastLinkToken();
+    expect(rawToken).toBeTruthy();
+
+    const [record] = ctx.verificationRepo.tokens;
+    expect(record.tokenHash).toBe(hashEmailVerificationToken(rawToken!));
+    expect(record.tokenHash).not.toBe(rawToken);
+    expect(JSON.stringify(ctx.verificationRepo.tokens)).not.toContain(rawToken);
   });
 
   it('never returns the raw token or its hash', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
     const response = await requestVerification(ctx, ctx.accessToken);
 
     const raw = JSON.stringify(response.json());
@@ -172,6 +172,8 @@ describe('POST /v1/auth/email-verification/request', () => {
 
   it('resend invalidates all previous unused tokens (single usable generation)', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const firstToken = ctx.mailer.lastLinkToken()!;
     await requestVerification(ctx, ctx.accessToken);
 
@@ -189,6 +191,8 @@ describe('POST /v1/auth/email-verification/request', () => {
 
   it('returns safe success without sending when already verified', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     await completeVerification(ctx, ctx.mailer.lastLinkToken()!);
     const sentBefore = ctx.mailer.messages.length;
 
@@ -209,6 +213,7 @@ describe('POST /v1/auth/email-verification/request', () => {
         completePerIpMax: 100,
       },
     });
+    makeUnverified(ctx);
 
     expect((await requestVerification(ctx, ctx.accessToken)).statusCode).toBe(200);
     expect((await requestVerification(ctx, ctx.accessToken)).statusCode).toBe(200);
@@ -221,6 +226,8 @@ describe('POST /v1/auth/email-verification/request', () => {
 describe('POST /v1/auth/email-verification/complete', () => {
   it('verifies the account with the emailed token (public, no auth required)', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const rawToken = ctx.mailer.lastLinkToken()!;
 
     const response = await completeVerification(ctx, rawToken);
@@ -241,6 +248,8 @@ describe('POST /v1/auth/email-verification/complete', () => {
 
   it('invalidates sibling active tokens on completion', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     // Issue a second generation, then hand-craft a competing usable sibling to
     // prove completion retires everything else.
     await requestVerification(ctx, ctx.accessToken);
@@ -264,6 +273,8 @@ describe('POST /v1/auth/email-verification/complete', () => {
 
   it('rejects reuse of a consumed token (single-use invariant)', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const rawToken = ctx.mailer.lastLinkToken()!;
     await completeVerification(ctx, rawToken);
 
@@ -278,6 +289,8 @@ describe('POST /v1/auth/email-verification/complete', () => {
 
   it('rejects an expired token', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const rawToken = ctx.mailer.lastLinkToken()!;
     ctx.verificationRepo.tokens[0].expiresAt = new Date(Date.now() - 1000);
 
@@ -300,6 +313,8 @@ describe('POST /v1/auth/email-verification/complete', () => {
 
   it('rejects a token whose account is disabled, indistinguishably from unknown', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const rawToken = ctx.mailer.lastLinkToken()!;
     ctx.repo.users.find((u) => u.id === ctx.userId)!.status = 'disabled';
 
@@ -345,6 +360,8 @@ describe('POST /v1/auth/email-verification/complete', () => {
 describe('security events', () => {
   it('records sanitized lifecycle events without token material', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const rawToken = ctx.mailer.lastLinkToken()!;
     await requestVerification(ctx, ctx.accessToken);
     await completeVerification(ctx, rawToken); // stale -> failed event
@@ -371,6 +388,8 @@ describe('security events', () => {
 describe('issuance / delivery consistency (SMTP and DB are not atomic)', () => {
   it('a failed resend preserves the previously delivered usable link', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const deliveredToken = ctx.mailer.lastLinkToken()!;
 
     ctx.mailer.failNext = true;
@@ -390,6 +409,8 @@ describe('issuance / delivery consistency (SMTP and DB are not atomic)', () => {
 
   it('a persistence failure after delivery errors out without stranding the user', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const deliveredToken = ctx.mailer.lastLinkToken()!;
 
     // Simulate the non-atomic window: the mailer accepted the replacement but
@@ -420,6 +441,8 @@ describe('issuance / delivery consistency (SMTP and DB are not atomic)', () => {
 
   it('a successful resend activates the replacement and retires the predecessor', async () => {
     const ctx = await setup();
+    makeUnverified(ctx);
+    await requestVerification(ctx, ctx.accessToken);
     const oldToken = ctx.mailer.lastLinkToken()!;
 
     const resend = await requestVerification(ctx, ctx.accessToken);

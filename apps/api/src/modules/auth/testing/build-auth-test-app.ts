@@ -19,9 +19,18 @@ import {
   type PasswordRecoveryRateLimits,
 } from '../password-recovery.service';
 import {
+  createRegistrationService,
+  type RegistrationRateLimits,
+} from '../registration.service';
+import type { RegistrationInvitations } from '../registration.types';
+import {
   createInMemoryAuthRepository,
   type InMemoryAuthRepository,
 } from './in-memory-auth-repo';
+import {
+  createInMemoryRegistrationRepository,
+  type InMemoryRegistrationRepository,
+} from './in-memory-registration-repo';
 import {
   createInMemoryEmailVerificationRepository,
   type InMemoryEmailVerificationRepository,
@@ -46,6 +55,7 @@ import {
 export interface AuthTestContext {
   app: FastifyInstance;
   repo: InMemoryAuthRepository;
+  registrationRepo: InMemoryRegistrationRepository;
   verificationRepo: InMemoryEmailVerificationRepository;
   passwordRecoveryRepo: InMemoryPasswordRecoveryRepository;
   mailer: InMemoryAccountMailer;
@@ -55,12 +65,17 @@ export interface AuthTestContext {
 export interface BuildAuthTestAppOptions {
   rateLimiter?: RateLimiter;
   rateLimits?: AuthRateLimits;
+  registrationRateLimits?: RegistrationRateLimits;
   emailVerificationRateLimits?: EmailVerificationRateLimits;
   passwordRecoveryRateLimits?: PasswordRecoveryRateLimits;
   /** Verification token TTL in seconds. Defaults to the config default (24h). */
   emailVerificationTtlSeconds?: number;
   /** Reset token TTL in seconds. Defaults to the config default (1h). */
   passwordResetTtlSeconds?: number;
+  /** Completion token TTL in seconds. Defaults to the config default (24h). */
+  registrationCompletionTtlSeconds?: number;
+  /** Invitation collaborator for registration-with-invitation suites. */
+  registrationInvitations?: RegistrationInvitations;
   clock?: Clock;
 }
 
@@ -104,6 +119,28 @@ export async function buildAuthTestApp(
     rateLimits: options.passwordRecoveryRateLimits,
     clock: options.clock,
   });
+  const registrationRepo = createInMemoryRegistrationRepository({
+    orgStore: repo.orgStore,
+    sessions: repo.sessions,
+    refreshTokens: repo.refreshTokens,
+    securityEvents: repo.securityEvents,
+  });
+  const registrationService = createRegistrationService({
+    repo: registrationRepo,
+    mailer,
+    webBaseUrl: config.web.url,
+    completionTtlSeconds:
+      options.registrationCompletionTtlSeconds ??
+      config.registration.completionTtlSeconds,
+    jwtSecret: config.auth.jwtSecret,
+    accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+    sessionTtlSeconds: config.auth.sessionTtlSeconds,
+    refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+    rateLimiter: options.rateLimiter,
+    rateLimits: options.registrationRateLimits,
+    invitations: options.registrationInvitations,
+    clock: options.clock,
+  });
   const service = createAuthService({
     repo,
     jwtSecret: config.auth.jwtSecret,
@@ -121,8 +158,17 @@ export async function buildAuthTestApp(
     authService: service,
     emailVerificationService,
     passwordRecoveryService,
+    registrationService,
     logger: false,
   });
   await app.ready();
-  return { app, repo, verificationRepo, passwordRecoveryRepo, mailer, config };
+  return {
+    app,
+    repo,
+    registrationRepo,
+    verificationRepo,
+    passwordRecoveryRepo,
+    mailer,
+    config,
+  };
 }

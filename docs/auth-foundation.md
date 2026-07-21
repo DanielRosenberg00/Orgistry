@@ -28,15 +28,299 @@ normalization, or security-event persistence.
 > policy used by every password-setting surface. See
 > [`credential-management.md`](credential-management.md).
 
-This document is the **historical Sprint 2 reference**. It describes the auth
-foundation as it was first shipped: register/login/current-user with no refresh
-endpoint, logout, session listing/revocation, or email-verification flow, and
-where registration created **only** a user and a session. Later sprints extended
-this — the session lifecycle (Sprint 3), personal-workspace provisioning
-(Sprint 4), and the email-verification lifecycle (Sprint 16; see
-[email-and-verification.md](email-and-verification.md)). Where this document
-describes the original state, §E records what has since been resolved and
-points to the current authoritative docs.
+> **Sprint 18 update.** Registration is no longer part of the auth service at
+> all. The synchronous flow this document originally described — create user +
+> workspace + session in one `POST /v1/auth/register` call, with a
+> `409 EMAIL_ALREADY_REGISTERED` for duplicates — is **retired**, replaced by a
+> verification-first, two-step flow in its own module. The authoritative
+> current design is the
+> [Verification-first registration (Sprint 18)](#verification-first-registration-sprint-18)
+> section below. Login/refresh/logout/me/sessions/change-password/change-email
+> are unchanged.
+
+Sections A–F of this document are the **historical Sprint 2 reference**. They
+describe the auth foundation as it was first shipped: register/login/
+current-user with no refresh endpoint, logout, session listing/revocation, or
+email-verification flow, and where registration created **only** a user and a
+session. Later sprints extended this — the session lifecycle (Sprint 3),
+personal-workspace provisioning (Sprint 4), the email-verification lifecycle
+(Sprint 16; see [email-and-verification.md](email-and-verification.md)) — and
+Sprint 18 replaced registration outright. Where the historical sections
+describe the original state, §E records what has since been resolved and
+points to the current authoritative docs. The Sprint 18 section that follows
+is **current and authoritative**, not historical.
+
+## Verification-first registration (Sprint 18)
+
+This section is the authoritative, current registration design. `register()`
+no longer exists on the auth service, and `POST /v1/auth/register` no longer
+creates anything. Registration lives in its own module —
+`apps/api/src/modules/auth/registration.{routes,service,repo,types,errors,email,token}.ts`
+— and reuses the platform's existing primitives (opaque-token generate/hash,
+Argon2id, the shared `AccountMailer`, the shared organization-provisioning and
+invitation-acceptance seams, the sanitized security-event writer) rather than
+inventing parallel ones.
+
+### Why
+
+The retired flow answered a duplicate email with `409
+EMAIL_ALREADY_REGISTERED` — a public account-existence oracle that could not
+be closed while registration synchronously returned a live session (the
+tradeoff documented in
+[credential-management.md](credential-management.md)). Verification-first
+registration inverts the order: prove the mailbox first, create the account
+second. That closes the oracle (the public response is identical for every
+account state) and yields a second property for free: a completed user is
+**email-verified at creation**, so registration no longer sends a
+verification email at all.
+
+### Endpoints
+
+```
+POST /v1/auth/register              -> 200 { accepted: true }        (always)
+POST /v1/auth/registration/complete -> 201 { user, tokens, invitation }
+```
+
+Both are public. The first creates NO user, session, access token, refresh
+cookie, organization, or membership — it only (for an eligible new email)
+stages a pending registration and emails a completion link. Only the second
+creates the account.
+
+### The request flow (`POST /v1/auth/register`)
+
+1. **Validate** the body through the shared contracts (`VALIDATION_ERROR` is
+   explicit — malformed input is not masked; the password parses through the
+   shared `newPasswordSchema`).
+2. **Rate-limit before any account lookup**: per IP
+   (`RATE_LIMIT_REGISTER_PER_IP_MAX`) and per normalized-email **digest**
+   (`RATE_LIMIT_REGISTER_PER_EMAIL_MAX` — the email is hashed into the Redis
+   key). Exceeding either is an explicit `429 RATE_LIMITED`.
+3. **Hash the password (Argon2id) BEFORE anything state-dependent**, so the
+   dominant CPU cost is identical on every path — including rejected-
+   invitation paths — regardless of whether the email is registered.
+4. **Validate an optional `invitationToken` INSIDE the enumeration-safe
+   boundary, without ever surfacing the result.** Every private
+   invitation-validation failure — unknown or malformed token, expired,
+   revoked, or already-accepted invitation, email mismatch, request-time
+   quota exhaustion, even a failing invitation resolver — collapses to the
+   SAME generic acceptance: no pending registration is staged, no user is
+   created, no invitation state is mutated, and **no email of any kind is
+   sent** (not even the existing-account guidance — a failed invitation must
+   not become a probe vehicle). Only a coarse anonymous event
+   (`invitation_rejected` / `invitation_lookup_failed`, no token material, no
+   email, no organization or invitation ids, no quota values) records the
+   outcome internally. The dedicated **invitation-INSPECT endpoint remains
+   the intended feedback channel** for a token holder — registration
+   deliberately adds no second invitation-state oracle and no
+   invitation-existence or email-match disclosure. The translation is
+   centralized in one place (`resolveRequestInvitation` in
+   `registration.service.ts`).
+5. **Branch on account state — without ever changing the response** (see the
+   staging and existing-account subsections below).
+6. **Always return `200 { ok: true, data: { accepted: true } }`** — for
+   eligible new emails, existing active accounts (verified or not), disabled
+   accounts, soft-deleted accounts, and every internal failure (lookup,
+   persist, mail). After validation and rate limiting succeed, nothing
+   downstream can alter the public response (the password-recovery
+   convention). The endpoint never returns `EMAIL_ALREADY_REGISTERED`; that
+   code now exists ONLY on the authenticated change-email flow.
+
+### Staging: the `pending_registrations` table
+
+For an eligible new email the request stages a row (id prefix `preg_`;
+migration `0010_tiresome_thunderbird.sql`): `email`, `normalized_email`, the
+Argon2id `password_hash` (computed before the lookup, as above),
+`display_name`, the SHA-256 `token_hash` of a fresh completion token, an
+optional **stable `invitation_id`** (NEVER the invitation token or its hash),
+`expires_at` (`REGISTRATION_COMPLETION_TTL_SECONDS`, default 24 h), and the
+standard `used_at` / `invalidated_at` / `created_at` lifecycle columns.
+
+**Issuance concurrency and replacement.** Issuance runs in ONE transaction
+serialized per normalized email by a PostgreSQL transaction-level advisory
+lock, and invalidates ALL prior unused generations before inserting the new
+one — so after any set of concurrent requests settles, exactly one usable
+generation exists per email. The structural backstop is the partial unique
+index `uq_pending_registrations_usable_email` on `normalized_email WHERE
+used_at IS NULL AND invalidated_at IS NULL`. Supporting indexes: unique
+`uq_pending_registrations_token_hash`, `ix_pending_registrations_normalized_email`,
+and `ix_pending_registrations_expires_at` (for a future cleanup sweep — no
+cleanup scheduler exists yet).
+
+**Persist-then-send.** The pending row commits before the completion email is
+handed to the mailer (the password-recovery convention); a mail failure never
+alters the public response — the user simply submits again and the fresh
+generation supersedes the old.
+
+**The completion email** ("Complete your Orgistry registration") links to
+`<WEB_DEMO_URL>/auth/complete-registration#token=<raw>` — the token rides in
+the URL **fragment**, never a `?token=` query string, so browsers never
+transmit it in an HTTP request. The email states the expiry and
+ignore-if-not-requested guidance, and — for invitation registrations — may
+name the inviting organization (already public to the token holder via
+invitation inspect).
+
+### Existing, disabled, and soft-deleted accounts
+
+- **Existing ACTIVE account (verified or not):** no pending row is staged and
+  no duplicate user can arise. A neutral **guidance email** is sent to the
+  address — "Someone attempted to register… sign in or use password recovery;
+  if this wasn't you, no action is required" — under an internal throttle
+  (`RATE_LIMIT_REGISTRATION_NOTICE_PER_EMAIL_MAX`, default 1 per window;
+  exceeding it silently skips the email). It is NOT a password-reset email
+  and never creates a recovery or verification token.
+- **Disabled or soft-deleted account:** nothing is sent — no reactivation
+  policy exists.
+- None of this alters the public response.
+
+### The completion flow (`POST /v1/auth/registration/complete`)
+
+Accepts `{ token }` in the request **body only** (never a URL); throttled per
+IP (`RATE_LIMIT_REGISTRATION_COMPLETE_PER_IP_MAX`, default 10) and per token
+second-order digest (`RATE_LIMIT_REGISTRATION_COMPLETE_PER_TOKEN_MAX`,
+default 5). Then, in ONE transaction:
+
+1. `SELECT … FOR UPDATE` the pending row by token hash — concurrent
+   completions serialize at the database; **exactly one of any set of
+   concurrent completions succeeds**.
+2. Re-check expiry, consumption, and that no user exists for the email.
+3. Create the **user, email-verified at creation** — completing the emailed
+   token IS the mailbox proof.
+4. Provision the **personal workspace + founding Owner membership + default
+   plan state** through the shared provisioning seam (the same seam the
+   retired synchronous flow used).
+5. Issue the **session and first refresh token** (hash-only) — session
+   issuance happens only here, never at the initial request.
+6. **Accept the stored invitation** where applicable (policy below).
+7. Consume the pending row (`used_at`) and invalidate siblings.
+
+The refresh cookie is set only AFTER the transaction commits. Response:
+`201 { user, tokens, invitation }`, where `invitation` is `null` (no
+invitation), `{ status: 'accepted' }`, or `{ status: 'unavailable' }`.
+
+Errors describe token validity only: `REGISTRATION_TOKEN_INVALID` (404 —
+unknown token OR the email was taken during the pending window, deliberately
+indistinguishable), `REGISTRATION_TOKEN_EXPIRED` (410), and
+`REGISTRATION_TOKEN_USED` (409 — consumed earlier or superseded by a newer
+generation).
+
+### Invitation policy at completion (a documented product choice)
+
+At completion the invitation lifecycle, email match, duplicate membership,
+and quota are re-checked by the shared acceptance seam under a row lock
+INSIDE A SAVEPOINT. If the invitation has become unavailable
+(expired/revoked/accepted/quota/…), ONLY the acceptance rolls back: the
+account, personal workspace, and session still commit, and the response
+reports `invitation: { status: 'unavailable' }` — the outcome is never
+silently dropped. Rationale: the user has proven the mailbox and set a
+password; destroying the account because a third party revoked an invitation
+would punish the proven user. The alternative — fail together — was the OLD
+synchronous model's behavior and is no longer a documented product
+invariant. See [invitations.md](invitations.md).
+
+### Security events
+
+- `auth.registration_requested` — always ANONYMOUS with a null user id: an
+  attempt against an existing account NEVER references the victim's user id.
+  Metadata is coarse strings only — `{ outcome, delivered }` — never an
+  email, digest, token, or URL.
+- `auth.registration_completion_succeeded` — attributed to the newly proven
+  user; metadata `{ invitation: 'none' | 'accepted' | 'unavailable' }`.
+- `auth.registration_completion_rejected` — anonymous, coarse `reason` only.
+- Retired: `auth.registration_succeeded` and
+  `auth.registration_duplicate_email` (historical rows keep the old names).
+
+### Config
+
+`config.registration.completionTtlSeconds`
+(`REGISTRATION_COMPLETION_TTL_SECONDS`, default 24 h) and
+`config.rateLimit.registration.{requestPerIpMax, requestPerEmailMax,
+completePerIpMax, completePerTokenMax, existingAccountNoticePerEmailMax}`.
+The register limits MOVED out of `config.rateLimit.auth`.
+
+### Frontend
+
+`/auth/register` shows a generic check-email state after submission —
+identical copy for every account state (and for valid and invalid
+invitations alike; the page cannot know the difference and never claims an
+invitation was applied or an email delivered); it links to login and
+forgot-password and never authenticates. The new
+`/auth/complete-registration` page (`CompleteRegistrationPage`) follows the
+established token hygiene: fragment capture into transient memory, immediate
+history scrub, body-only submission, no storage, never rendered; on success
+it adopts the authenticated session and navigates into the app;
+invitation-unavailable shows an explanation with a continue link;
+missing/invalid/expired/used states are handled.
+
+Invitation-aware registration flows through the invitation landing page
+(`/invitations/accept`, `InvitationPage` — the target of the invitation
+email): it captures the raw invitation token ONCE from the query string into
+transient memory, immediately scrubs the token-bearing URL from history,
+inspects it via the body-only `POST /v1/invitations/inspect` call (the
+invitation-state feedback channel), and then either accepts directly (signed
+in) or hands the token to `/auth/register` in TRANSIENT router state. The
+register page captures that state once, scrubs it from the history entry,
+prefills the invited address, sends the token ONLY in the registration
+request body, and drops it from memory the moment the request is accepted —
+keeping only the safe display context (organization name) the inspect
+endpoint had already disclosed. The raw invitation token is never rendered,
+stored, logged, or placed in any URL, and is never confused with the
+registration-completion token.
+
+### Invariants (must not change without a deliberate redesign)
+
+- Initial registration (`POST /v1/auth/register`) never creates auth state —
+  no user, session, access token, refresh cookie, organization, or
+  membership.
+- Initial registration never reveals duplicate-email state: one status, one
+  body, for every account state and every internal failure.
+  `EMAIL_ALREADY_REGISTERED` exists only on the authenticated change-email
+  flow.
+- Initial registration never reveals invitation state either: every private
+  invitation-validation failure returns the same generic acceptance, stages
+  nothing, mutates nothing, and sends nothing. Invitation feedback lives
+  exclusively on the invitation-inspect endpoint.
+- Only a valid completion token creates an account.
+- Passwords are persisted only as Argon2id hashes; completion tokens only as
+  SHA-256 hashes; the pending row never stores the invitation token or its
+  hash (only the stable invitation id).
+- At most one usable pending generation per normalized email
+  (advisory-lock-serialized issuance + partial unique index); completion
+  tokens are single-use.
+- Completed users are email-verified at creation; registration sends no
+  verification email.
+- Session issuance happens only at completion, only after the transaction
+  commits.
+- The invitation lifecycle is re-checked at completion; an unavailable
+  invitation never blocks account creation and is always reported in the
+  response.
+- Raw tokens, passwords, and hashes never appear in logs, responses,
+  security-event metadata, or Redis keys (limiter buckets are digest-keyed).
+
+### Known limitations (honest)
+
+- Response TIMING on the register request is not fully equalized: the
+  Argon2id cost is equalized by pre-lookup hashing, but the new-email path
+  still performs one insert and one mailer hand-off. The pre-lookup per-IP
+  and per-email-digest rate limits bound how fast the residual can be
+  sampled.
+- Redis rate limiting still fails open (system-wide policy).
+- No cleanup scheduler for consumed/expired `pending_registrations` rows (the
+  `expires_at` index exists for a future sweep).
+- Production SMTP delivery remains externally unvalidated; there is no
+  bounce/complaint handling.
+- The project remains NOT staging-ready and NOT production-ready.
+
+### Testing
+
+`registration.routes.test.ts` (route-level, in-memory),
+`invitation.routes.test.ts` (including a ten-row public equality matrix over
+invitation states), and `registration.integration.test.ts` (live PostgreSQL:
+advisory-lock issuance, `FOR UPDATE` completion race, savepoint invitation
+semantics), plus the web demo's `registration.test.tsx` and
+`invitation-registration.test.tsx`. The demo seed (`tooling/demo-seed.mjs`)
+exercises the flow end to end over the public HTTP API by reading the
+completion link from the Mailpit API — runtime-validated for both the fresh
+registration-completion path and the idempotent login-first re-run.
 
 ## A. Developer Documentation
 
@@ -56,7 +340,7 @@ points to the current authoritative docs.
 ### Endpoints
 
 ```
-POST /v1/auth/register   -> 201 { user, tokens }
+POST /v1/auth/register   -> 201 { user, tokens }   (RETIRED in Sprint 18 — see above)
 POST /v1/auth/login      -> 200 { user, tokens }
 GET  /v1/auth/me         -> 200 { user }     (requires Authorization: Bearer <token>)
 ```
@@ -65,16 +349,21 @@ All responses use the standard success/error envelopes and carry a request id.
 
 ### How it works
 
-**Register.** Validate body (Zod) → normalize email → reject if the normalized
-email exists → Argon2id-hash the password → **atomically** provision the account
-(user + personal workspace organization + active Owner membership + session +
-first refresh token, in one transaction) → sign a short-lived access token →
-write `auth.registration_succeeded` → return `{ user, tokens }`. The
-normalized-email unique index is the authoritative guard for the concurrent case;
-the repository maps a unique violation to the same `EMAIL_ALREADY_REGISTERED`
-conflict. As of Sprint 4 the whole provisioning is transactional (see
-[`organization-foundation.md`](organization-foundation.md)); a failure in any
-step rolls everything back, so a registered user always has a personal workspace.
+**Register (as shipped in Sprint 2; RETIRED in Sprint 18).** The original flow
+validated the body (Zod) → normalized the email → rejected a duplicate
+normalized email with `409 EMAIL_ALREADY_REGISTERED` → Argon2id-hashed the
+password → **atomically** provisioned the account (user + personal workspace
+organization + active Owner membership + session + first refresh token, in one
+transaction, as of Sprint 4) → signed a short-lived access token → wrote
+`auth.registration_succeeded` → returned `{ user, tokens }`. The
+normalized-email unique index was the authoritative guard for the concurrent
+case. **None of this is current behavior**: Sprint 18 replaced it with the
+verification-first flow described in
+[Verification-first registration (Sprint 18)](#verification-first-registration-sprint-18).
+`POST /v1/auth/register` no longer creates a user, workspace, session, or
+cookie, and never returns `EMAIL_ALREADY_REGISTERED` (that code survives only
+on the authenticated change-email flow); the atomic provisioning now happens
+at registration completion.
 
 **Login.** Validate body → normalize email → look up user. On any failure
 (unknown email, inactive account, wrong password) the response is the **same**
@@ -204,17 +493,23 @@ These must not change without a deliberate redesign:
 - **Security-event sanitization.** Event metadata is recursively stripped of
   password/token/secret/authorization/cookie/hash/credential-like keys before
   persistence.
-- **Registration workspace provisioning (Sprint 4).** Register also creates the
-  user's personal workspace (organization + active Owner membership) in the same
-  transaction as the user, session, and first refresh token. It creates no
-  permission, entitlement, quota, project, or invitation. The full design lives
-  in [`organization-foundation.md`](organization-foundation.md).
+- **Registration workspace provisioning (Sprint 4 → Sprint 18).** As of
+  Sprint 4, register created the user's personal workspace (organization +
+  active Owner membership) in the same transaction as the user, session, and
+  first refresh token. As of Sprint 18 that atomic provisioning happens at
+  **registration completion** (`POST /v1/auth/registration/complete`), through
+  the same shared provisioning seam — the invariant that a created user always
+  has a personal workspace is unchanged; the moment it applies moved. See the
+  Sprint 18 section above and
+  [`organization-foundation.md`](organization-foundation.md).
 
 ### Error codes added
 
 `INVALID_CREDENTIALS` (401) and `EMAIL_ALREADY_REGISTERED` (409) extend the
 catalog in `@orgistry/contracts`. Missing/invalid access tokens map to the
-existing `UNAUTHORIZED`; validation failures to `VALIDATION_ERROR`.
+existing `UNAUTHORIZED`; validation failures to `VALIDATION_ERROR`. (As of
+Sprint 18, `EMAIL_ALREADY_REGISTERED` is returned only by the authenticated
+change-email flow — public registration never returns it.)
 
 ## D. Integration Notes
 
@@ -265,9 +560,15 @@ state see [`session-lifecycle.md`](session-lifecycle.md) (Sprint 3) and
 
 - Email verification (the token table is scaffolding; `users.email_verified_at`
   is always null on registration) — **resolved in Sprint 16**; see
-  [`email-and-verification.md`](email-and-verification.md).
+  [`email-and-verification.md`](email-and-verification.md). Since Sprint 18,
+  registered users are email-verified at creation (completion of the emailed
+  registration token is the mailbox proof).
 - Password recovery and password/email change — **resolved in Sprint 17**; see
   [`credential-management.md`](credential-management.md).
+- The registration duplicate-email disclosure (the `409` account-existence
+  oracle) — **resolved in Sprint 18** by the verification-first registration
+  redesign; see the Sprint 18 section above (a bounded timing residual on the
+  request path remains and is documented there).
 - Permissions, member management, invitations, entitlements, quotas, projects,
   API keys, organization audit logs, and any auth/organization web UI —
   resolved by Sprints 5–11.

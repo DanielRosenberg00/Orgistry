@@ -17,6 +17,11 @@ import {
   createInMemoryOrgStore,
   type InMemoryOrgStore,
 } from './in-memory-org-store';
+import {
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../../mail/testing/in-memory-account-mailer';
+import { createRegistrationTestKit } from '../../auth/testing/registration-test-kit';
 
 /**
  * Build a fully wired app with BOTH the auth and organization services over a
@@ -31,6 +36,7 @@ export interface OrganizationTestContext {
   app: FastifyInstance;
   authRepo: InMemoryAuthRepository;
   orgStore: InMemoryOrgStore;
+  mailer: InMemoryAccountMailer;
   config: Config;
 }
 
@@ -47,6 +53,12 @@ export async function buildOrganizationTestApp(): Promise<OrganizationTestContex
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
   });
+  const mailer = createInMemoryAccountMailer();
+  const { registrationService } = createRegistrationTestKit({
+    config,
+    authRepo,
+    mailer,
+  });
   const organizationService = createOrganizationService({ repo: orgRepo });
   const memberService = createMemberService({ repo: orgRepo });
   const rbacService = createRbacService({
@@ -61,6 +73,7 @@ export async function buildOrganizationTestApp(): Promise<OrganizationTestContex
     config,
     readinessProbes: [passingProbe('postgres'), passingProbe('redis')],
     authService,
+    registrationService,
     organizationService,
     memberService,
     organizationRbacService,
@@ -68,5 +81,5 @@ export async function buildOrganizationTestApp(): Promise<OrganizationTestContex
     logger: false,
   });
   await app.ready();
-  return { app, authRepo, orgStore, config };
+  return { app, authRepo, orgStore, mailer, config };
 }

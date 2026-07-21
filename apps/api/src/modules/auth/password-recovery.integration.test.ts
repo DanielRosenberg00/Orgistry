@@ -15,6 +15,9 @@ import { createEmailVerificationService } from './email-verification.service';
 import { createDbPasswordRecoveryRepository } from './password-recovery.repo';
 import { createPasswordRecoveryService } from './password-recovery.service';
 import { hashPasswordResetToken } from './password-recovery.token';
+import { createDbRegistrationRepository } from './registration.repo';
+import { createRegistrationService } from './registration.service';
+import { registerTestUser } from './testing/register-test-user';
 
 /**
  * DB-backed password-recovery + credential-management integration test.
@@ -67,18 +70,22 @@ describe.skipIf(!connectionString)(
     let firstAccessToken: string;
     let firstRefreshCookie: string;
 
-    function refreshCookieValue(response: LightMyRequestResponse): string {
+    function cookieFromSetCookie(
+      header: string | string[] | undefined,
+    ): string {
       const name = config.auth.refreshCookie.name;
-      const header = response.headers['set-cookie'];
       const raw = Array.isArray(header) ? header.join(';') : (header ?? '');
       return new RegExp(`${name}=([^;]*)`).exec(raw)?.[1] ?? '';
+    }
+    function refreshCookieValue(response: LightMyRequestResponse): string {
+      return cookieFromSetCookie(response.headers['set-cookie']);
     }
 
     beforeAll(async () => {
       await runMigrations(connectionString as string);
       db = createDbClient(connectionString as string);
       await db.sql.unsafe(
-        'TRUNCATE memberships, organizations, security_events, password_reset_tokens, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
+        'TRUNCATE pending_registrations, memberships, organizations, security_events, password_reset_tokens, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
       );
 
       mailer = createInMemoryAccountMailer();
@@ -94,6 +101,16 @@ describe.skipIf(!connectionString)(
         webBaseUrl: config.web.url,
         ttlSeconds: config.passwordRecovery.ttlSeconds,
       });
+      const registrationService = createRegistrationService({
+        repo: createDbRegistrationRepository(db.db),
+        mailer,
+        webBaseUrl: config.web.url,
+        completionTtlSeconds: config.registration.completionTtlSeconds,
+        jwtSecret: config.auth.jwtSecret,
+        accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+        sessionTtlSeconds: config.auth.sessionTtlSeconds,
+        refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+      });
       const authService = createAuthService({
         repo: createDbAuthRepository(db.db),
         jwtSecret: config.auth.jwtSecret,
@@ -108,19 +125,19 @@ describe.skipIf(!connectionString)(
         authService,
         emailVerificationService,
         passwordRecoveryService,
+        registrationService,
         logger: false,
       });
       await app.ready();
 
-      const registered = await app.inject({
-        method: 'POST',
-        url: '/v1/auth/register',
-        payload: user,
-      });
-      expect(registered.statusCode).toBe(201);
-      userId = registered.json().data.user.id;
-      firstAccessToken = registered.json().data.tokens.accessToken;
-      firstRefreshCookie = refreshCookieValue(registered);
+      // Two-step verification-first registration (Sprint 18); the completion
+      // response carries the first session's tokens and refresh cookie.
+      const registered = await registerTestUser(app, mailer, user);
+      userId = registered.userId;
+      firstAccessToken = registered.accessToken;
+      firstRefreshCookie = cookieFromSetCookie(registered.setCookie);
+      // Drop the registration emails so recovery tests only see their own.
+      mailer.messages.length = 0;
     });
 
     afterAll(async () => {

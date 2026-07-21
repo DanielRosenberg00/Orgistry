@@ -6,6 +6,13 @@ import { buildApp } from '../../app';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import { createAuthService } from '../auth/auth.service';
 import { createDbAuthRepository } from '../auth/auth.repo';
+import { createDbRegistrationRepository } from '../auth/registration.repo';
+import { createRegistrationService } from '../auth/registration.service';
+import { registerTestUser } from '../auth/testing/register-test-user';
+import {
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../mail/testing/in-memory-account-mailer';
 import { createOrganizationService } from '../organization/organization.service';
 import { createDbOrganizationRepository } from '../organization/organization.repo';
 import { createProjectService } from '../projects/project.service';
@@ -40,6 +47,7 @@ describe.skipIf(!connectionString)('entitlements against live PostgreSQL', () =>
   const config = testConfig();
   let db: ReturnType<typeof createDbClient>;
   let app: FastifyInstance;
+  let mailer: InMemoryAccountMailer;
   let emailSeq = 0;
 
   function authHeader(token: string): Record<string, string> {
@@ -48,20 +56,12 @@ describe.skipIf(!connectionString)('entitlements against live PostgreSQL', () =>
 
   async function registerUser(): Promise<{ token: string; userId: string }> {
     emailSeq += 1;
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: {
-        email: `plan.int.${emailSeq}@example.com`,
-        password: 'a-strong-password-123',
-        displayName: 'Plan Int',
-      },
+    const result = await registerTestUser(app, mailer, {
+      email: `plan.int.${emailSeq}@example.com`,
+      password: 'a-strong-password-123',
+      displayName: 'Plan Int',
     });
-    expect(response.statusCode).toBe(201);
-    return {
-      token: response.json().data.tokens.accessToken,
-      userId: response.json().data.user.id,
-    };
+    return { token: result.accessToken, userId: result.userId };
   }
 
   async function createTeamOrg(token: string, name: string): Promise<string> {
@@ -78,11 +78,27 @@ describe.skipIf(!connectionString)('entitlements against live PostgreSQL', () =>
   beforeAll(async () => {
     await runMigrations(connectionString as string);
     db = createDbClient(connectionString as string);
+    // Clean domain state so the suite is deterministic and re-runnable; the
+    // seeded roles/permissions/plans baseline is preserved (not truncated).
+    await db.sql.unsafe(
+      'TRUNCATE pending_registrations, projects, memberships, organizations, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
+    );
     const orgRepo = createDbOrganizationRepository(db.db);
     const entitlementService = createEntitlementService({
       repo: createDbEntitlementRepository(db.db),
     });
 
+    mailer = createInMemoryAccountMailer();
+    const registrationService = createRegistrationService({
+      repo: createDbRegistrationRepository(db.db),
+      mailer,
+      webBaseUrl: config.web.url,
+      completionTtlSeconds: config.registration.completionTtlSeconds,
+      jwtSecret: config.auth.jwtSecret,
+      accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+      sessionTtlSeconds: config.auth.sessionTtlSeconds,
+      refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+    });
     const authService = createAuthService({
       repo: createDbAuthRepository(db.db),
       jwtSecret: config.auth.jwtSecret,
@@ -94,6 +110,7 @@ describe.skipIf(!connectionString)('entitlements against live PostgreSQL', () =>
       config,
       readinessProbes: [passingProbe('postgres')],
       authService,
+      registrationService,
       organizationService: createOrganizationService({ repo: orgRepo }),
       projectService: createProjectService({
         accessControl: orgRepo,

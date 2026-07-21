@@ -3,7 +3,6 @@ import {
   changePasswordRequestSchema,
   cursorPageParamsSchema,
   loginRequestSchema,
-  registerRequestSchema,
 } from '@orgistry/contracts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { sendSuccess } from '../../lib/envelope';
@@ -60,15 +59,9 @@ export function registerAuthRoutes(
 ): void {
   const { service, refreshCookie, csrfHeaderName } = options;
 
-  app.post('/v1/auth/register', async (request, reply) => {
-    const input = registerRequestSchema.parse(request.body);
-    const { response, rawRefreshToken } = await service.register(
-      input,
-      requestContext(request),
-    );
-    setRefreshCookie(reply, rawRefreshToken, refreshCookie);
-    return sendSuccess(reply, response, 201);
-  });
+  // NOTE: `POST /v1/auth/register` moved to `registration.routes.ts` in
+  // Sprint 18 (verification-first registration) — registering no longer
+  // issues a session, so it no longer belongs to this session-issuing module.
 
   app.post('/v1/auth/login', async (request, reply) => {
     const input = loginRequestSchema.parse(request.body);

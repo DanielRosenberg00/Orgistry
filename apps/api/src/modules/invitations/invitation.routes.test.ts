@@ -2,8 +2,11 @@ import { ROLE_IDS } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import {
+  lastCompletionTokenFor,
+  registerTestUser,
+} from '../auth/testing/register-test-user';
 import { INVITATION_EVENT_TYPES } from './invitation.events';
-import { hashInvitationToken } from './invitation.token';
 import {
   buildInvitationsTestApp,
   type InvitationsTestContext,
@@ -32,21 +35,12 @@ interface TestUser {
 async function registerUser(email?: string): Promise<TestUser> {
   emailSeq += 1;
   const resolved = email ?? `user.${emailSeq}@example.com`;
-  const response = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: {
-      email: resolved,
-      password: 'a-strong-password-123',
-      displayName: 'Test User',
-    },
-  });
-  expect(response.statusCode).toBe(201);
-  return {
-    token: response.json().data.tokens.accessToken,
-    userId: response.json().data.user.id,
+  const { accessToken, userId } = await registerTestUser(app, ctx.mailer, {
     email: resolved,
-  };
+    password: 'a-strong-password-123',
+    displayName: 'Test User',
+  });
+  return { token: accessToken, userId, email: resolved };
 }
 
 function authHeader(token: string): Record<string, string> {
@@ -151,6 +145,9 @@ describe('invitation create', () => {
   it('creates a pending invitation, records the event, and never exposes the token', async () => {
     const owner = await registerUser();
     const orgId = await createTeamOrg(owner.token);
+    // Ignore the owner's registration-completion email; this test asserts on
+    // the INVITATION delivery only.
+    ctx.mailer.messages.length = 0;
 
     const response = await invite(owner.token, orgId, 'Invitee@Example.com', 'admin');
     expect(response.statusCode).toBe(201);
@@ -669,27 +666,59 @@ describe('invitation accept (existing user)', () => {
   });
 });
 
-describe('registration with invitation', () => {
-  it('creates the account, its personal workspace, AND the invited membership', async () => {
+/** Stage a registration, optionally carrying an invitation token. */
+function registerWithInvitation(
+  email: string,
+  invitationToken: string | null,
+  displayName = 'Newbie',
+) {
+  return app.inject({
+    method: 'POST',
+    url: '/v1/auth/register',
+    payload: {
+      email,
+      password: 'a-strong-password-123',
+      displayName,
+      ...(invitationToken ? { invitationToken } : {}),
+    },
+  });
+}
+
+function completeRegistration(rawCompletionToken: string) {
+  return app.inject({
+    method: 'POST',
+    url: '/v1/auth/registration/complete',
+    payload: { token: rawCompletionToken },
+  });
+}
+
+describe('registration with invitation (verification-first, Sprint 18)', () => {
+
+  it('creates the account, personal workspace, AND invited membership at completion', async () => {
     const owner = await registerUser();
     const orgId = await createTeamOrg(owner.token);
     const { id, rawToken } = await inviteOk(owner.token, orgId, 'newbie@example.com', 'member');
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: {
-        email: 'newbie@example.com',
-        password: 'a-strong-password-123',
-        displayName: 'Newbie',
-        invitationToken: rawToken,
-      },
-    });
-    expect(response.statusCode).toBe(201);
-    // Session/refresh response shape is unchanged.
-    expect(response.json().data.tokens.accessToken).toBeTruthy();
-    expect(response.headers['set-cookie']).toBeTruthy();
-    const newUserId = response.json().data.user.id;
+    // Step 1: the request is GENERIC — no account, no session, no cookie.
+    const requested = await registerWithInvitation('newbie@example.com', rawToken);
+    expect(requested.statusCode).toBe(200);
+    expect(requested.json()).toEqual({ ok: true, data: { accepted: true } });
+    expect(requested.headers['set-cookie']).toBeUndefined();
+    expect(
+      ctx.orgStore.users.some((u) => u.normalizedEmail === 'newbie@example.com'),
+    ).toBe(false);
+    // The invitation is untouched until the mailbox is proven.
+    expect(ctx.orgStore.invitations.find((i) => i.id === id)?.status).toBe('pending');
+
+    // Step 2: the mailbox owner completes via the emailed token.
+    const completionToken = lastCompletionTokenFor(ctx.mailer, 'newbie@example.com');
+    expect(completionToken).toBeTruthy();
+    const completed = await completeRegistration(completionToken as string);
+    expect(completed.statusCode).toBe(201);
+    expect(completed.json().data.tokens.accessToken).toBeTruthy();
+    expect(completed.json().data.invitation).toEqual({ status: 'accepted' });
+    expect(completed.headers['set-cookie']).toBeTruthy();
+    const newUserId = completed.json().data.user.id;
 
     // Personal workspace (owner of a personal org) STILL created.
     const personal = ctx.orgStore.memberships.filter(
@@ -702,145 +731,326 @@ describe('registration with invitation', () => {
     );
     expect(invited?.status).toBe('active');
     expect(invited?.roleId).toBe(ROLE_IDS.member);
-    // Invitation accepted.
+    // Invitation accepted, atomically with the account.
     expect(ctx.orgStore.invitations.find((i) => i.id === id)?.status).toBe('accepted');
+    // Acceptance events recorded.
+    expect(eventsOfType(INVITATION_EVENT_TYPES.accepted).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('rolls back the ENTIRE registration if in-transaction acceptance fails (race)', async () => {
+  it('an invitation revoked between request and completion follows the documented policy: account created, join unavailable', async () => {
     const owner = await registerUser();
     const orgId = await createTeamOrg(owner.token);
     const { id, rawToken } = await inviteOk(owner.token, orgId, 'racer@example.com');
-    // Simulate the invitation becoming unavailable AFTER the pre-check but
-    // BEFORE the acceptance commits: revoke it, then drive the registration
-    // transaction directly with the now-stale acceptance.
+
+    const requested = await registerWithInvitation('racer@example.com', rawToken);
+    expect(requested.statusCode).toBe(200);
+    // The invitation becomes unavailable while the completion email is in flight.
     await app.inject({
       method: 'DELETE',
       url: `/v1/organizations/${orgId}/invitations/${id}`,
       headers: authHeader(owner.token),
     });
 
-    const usersBefore = ctx.authRepo.users.length;
-    const membershipsBefore = ctx.orgStore.memberships.length;
-    const sessionsBefore = ctx.authRepo.sessions.length;
+    const completionToken = lastCompletionTokenFor(ctx.mailer, 'racer@example.com');
+    const completed = await completeRegistration(completionToken as string);
 
-    await expect(
-      ctx.authRepo.registerAccount({
-        user: {
-          email: 'racer@example.com',
-          normalizedEmail: 'racer@example.com',
-          passwordHash: 'x',
-          displayName: 'Racer',
-        },
-        personalWorkspace: { name: "Racer's Workspace", slugBase: 'racer-ws' },
-        session: {
-          ipAddress: null,
-          userAgent: null,
-          expiresAt: new Date(Date.now() + 10_000),
-        },
-        refreshToken: {
-          tokenHash: `rt-${createId('rtok')}`,
-          familyId: createId('rtok'),
-          expiresAt: new Date(Date.now() + 10_000),
-        },
-        invitationAcceptance: {
-          tokenHash: hashInvitationToken(rawToken),
-          maxMembers: 50,
-          eventContext: { requestId: null, ipAddress: null, userAgent: null },
-        },
-      }),
-    ).rejects.toMatchObject({ code: 'INVITATION_REVOKED' });
-
-    // No partial state: no new user, no new membership, no session issued, and
-    // the invitation stays revoked (never flipped to accepted).
-    expect(ctx.authRepo.users.length).toBe(usersBefore);
-    expect(ctx.orgStore.memberships.length).toBe(membershipsBefore);
-    expect(ctx.authRepo.sessions.length).toBe(sessionsBefore);
-    expect(ctx.orgStore.invitations.find((i) => i.id === id)?.status).toBe(
-      'revoked',
-    );
+    // Documented Sprint 18 policy: the proven mailbox still gets its account,
+    // personal workspace, and session; ONLY the invited-organization join is
+    // reported as unavailable — never silently dropped.
+    expect(completed.statusCode).toBe(201);
+    expect(completed.json().data.invitation).toEqual({ status: 'unavailable' });
+    const newUserId = completed.json().data.user.id;
+    expect(
+      ctx.orgStore.memberships.some(
+        (m) => m.userId === newUserId && m.organizationId === orgId,
+      ),
+    ).toBe(false);
+    expect(
+      ctx.orgStore.memberships.some(
+        (m) => m.userId === newUserId && m.roleId === ROLE_IDS.owner,
+      ),
+    ).toBe(true);
+    // The invitation stays revoked (never flipped to accepted).
+    expect(ctx.orgStore.invitations.find((i) => i.id === id)?.status).toBe('revoked');
   });
 
-  it('rejects registration when the email does not match the invitation', async () => {
+  it('an invitation expired between request and completion is also reported unavailable', async () => {
     const owner = await registerUser();
     const orgId = await createTeamOrg(owner.token);
-    const { rawToken } = await inviteOk(owner.token, orgId, 'invited@example.com');
+    const { id, rawToken } = await inviteOk(owner.token, orgId, 'late@example.com');
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: {
-        email: 'different@example.com',
-        password: 'a-strong-password-123',
-        displayName: 'Mismatch',
-        invitationToken: rawToken,
-      },
-    });
-    expect(response.statusCode).toBe(403);
-    expect(response.json().error.code).toBe('INVITATION_EMAIL_MISMATCH');
-    // No account created for the failed registration.
+    await registerWithInvitation('late@example.com', rawToken);
+    const invitation = ctx.orgStore.invitations.find((i) => i.id === id);
+    if (invitation) invitation.expiresAt = new Date(Date.now() - 1000);
+
+    const completionToken = lastCompletionTokenFor(ctx.mailer, 'late@example.com');
+    const completed = await completeRegistration(completionToken as string);
+    expect(completed.statusCode).toBe(201);
+    expect(completed.json().data.invitation).toEqual({ status: 'unavailable' });
     expect(
-      ctx.orgStore.users.some((u) => u.normalizedEmail === 'different@example.com'),
+      ctx.orgStore.memberships.some(
+        (m) =>
+          m.organizationId === orgId &&
+          m.userId === completed.json().data.user.id,
+      ),
     ).toBe(false);
   });
 
-  it('does not create an account or membership when acceptance quota fails', async () => {
+  it('re-checks the member quota at completion (filled while the email was in flight)', async () => {
+    const owner = await registerUser();
+    const orgId = await createTeamOrg(owner.token);
+    setPlan(orgId, 'free'); // max_members = 3
+    const { id, rawToken } = await inviteOk(owner.token, orgId, 'squeezed@example.com');
+
+    const requested = await registerWithInvitation('squeezed@example.com', rawToken);
+    expect(requested.statusCode).toBe(200);
+    addFillerMember(orgId);
+    addFillerMember(orgId); // active = 3 (= max) before completion
+
+    const completionToken = lastCompletionTokenFor(ctx.mailer, 'squeezed@example.com');
+    const completed = await completeRegistration(completionToken as string);
+    expect(completed.statusCode).toBe(201);
+    expect(completed.json().data.invitation).toEqual({ status: 'unavailable' });
+    expect(
+      ctx.orgStore.memberships.some(
+        (m) =>
+          m.organizationId === orgId &&
+          m.userId === completed.json().data.user.id,
+      ),
+    ).toBe(false);
+    // No duplicate acceptance state: the invitation remains pending.
+    expect(ctx.orgStore.invitations.find((i) => i.id === id)?.status).toBe('pending');
+  });
+
+  it('answers an email mismatch with the generic acceptance, with and without an existing account', async () => {
+    const owner = await registerUser();
+    const orgId = await createTeamOrg(owner.token);
+    const { id, rawToken } = await inviteOk(owner.token, orgId, 'invited@example.com');
+    ctx.mailer.messages.length = 0;
+
+    // Mismatch with an email that has NO account…
+    const noAccount = await registerWithInvitation('different@example.com', rawToken, 'Mismatch');
+    // …and a mismatch with an email that HAS an account (the owner's).
+    const hasAccount = await registerWithInvitation(owner.email, rawToken, 'Mismatch');
+
+    // Identical GENERIC acceptance for both: the mismatch itself is a private
+    // invitation state and must not surface, and account existence must not
+    // alter the response either.
+    expect(noAccount.statusCode).toBe(200);
+    expect(hasAccount.statusCode).toBe(200);
+    expect(noAccount.json()).toEqual({ ok: true, data: { accepted: true } });
+    expect(hasAccount.json()).toEqual(noAccount.json());
+
+    // Nothing staged, no account created, nothing sent (a failed invitation
+    // must not trigger even the existing-account guidance email), and the
+    // invitation itself is untouched.
+    expect(
+      ctx.orgStore.users.some((u) => u.normalizedEmail === 'different@example.com'),
+    ).toBe(false);
+    // No USABLE pending generation was staged (the owner's own consumed row
+    // from setup is the only historical record).
+    expect(
+      ctx.registrationRepo.pendingRegistrations.filter(
+        (p) => p.usedAt === null && p.invalidatedAt === null,
+      ),
+    ).toHaveLength(0);
+    expect(ctx.mailer.messages).toHaveLength(0);
+    expect(ctx.orgStore.invitations.find((i) => i.id === id)?.status).toBe('pending');
+  });
+
+  it('answers a quota-exhausted invitation with the generic acceptance without staging anything', async () => {
     const owner = await registerUser();
     const orgId = await createTeamOrg(owner.token);
     setPlan(orgId, 'free'); // max_members = 3
     const { id, rawToken } = await inviteOk(owner.token, orgId, 'newbie@example.com');
     addFillerMember(orgId);
     addFillerMember(orgId); // active = 3 (= max) before registration
+    ctx.mailer.messages.length = 0;
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: {
-        email: 'newbie@example.com',
-        password: 'a-strong-password-123',
-        displayName: 'Newbie',
-        invitationToken: rawToken,
-      },
-    });
-    expect(response.statusCode).toBe(409);
-    expect(response.json().error.code).toBe('QUOTA_EXCEEDED');
+    const response = await registerWithInvitation('newbie@example.com', rawToken);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, data: { accepted: true } });
     expect(
       ctx.orgStore.users.some((u) => u.normalizedEmail === 'newbie@example.com'),
     ).toBe(false);
+    expect(
+      ctx.registrationRepo.pendingRegistrations.filter(
+        (p) => p.usedAt === null && p.invalidatedAt === null,
+      ),
+    ).toHaveLength(0);
+    expect(ctx.mailer.messages).toHaveLength(0);
     expect(ctx.orgStore.invitations.find((i) => i.id === id)?.status).toBe('pending');
-    // No auth session is issued for a failed registration-with-invitation.
     expect(response.headers['set-cookie']).toBeUndefined();
-    expect(response.json().data).toBeUndefined();
   });
 
-  it('rejects registration with an unknown invitation token', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: {
-        email: 'newbie@example.com',
-        password: 'a-strong-password-123',
-        displayName: 'Newbie',
-        invitationToken: 'unknown-token',
-      },
-    });
-    expect(response.statusCode).toBe(404);
-    expect(response.json().error.code).toBe('INVITATION_INVALID');
+  it('answers an unknown invitation token with the generic acceptance', async () => {
+    const response = await registerWithInvitation('newbie@example.com', 'unknown-token');
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, data: { accepted: true } });
     expect(
       ctx.orgStore.users.some((u) => u.normalizedEmail === 'newbie@example.com'),
     ).toBe(false);
+    expect(ctx.registrationRepo.pendingRegistrations).toHaveLength(0);
   });
 
-  it('still registers normally when no invitation token is supplied', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: {
-        email: 'plain@example.com',
-        password: 'a-strong-password-123',
-        displayName: 'Plain',
-      },
+  it('still registers normally (two-step) when no invitation token is supplied', async () => {
+    const { completion, invitation } = await registerTestUser(app, ctx.mailer, {
+      email: 'plain@example.com',
+      password: 'a-strong-password-123',
+      displayName: 'Plain',
     });
-    expect(response.statusCode).toBe(201);
-    expect(response.json().data.tokens.accessToken).toBeTruthy();
+    expect(completion.tokens.accessToken).toBeTruthy();
+    expect(invitation).toBeNull();
+  });
+});
+
+describe('public registration equality matrix (invitation states)', () => {
+  interface PublicShape {
+    status: number;
+    body: unknown;
+    setCookie: unknown;
+    authHeader: unknown;
+  }
+
+  function publicShape(response: {
+    statusCode: number;
+    json: () => unknown;
+    headers: Record<string, unknown>;
+  }): PublicShape {
+    return {
+      status: response.statusCode,
+      body: response.json(),
+      setCookie: response.headers['set-cookie'],
+      authHeader: response.headers.authorization,
+    };
+  }
+
+  /** Counts of everything a rejected invitation must leave untouched. */
+  function sideEffectSnapshot() {
+    return {
+      users: ctx.orgStore.users.length,
+      pendings: ctx.registrationRepo.pendingRegistrations.length,
+      sessions: ctx.authRepo.sessions.length,
+      refreshTokens: ctx.authRepo.refreshTokens.length,
+      mails: ctx.mailer.messages.length,
+      invitationStates: ctx.orgStore.invitations
+        .map((i) => `${i.id}:${i.status}:${i.acceptedAt?.getTime() ?? ''}`)
+        .join('|'),
+    };
+  }
+
+  it('answers every private invitation state with the byte-identical generic acceptance and zero side effects', async () => {
+    const owner = await registerUser('matrix-owner@example.com');
+    const org1 = await createTeamOrg(owner.token, 'Matrix One');
+
+    // Fixture invitations, one per rejected state.
+    const mismatch = await inviteOk(owner.token, org1, 'invited@example.com');
+    const expired = await inviteOk(owner.token, org1, 'expired@example.com');
+    const expiredRow = ctx.orgStore.invitations.find((i) => i.id === expired.id);
+    if (expiredRow) expiredRow.expiresAt = new Date(Date.now() - 1000);
+    const revoked = await inviteOk(owner.token, org1, 'revoked@example.com');
+    await app.inject({
+      method: 'DELETE',
+      url: `/v1/organizations/${org1}/invitations/${revoked.id}`,
+      headers: authHeader(owner.token),
+    });
+    // An already-ACCEPTED invitation: consumed by a full registration.
+    const accepted = await inviteOk(owner.token, org1, 'acceptee@example.com');
+    await registerTestUser(app, ctx.mailer, {
+      email: 'acceptee@example.com',
+      password: 'a-strong-password-123',
+      displayName: 'Acceptee',
+      invitationToken: accepted.rawToken,
+    });
+    // Request-time quota exhaustion lives in its own org so it cannot bleed
+    // into the other fixtures' validation.
+    const org2 = await createTeamOrg(owner.token, 'Matrix Quota');
+    setPlan(org2, 'free'); // max_members = 3
+    const quota = await inviteOk(owner.token, org2, 'quota@example.com');
+    addFillerMember(org2);
+    addFillerMember(org2); // active = 3 (= max)
+    // Internal invitation-validation failure: the org's plan state is gone,
+    // so quota resolution inside prepare fails (a resolver-side fault, not a
+    // caller-visible state).
+    const org3 = await createTeamOrg(owner.token, 'Matrix Broken');
+    const internal = await inviteOk(owner.token, org3, 'internal@example.com');
+    const planIndex = ctx.orgStore.organizationPlans.findIndex(
+      (p) => p.organizationId === org3,
+    );
+    ctx.orgStore.organizationPlans.splice(planIndex, 1);
+
+    // Row 1 — plain eligible new email: the canonical shape. It legitimately
+    // stages one pending registration and sends one completion email.
+    const plain = publicShape(
+      await registerWithInvitation('matrix-plain@example.com', null, 'Plain'),
+    );
+
+    const baseline = sideEffectSnapshot();
+
+    // Row 2 — existing active account (may send guidance mail; no staging).
+    const existing = publicShape(
+      await registerWithInvitation('matrix-owner@example.com', null, 'Existing'),
+    );
+    expect(sideEffectSnapshot().pendings).toBe(baseline.pendings);
+    expect(sideEffectSnapshot().users).toBe(baseline.users);
+
+    // Rows 3-10 — every rejected invitation state, each with ZERO side
+    // effects: no user, no pending, no session/refresh token, no invitation
+    // mutation, no email of any kind.
+    const rejectedRows: Array<[string, string, string]> = [
+      ['unknown invitation token', 'row-unknown@example.com', 'totally-unknown-token'],
+      ['email mismatch (new email)', 'row-mismatch-new@example.com', mismatch.rawToken],
+      ['email mismatch (existing email)', 'matrix-owner@example.com', mismatch.rawToken],
+      ['expired invitation', 'expired@example.com', expired.rawToken],
+      ['revoked invitation', 'revoked@example.com', revoked.rawToken],
+      ['already accepted invitation', 'row-accepted@example.com', accepted.rawToken],
+      ['request-time quota exhaustion', 'quota@example.com', quota.rawToken],
+      ['internal invitation-validation failure', 'internal@example.com', internal.rawToken],
+    ];
+
+    let before = sideEffectSnapshot();
+    for (const [label, email, token] of rejectedRows) {
+      const shape = publicShape(await registerWithInvitation(email, token, 'Matrix'));
+      // Byte-identical public contract with the plain row.
+      expect(shape, label).toEqual(plain);
+      const after = sideEffectSnapshot();
+      expect(after, label).toEqual(before);
+      before = after;
+    }
+
+    // The existing-account row matches the same shape too.
+    expect(existing).toEqual(plain);
+    expect(plain.status).toBe(200);
+    expect(plain.body).toEqual({ ok: true, data: { accepted: true } });
+    expect(plain.setCookie).toBeUndefined();
+    expect(plain.authHeader).toBeUndefined();
+
+    // Event hygiene across the whole matrix: anonymous, coarse, and free of
+    // token material, hashes, emails, org/invitation ids, and quota values.
+    const registrationEvents = ctx.registrationRepo.securityEvents.filter(
+      (e) => e.eventType === 'auth.registration_requested',
+    );
+    expect(registrationEvents.length).toBeGreaterThanOrEqual(rejectedRows.length);
+    const raw = JSON.stringify(registrationEvents.map((e) => e.metadata));
+    for (const secret of [
+      mismatch.rawToken,
+      expired.rawToken,
+      revoked.rawToken,
+      accepted.rawToken,
+      quota.rawToken,
+      internal.rawToken,
+      'example.com',
+      org1,
+      org2,
+      org3,
+      mismatch.id,
+      quota.id,
+    ]) {
+      expect(raw).not.toContain(secret);
+    }
+    for (const event of registrationEvents) {
+      expect(event.userId).toBeNull();
+      expect(event.actorType).toBe('anonymous');
+    }
   });
 });

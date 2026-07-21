@@ -18,6 +18,11 @@ import { createInMemoryProjectRepository } from '../../projects/testing/in-memor
 import { createEntitlementService } from '../entitlement.service';
 import { createPlanService } from '../plan.service';
 import { createInMemoryEntitlementRepository } from './in-memory-plan-repo';
+import {
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../../mail/testing/in-memory-account-mailer';
+import { createRegistrationTestKit } from '../../auth/testing/registration-test-kit';
 
 /**
  * Build a fully wired app with the auth, organization, project, and plan
@@ -34,6 +39,7 @@ export interface EntitlementsTestContext {
   app: FastifyInstance;
   authRepo: InMemoryAuthRepository;
   orgStore: InMemoryOrgStore;
+  mailer: InMemoryAccountMailer;
   config: Config;
 }
 
@@ -52,6 +58,12 @@ export async function buildEntitlementsTestApp(): Promise<EntitlementsTestContex
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
   });
+  const mailer = createInMemoryAccountMailer();
+  const { registrationService } = createRegistrationTestKit({
+    config,
+    authRepo,
+    mailer,
+  });
   const organizationService = createOrganizationService({ repo: orgRepo });
   const entitlementService = createEntitlementService({ repo: entitlementRepo });
   const planService = createPlanService({
@@ -68,11 +80,12 @@ export async function buildEntitlementsTestApp(): Promise<EntitlementsTestContex
     config,
     readinessProbes: [passingProbe('postgres'), passingProbe('redis')],
     authService,
+    registrationService,
     organizationService,
     projectService,
     planService,
     logger: false,
   });
   await app.ready();
-  return { app, authRepo, orgStore, config };
+  return { app, authRepo, orgStore, mailer, config };
 }

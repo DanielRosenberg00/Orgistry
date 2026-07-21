@@ -11,7 +11,6 @@
  */
 
 export const SECURITY_EVENT_TYPES = {
-  registrationSucceeded: 'auth.registration_succeeded',
   loginSucceeded: 'auth.login_succeeded',
   loginFailed: 'auth.login_failed',
   accessTokenRejected: 'auth.access_token_rejected',
@@ -41,12 +40,21 @@ export const SECURITY_EVENT_TYPES = {
   passwordChangeRejected: 'auth.password_change_rejected',
   emailChanged: 'auth.email_changed',
   emailChangeRejected: 'auth.email_change_rejected',
-  // Public registration hit an existing normalized email. Attributed to an
-  // ANONYMOUS actor with a null user id — the caller is unproven, and the
-  // event must never read as an action by (or a reference to) the existing
-  // account. Metadata is a coarse reason only: no email, no email digest.
-  // Named for what HAPPENED, not for a suppression that does not occur.
-  registrationDuplicateEmail: 'auth.registration_duplicate_email',
+  // ----- Verification-first registration (Sprint 18) -----
+  // The REQUEST event is always ANONYMOUS with a null user id: submitting an
+  // email to a public endpoint authenticates nobody, and an attempt against
+  // an existing account must never reference that account's user id. Its
+  // metadata is a coarse `outcome` + `delivered` flag only — no email, no
+  // email digest, no token material, no URL. (This event supersedes the
+  // retired `auth.registration_succeeded` / `auth.registration_duplicate_email`
+  // pair from the synchronous-registration era; historical rows keep their
+  // old names.) COMPLETION events: success attributes to the newly proven
+  // user (mailbox control was just demonstrated) with a coarse invitation
+  // outcome; rejection attributes to no one, recording only a coarse
+  // `reason`.
+  registrationRequested: 'auth.registration_requested',
+  registrationCompletionSucceeded: 'auth.registration_completion_succeeded',
+  registrationCompletionRejected: 'auth.registration_completion_rejected',
 } as const;
 
 export type SecurityEventType =

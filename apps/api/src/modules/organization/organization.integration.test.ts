@@ -7,7 +7,13 @@ import { buildApp } from '../../app';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import { createAuthService } from '../auth/auth.service';
 import { createDbAuthRepository } from '../auth/auth.repo';
-import type { RegisterAccountParams } from '../auth/auth.types';
+import { createDbRegistrationRepository } from '../auth/registration.repo';
+import { createRegistrationService } from '../auth/registration.service';
+import { registerTestUser } from '../auth/testing/register-test-user';
+import {
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../mail/testing/in-memory-account-mailer';
 import { createOrganizationService } from './organization.service';
 import { createDbOrganizationRepository } from './organization.repo';
 
@@ -16,9 +22,12 @@ import { createDbOrganizationRepository } from './organization.repo';
  *
  * Exercises registration-provisioned personal workspaces, team creation,
  * list/read scoping, and the persistence invariants the in-memory unit tests
- * cannot prove against a live PostgreSQL: transactional registration rollback,
- * the one-active-membership-per-(user,org) partial unique index, and
- * membership-scoped visibility.
+ * cannot prove against a live PostgreSQL: transactional
+ * registration-completion rollback, the one-active-membership-per-(user,org)
+ * partial unique index, and membership-scoped visibility. Users are created
+ * through the Sprint 18 two-step registration flow (request -> emailed
+ * completion token -> complete); the personal workspace is provisioned by the
+ * completion transaction.
  *
  * Skips (with a warning) when no database is reachable. Run via
  * `pnpm test:integration` with infrastructure up.
@@ -37,8 +46,9 @@ if (!connectionString) {
 describe.skipIf(!connectionString)('organization foundation against live PostgreSQL', () => {
   const config = testConfig();
   let db: ReturnType<typeof createDbClient>;
-  let authRepo: ReturnType<typeof createDbAuthRepository>;
+  let registrationRepo: ReturnType<typeof createDbRegistrationRepository>;
   let app: FastifyInstance;
+  let mailer: InMemoryAccountMailer;
   let emailSeq = 0;
 
   function authHeader(token: string): Record<string, string> {
@@ -52,13 +62,12 @@ describe.skipIf(!connectionString)('organization foundation against live Postgre
   }> {
     emailSeq += 1;
     const email = `org.user.${emailSeq}@example.com`;
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: { email, password: 'a-strong-password-123', displayName },
+    const result = await registerTestUser(app, mailer, {
+      email,
+      password: 'a-strong-password-123',
+      displayName,
     });
-    expect(response.statusCode).toBe(201);
-    return { token: response.json().data.tokens.accessToken, userId: response.json().data.user.id, email };
+    return { token: result.accessToken, userId: result.userId, email };
   }
 
   function createOrg(
@@ -76,10 +85,21 @@ describe.skipIf(!connectionString)('organization foundation against live Postgre
   beforeAll(async () => {
     await runMigrations(connectionString as string);
     db = createDbClient(connectionString as string);
-    authRepo = createDbAuthRepository(db.db);
+    registrationRepo = createDbRegistrationRepository(db.db);
 
+    mailer = createInMemoryAccountMailer();
+    const registrationService = createRegistrationService({
+      repo: registrationRepo,
+      mailer,
+      webBaseUrl: config.web.url,
+      completionTtlSeconds: config.registration.completionTtlSeconds,
+      jwtSecret: config.auth.jwtSecret,
+      accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+      sessionTtlSeconds: config.auth.sessionTtlSeconds,
+      refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+    });
     const authService = createAuthService({
-      repo: authRepo,
+      repo: createDbAuthRepository(db.db),
       jwtSecret: config.auth.jwtSecret,
       accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
       sessionTtlSeconds: config.auth.sessionTtlSeconds,
@@ -92,6 +112,7 @@ describe.skipIf(!connectionString)('organization foundation against live Postgre
       config,
       readinessProbes: [passingProbe('postgres')],
       authService,
+      registrationService,
       organizationService,
       logger: false,
     });
@@ -107,11 +128,12 @@ describe.skipIf(!connectionString)('organization foundation against live Postgre
     // Truncate domain tables but PRESERVE the seeded `roles` baseline. CASCADE
     // from users also clears organizations/memberships/sessions/tokens.
     await db.sql.unsafe(
-      'TRUNCATE memberships, organizations, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
+      'TRUNCATE pending_registrations, memberships, organizations, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
     );
+    mailer.messages.length = 0;
   });
 
-  it('provisions a personal workspace + active Owner membership at registration', async () => {
+  it('provisions a personal workspace + active Owner membership at registration completion', async () => {
     const { userId } = await registerUser('Ada Lovelace');
 
     const orgs = await db.sql<
@@ -130,34 +152,57 @@ describe.skipIf(!connectionString)('organization foundation against live Postgre
     expect(memberships[0].organization_id).toBe(orgs[0].id);
   });
 
-  it('rolls registration back atomically when a later step fails', async () => {
+  it('rolls registration completion back atomically when a later step fails', async () => {
     const sharedTokenHash = `dup_${createId('rtok')}`;
-    const params = (email: string, slugBase: string): RegisterAccountParams => ({
-      user: {
+    const expiresAt = new Date(Date.now() + 60_000);
+
+    async function stageAndComplete(
+      email: string,
+      displayName: string,
+      tokenHash: string,
+    ) {
+      await registrationRepo.issuePendingRegistration({
         email,
         normalizedEmail: email,
         passwordHash: 'not-a-real-hash',
-        displayName: 'Atomic',
-      },
-      personalWorkspace: { name: 'Atomic Workspace', slugBase },
-      session: {
-        ipAddress: null,
-        userAgent: null,
-        expiresAt: new Date(Date.now() + 60_000),
-      },
-      refreshToken: {
-        tokenHash: sharedTokenHash,
-        familyId: createId('rtok'),
-        expiresAt: new Date(Date.now() + 60_000),
-      },
-    });
+        // Distinct display names -> distinct workspace slug bases, so the org
+        // insert succeeds and only the refresh-token insert can fail.
+        displayName,
+        tokenHash,
+        invitationId: null,
+        expiresAt,
+        now: new Date(),
+      });
+      return registrationRepo.completeRegistration({
+        tokenHash,
+        session: {
+          ipAddress: null,
+          userAgent: null,
+          expiresAt,
+        },
+        refreshToken: {
+          // BOTH completions present the same refresh-token hash, so the
+          // second one's refresh-token insert violates the unique index AFTER
+          // its user/org/membership inserts, forcing a full rollback.
+          tokenHash: sharedTokenHash,
+          familyId: createId('rtok'),
+          expiresAt,
+        },
+        invitation: null,
+        now: new Date(),
+      });
+    }
 
-    // First registration succeeds and claims the shared refresh-token hash.
-    await authRepo.registerAccount(params('atomic.a@example.com', 'atomic-a'));
-    // Second reuses the hash -> the refresh-token insert violates the unique
-    // index AFTER the user/org/membership inserts, forcing a full rollback.
+    // First completion succeeds and claims the shared refresh-token hash.
+    const first = await stageAndComplete(
+      'atomic.a@example.com',
+      'Atomic A',
+      'tok_hash_a',
+    );
+    expect(first.status).toBe('completed');
+    // Second reuses the hash -> unique violation late in the transaction.
     await expect(
-      authRepo.registerAccount(params('atomic.b@example.com', 'atomic-b')),
+      stageAndComplete('atomic.b@example.com', 'Atomic B', 'tok_hash_b'),
     ).rejects.toThrow();
 
     const users = await db.sql<{ count: string }[]>`

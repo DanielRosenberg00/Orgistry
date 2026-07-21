@@ -7,6 +7,7 @@ import {
   type AuthTestContext,
   type BuildAuthTestAppOptions,
 } from './testing/build-auth-test-app';
+import { registerTestUser } from './testing/register-test-user';
 
 /**
  * End-to-end password-recovery behavior through `app.inject`, backed by the
@@ -27,18 +28,12 @@ async function setup(
   options: BuildAuthTestAppOptions = {},
 ): Promise<AuthTestContext & { accessToken: string; userId: string }> {
   const ctx = await buildAuthTestApp(options);
-  const response = await ctx.app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: REGISTER_BODY,
-  });
-  expect(response.statusCode).toBe(201);
-  const body = response.json();
-  return {
-    ...ctx,
-    accessToken: body.data.tokens.accessToken,
-    userId: body.data.user.id,
-  };
+  const { accessToken, userId } = await registerTestUser(
+    ctx.app,
+    ctx.mailer,
+    REGISTER_BODY,
+  );
+  return { ...ctx, accessToken, userId };
 }
 
 function requestReset(
@@ -86,7 +81,7 @@ function me(
   });
 }
 
-/** Extract the refresh cookie value from a register/login/refresh response. */
+/** Extract the refresh cookie value from a login/refresh response. */
 function refreshCookieValue(
   ctx: { config: AuthTestContext['config'] },
   response: LightMyRequestResponse,
@@ -370,7 +365,8 @@ describe('POST /v1/auth/password-recovery/complete', () => {
 
   it('revokes every prior session and refresh token (old credentials all die)', async () => {
     const ctx = await setup();
-    // A second live session via login (register already created the first).
+    // A second live session via login (registration completion created the
+    // first).
     const secondLogin = await login(ctx, REGISTER_BODY.password);
     const secondAccess = secondLogin.json().data.tokens.accessToken;
     const secondCookie = refreshCookieValue(ctx, secondLogin);

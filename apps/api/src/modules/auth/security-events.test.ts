@@ -136,9 +136,6 @@ describe('sanitizeSecurityMetadata', () => {
 
 describe('SECURITY_EVENT_TYPES', () => {
   it('uses stable dotted names', () => {
-    expect(SECURITY_EVENT_TYPES.registrationSucceeded).toBe(
-      'auth.registration_succeeded',
-    );
     expect(SECURITY_EVENT_TYPES.loginSucceeded).toBe('auth.login_succeeded');
     expect(SECURITY_EVENT_TYPES.loginFailed).toBe('auth.login_failed');
     expect(SECURITY_EVENT_TYPES.accessTokenRejected).toBe(
@@ -158,6 +155,34 @@ describe('SECURITY_EVENT_TYPES', () => {
     expect(SECURITY_EVENT_TYPES.sessionRevoked).toBe('auth.session_revoked');
     expect(SECURITY_EVENT_TYPES.rateLimitExceeded).toBe(
       'auth.rate_limit_exceeded',
+    );
+  });
+
+  it('defines stable Sprint 18 verification-first registration event names', () => {
+    expect(SECURITY_EVENT_TYPES.registrationRequested).toBe(
+      'auth.registration_requested',
+    );
+    expect(SECURITY_EVENT_TYPES.registrationCompletionSucceeded).toBe(
+      'auth.registration_completion_succeeded',
+    );
+    expect(SECURITY_EVENT_TYPES.registrationCompletionRejected).toBe(
+      'auth.registration_completion_rejected',
+    );
+  });
+
+  it('no longer defines the retired synchronous-registration event names', () => {
+    // `auth.registration_succeeded` / `auth.registration_duplicate_email` were
+    // superseded by the request/completion pair; historical rows keep their
+    // old names, but the live catalog must not re-mint them.
+    expect(SECURITY_EVENT_TYPES).not.toHaveProperty('registrationSucceeded');
+    expect(SECURITY_EVENT_TYPES).not.toHaveProperty(
+      'registrationDuplicateEmail',
+    );
+    expect(Object.values(SECURITY_EVENT_TYPES)).not.toContain(
+      'auth.registration_succeeded',
+    );
+    expect(Object.values(SECURITY_EVENT_TYPES)).not.toContain(
+      'auth.registration_duplicate_email',
     );
   });
 });

@@ -17,6 +17,16 @@ See [`auth-foundation.md`](auth-foundation.md) for the register/login/me
 foundation this extends, and [`api-conventions.md`](api-conventions.md) for the
 shared envelope/error/pagination conventions.
 
+> **Sprint 18 update.** `POST /v1/auth/register` no longer creates a user,
+> session, or refresh token — registration is verification-first, and the
+> first session + refresh family of a new account is issued by
+> `POST /v1/auth/registration/complete` instead (its refresh cookie is set
+> only after the completion transaction commits). Where this document says
+> "register/login" issue sessions, read "login and registration completion".
+> Everything else here — rotation, reuse detection, logout, listing,
+> revocation, CSRF — is unchanged. See
+> [`auth-foundation.md`](auth-foundation.md).
+
 ## A. Developer Documentation
 
 ### What was implemented
@@ -45,8 +55,11 @@ GET    /v1/auth/sessions            -> 200 { items, nextCursor, hasMore }   Bear
 DELETE /v1/auth/sessions/:sessionId -> 200 { success }      Bearer
 ```
 
-Register and login are unchanged in JSON shape (`201/200 { user, tokens }`) but
-now **also** emit a `Set-Cookie` for the refresh credential.
+As of Sprint 3, register and login were unchanged in JSON shape
+(`201/200 { user, tokens }`) but **also** emitted a `Set-Cookie` for the
+refresh credential. (Since Sprint 18 only login and registration **completion**
+return `{ user, tokens }` + the cookie; `POST /v1/auth/register` returns
+`200 { accepted: true }` with no cookie.)
 
 ### How it works
 
@@ -58,11 +71,12 @@ authorizes minting a *new* access token and nothing else. The two never share a
 channel: the access token is never in a cookie; the refresh token is never in a
 JSON body, log, or security event.
 
-**Issuance.** `register`/`login` create the user (register only), a session, an
-access token, and the first refresh token of a new family
-(`parent_token_id = null`). The raw refresh token is returned out of the service
-as `rawRefreshToken` and set as the cookie by the route; the database stores
-only its SHA-256 hash.
+**Issuance.** `login` — and, since Sprint 18, registration **completion**
+(which also creates the user) — creates a session, an access token, and the
+first refresh token of a new family (`parent_token_id = null`). The raw
+refresh token is returned out of the service as `rawRefreshToken` and set as
+the cookie by the route (at registration completion, only after the
+transaction commits); the database stores only its SHA-256 hash.
 
 **Refresh + rotation.** `POST /v1/auth/refresh` requires the CSRF header, reads
 the cookie, and rotates: the presented token is hashed, looked up, validated
@@ -125,7 +139,10 @@ allow-list denies. No double-submit token value is implemented at this stage
 config: login-per-IP, login-per-email (email hashed into the key), register-per-IP,
 refresh-per-session, refresh-per-IP. Exceeding a bucket returns `RATE_LIMITED`
 with the standard envelope and request id. The limiter **fails open**: a Redis
-outage disables limiting but never affects auth correctness.
+outage disables limiting but never affects auth correctness. (Since Sprint 18
+the registration buckets — request per IP/per-email-digest, completion per
+IP/per-token-digest — live under `config.rateLimit.registration`, no longer
+`config.rateLimit.auth`.)
 
 ### How to extend it safely
 

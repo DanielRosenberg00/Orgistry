@@ -113,6 +113,17 @@ const rawEnvSchema = z.object({
     .positive()
     .default(3_600),
 
+  // Registration-completion token lifetime (Sprint 18). Bounds how long the
+  // emailed complete-registration link (and the staged pending registration
+  // behind it) remains usable. Default: 24 hours, matching the verification
+  // link — the token creates a fresh account rather than granting access to an
+  // existing one, so the longer verification-style window is appropriate.
+  REGISTRATION_COMPLETION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(86_400),
+
   // Invitation token lifetime (Sprint 9). Bounds how long a raw invitation token
   // remains acceptable; expiry is enforced at inspect/accept/list time. Default:
   // 7 days.
@@ -185,19 +196,41 @@ const rawEnvSchema = z.object({
     .int()
     .positive()
     .default(5),
+  // Registration buckets (Sprint 17, extended in Sprint 18 for the
+  // verification-first flow). The request endpoint is public and limited per
+  // IP AND per normalized-email digest BEFORE any account lookup; completion
+  // is public and limited per IP and per token-derived internal key. No raw
+  // email or token material ever enters a limiter key.
   RATE_LIMIT_REGISTER_PER_IP_MAX: z.coerce
     .number()
     .int()
     .positive()
     .default(5),
-  // Registration per-email bucket (Sprint 17): bounds how fast one address can
-  // be probed for existence through the registration conflict, independent of
-  // the caller's IP pool. Keyed on a digest of the normalized email.
   RATE_LIMIT_REGISTER_PER_EMAIL_MAX: z.coerce
     .number()
     .int()
     .positive()
     .default(3),
+  RATE_LIMIT_REGISTRATION_COMPLETE_PER_IP_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
+  RATE_LIMIT_REGISTRATION_COMPLETE_PER_TOKEN_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5),
+  // Existing-account guidance email throttle (Sprint 18): bounds how often a
+  // registration attempt against an already-registered address may generate a
+  // sign-in/recovery guidance email to that mailbox. INTERNAL — exceeding it
+  // silently skips the email (never an error), so it cannot alter the public
+  // registration contract.
+  RATE_LIMIT_REGISTRATION_NOTICE_PER_EMAIL_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1),
   RATE_LIMIT_REFRESH_PER_SESSION_MAX: z.coerce
     .number()
     .int()

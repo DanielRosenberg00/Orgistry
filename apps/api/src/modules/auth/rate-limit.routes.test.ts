@@ -2,17 +2,21 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { createInMemoryRateLimiter } from '../../lib/rate-limit';
 import { type AuthRateLimits } from './auth.service';
+import { type RegistrationRateLimits } from './registration.service';
 import {
   type AuthTestContext,
   buildAuthTestApp,
 } from './testing/build-auth-test-app';
+import { registerTestUser } from './testing/register-test-user';
 
 /**
  * Redis-backed auth rate limiting, exercised at the HTTP layer with an
  * in-memory limiter standing in for Redis (the limiter contract is identical;
  * the Redis implementation is unit-tested separately). Each case tunes one
  * bucket low and leaves the rest effectively unlimited so the trigger is
- * unambiguous.
+ * unambiguous. Registration buckets live on the verification-first
+ * registration service (`RegistrationRateLimits`), separate from the auth
+ * service's `AuthRateLimits`.
  */
 
 const HUGE = Number.MAX_SAFE_INTEGER;
@@ -30,8 +34,6 @@ function build(overrides: Partial<AuthRateLimits>): Promise<AuthTestContext> {
     windowSeconds: 60,
     loginPerIpMax: HUGE,
     loginPerEmailMax: HUGE,
-    registerPerIpMax: HUGE,
-    registerPerEmailMax: HUGE,
     refreshPerSessionMax: HUGE,
     refreshPerIpMax: HUGE,
     changePasswordPerUserMax: HUGE,
@@ -41,6 +43,24 @@ function build(overrides: Partial<AuthRateLimits>): Promise<AuthTestContext> {
   return buildAuthTestApp({
     rateLimiter: createInMemoryRateLimiter(),
     rateLimits: limits,
+  });
+}
+
+function buildRegistration(
+  overrides: Partial<RegistrationRateLimits>,
+): Promise<AuthTestContext> {
+  const limits: RegistrationRateLimits = {
+    windowSeconds: 60,
+    requestPerIpMax: HUGE,
+    requestPerEmailMax: HUGE,
+    completePerIpMax: HUGE,
+    completePerTokenMax: HUGE,
+    existingAccountNoticePerEmailMax: HUGE,
+    ...overrides,
+  };
+  return buildAuthTestApp({
+    rateLimiter: createInMemoryRateLimiter(),
+    registrationRateLimits: limits,
   });
 }
 
@@ -72,18 +92,43 @@ function login(app: FastifyInstance, email: string) {
 }
 
 describe('register per IP', () => {
-  it('limits repeated registrations from one IP', async () => {
-    ctx = await build({ registerPerIpMax: 2 });
-    expect((await register(ctx.app, 'a@example.com')).statusCode).toBe(201);
-    expect((await register(ctx.app, 'b@example.com')).statusCode).toBe(201);
+  it('limits repeated registration requests from one IP', async () => {
+    ctx = await buildRegistration({ requestPerIpMax: 2 });
+    expect((await register(ctx.app, 'a@example.com')).statusCode).toBe(200);
+    expect((await register(ctx.app, 'b@example.com')).statusCode).toBe(200);
     expectRateLimited(await register(ctx.app, 'c@example.com'));
+  });
+});
+
+describe('register per normalized email', () => {
+  it('limits repeated requests for one email — duplicates included — and does not leak existence', async () => {
+    ctx = await buildRegistration({ requestPerEmailMax: 2 });
+    // A COMPLETED registration makes the address an existing account (its
+    // request consumed the first per-email slot).
+    await registerTestUser(ctx.app, ctx.mailer, CREDENTIALS);
+
+    // Under the limit, a duplicate gets the SAME generic acceptance an
+    // eligible address would — never EMAIL_ALREADY_REGISTERED.
+    const duplicate = await register(ctx.app, CREDENTIALS.email.toUpperCase());
+    expect(duplicate.statusCode).toBe(200);
+    expect(duplicate.json()).toEqual({ ok: true, data: { accepted: true } });
+
+    // The third request trips the email-digest bucket (rl:register:email:<sha256>).
+    expectRateLimited(await register(ctx.app, CREDENTIALS.email));
+
+    // The rate-limit event records only the bucket name, never the email.
+    const event = ctx.repo.securityEvents.find(
+      (e) => e.eventType === 'auth.rate_limit_exceeded',
+    );
+    expect(event?.metadata).toEqual({ bucket: 'register_per_email' });
+    expect(JSON.stringify(event)).not.toContain('rate.user');
   });
 });
 
 describe('login per IP', () => {
   it('limits repeated logins from one IP', async () => {
     ctx = await build({ loginPerIpMax: 2 });
-    await register(ctx.app, CREDENTIALS.email);
+    await registerTestUser(ctx.app, ctx.mailer, CREDENTIALS);
     // Wrong password still counts against the IP bucket.
     await ctx.app.inject({
       method: 'POST',
@@ -138,9 +183,9 @@ describe('refresh per session', () => {
     const csrf = ctx.config.auth.csrfHeaderName;
     const name = ctx.config.auth.refreshCookie.name;
 
-    const reg = await register(ctx.app, CREDENTIALS.email);
-    const cookieValue = (res: LightMyRequestResponse) => {
-      const header = res.headers['set-cookie'];
+    // The session (and its refresh cookie) comes from registration COMPLETION.
+    const reg = await registerTestUser(ctx.app, ctx.mailer, CREDENTIALS);
+    const cookieValue = (header: string | string[] | undefined) => {
       const raw = Array.isArray(header) ? header[0] : (header ?? '');
       return new RegExp(`${name}=([^;]*)`).exec(raw)?.[1] ?? '';
     };
@@ -151,11 +196,11 @@ describe('refresh per session', () => {
         headers: { cookie: `${name}=${token}`, [csrf]: '1' },
       });
 
-    const r1 = await refresh(cookieValue(reg));
+    const r1 = await refresh(cookieValue(reg.setCookie));
     expect(r1.statusCode).toBe(200);
-    const r2 = await refresh(cookieValue(r1));
+    const r2 = await refresh(cookieValue(r1.headers['set-cookie']));
     expect(r2.statusCode).toBe(200);
     // Third refresh on the same session is rate limited before rotation.
-    expectRateLimited(await refresh(cookieValue(r2)));
+    expectRateLimited(await refresh(cookieValue(r2.headers['set-cookie'])));
   });
 });

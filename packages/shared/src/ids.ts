@@ -31,6 +31,9 @@ export const ID_PREFIXES = {
   // Password-reset tokens (Sprint 17). Distinct from `evtok` so a leaked id in
   // a log line is self-describing about which token family it belongs to.
   prtok: 'prtok',
+  // Pending registrations (Sprint 18): the verification-first registration
+  // staging record consumed by the completion endpoint.
+  preg: 'preg',
   evt: 'evt',
   sevt: 'sevt',
 } as const;

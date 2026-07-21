@@ -3,6 +3,7 @@ import { createId } from '@orgistry/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { MEMBER_EVENT_TYPES } from './member.events';
+import { registerTestUser } from '../auth/testing/register-test-user';
 import {
   buildOrganizationTestApp,
   type OrganizationTestContext,
@@ -25,20 +26,12 @@ interface TestUser {
 
 async function registerUser(displayName = 'Member User'): Promise<TestUser> {
   emailSeq += 1;
-  const response = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/register',
-    payload: {
-      email: `member.user.${emailSeq}@example.com`,
-      password: 'a-strong-password-123',
-      displayName,
-    },
+  const result = await registerTestUser(app, ctx.mailer, {
+    email: `member.user.${emailSeq}@example.com`,
+    password: 'a-strong-password-123',
+    displayName,
   });
-  expect(response.statusCode).toBe(201);
-  return {
-    token: response.json().data.tokens.accessToken,
-    userId: response.json().data.user.id,
-  };
+  return { token: result.accessToken, userId: result.userId };
 }
 
 function authHeader(token: string): Record<string, string> {

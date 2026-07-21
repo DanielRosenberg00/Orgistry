@@ -56,8 +56,9 @@ Baseline catalog (`ERROR_CODES`): `VALIDATION_ERROR`, `BAD_REQUEST`,
 added deliberately in later sprints.
 
 Auth codes (Sprint 2): `INVALID_CREDENTIALS` (generic failed login — same for
-unknown email and wrong password) and `EMAIL_ALREADY_REGISTERED` (duplicate
-normalized email on register).
+unknown email and wrong password) and `EMAIL_ALREADY_REGISTERED` (originally a
+duplicate normalized email on register; since Sprint 18 it exists ONLY on the
+authenticated change-email flow — public registration never returns it).
 
 Session-lifecycle codes (Sprint 3): `INVALID_REFRESH_TOKEN` (401, generic —
 missing/unknown/expired refresh), `TOKEN_REUSE_DETECTED` (401, a used/revoked
@@ -92,16 +93,41 @@ session is valid, so 401 would falsely signal an expired session), and
 `EMAIL_ALREADY_REGISTERED` (409) rejects a duplicate email on `change-email`.
 See [`credential-management.md`](credential-management.md).
 
+Registration codes (Sprint 18): `REGISTRATION_TOKEN_INVALID` (404 — unknown
+token, or the email was taken while the pending registration was outstanding;
+indistinguishable so account state never leaks),
+`REGISTRATION_TOKEN_EXPIRED` (410), and `REGISTRATION_TOKEN_USED` (409 —
+consumed earlier or superseded by a newer generation; a token never completes
+twice). All three describe token validity only and belong to
+`POST /v1/auth/registration/complete`. The registration **request** endpoint
+returns none of these — like the password-recovery request, it succeeds
+identically (`200 { accepted: true }`) for every account state, and it never
+returns `EMAIL_ALREADY_REGISTERED`. See
+[`auth-foundation.md`](auth-foundation.md).
+
 ## Auth endpoints
 
-See [`auth-foundation.md`](auth-foundation.md) (register/login/me) and
+See [`auth-foundation.md`](auth-foundation.md) (registration/login/me) and
 [`session-lifecycle.md`](session-lifecycle.md) (refresh/logout/sessions) for the
 full design.
 
-- `POST /v1/auth/register` — `201 { user, tokens }`. Validates body, enforces a
-  12-char minimum password, hashes with Argon2id, and atomically provisions a
-  user + personal workspace (organization + active Owner membership) + session +
-  refresh token (Sprint 4), then sets the HttpOnly refresh cookie.
+- `POST /v1/auth/register` — `200 { accepted: true }`, always
+  (enumeration-safe, verification-first; Sprint 18). Validates the body
+  (shared 12-char-minimum password policy), rate-limits per IP and per email
+  digest before any account lookup, and validates an optional
+  `invitationToken` INTERNALLY: every private invitation failure (unknown,
+  expired, revoked, accepted, email mismatch, quota) returns this same
+  generic acceptance and stages/sends nothing — no `INVITATION_*` error ever
+  escapes this endpoint (use `/v1/invitations/inspect` for invitation
+  feedback). For an eligible new email it stages a hash-only pending
+  registration and emails a completion link. Creates no user, session, or
+  cookie. Only `VALIDATION_ERROR` and `RATE_LIMITED` are explicit.
+- `POST /v1/auth/registration/complete` — `201 { user, tokens, invitation }`
+  (+ refresh cookie, set after commit). Body `{ token }`. In one transaction
+  creates the email-verified user + personal workspace (organization + active
+  Owner membership) + session + refresh token, and accepts a stored invitation
+  where applicable. Token errors: `REGISTRATION_TOKEN_INVALID` 404,
+  `…_EXPIRED` 410, `…_USED` 409.
 - `POST /v1/auth/login` — `200 { user, tokens }` (+ refresh cookie), or a generic
   `401 INVALID_CREDENTIALS` that never reveals whether the email exists.
 - `GET /v1/auth/me` — `200 { user }`; requires `Authorization: Bearer <token>`.
@@ -160,7 +186,8 @@ permissions).
   `SameSite=Lax` + the strict CORS allow-list + the required header. Missing →
   `403 CSRF_REQUIRED` with a request id.
 - **Rate limits.** Redis-backed fixed-window buckets (login-per-IP/email,
-  register-per-IP/email, refresh-per-session/IP, change-password/change-email
+  registration request per IP/email-digest, registration completion per
+  IP/token-digest, refresh-per-session/IP, change-password/change-email
   per user, password-recovery request per IP/email-digest, password-recovery
   completion per IP/token-digest, email-verification request/complete) from
   typed config; exceeding → `429 RATE_LIMITED` with a request id. The limiter

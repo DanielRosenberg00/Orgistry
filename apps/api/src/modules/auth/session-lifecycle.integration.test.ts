@@ -1,11 +1,18 @@
 import { createDbClient, runMigrations } from '@orgistry/db';
 import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
+import {
+  createInMemoryAccountMailer,
+  type InMemoryAccountMailer,
+} from '../mail/testing/in-memory-account-mailer';
 import { createAuthService } from './auth.service';
 import { createDbAuthRepository } from './auth.repo';
+import { createDbRegistrationRepository } from './registration.repo';
+import { createRegistrationService } from './registration.service';
+import { registerTestUser } from './testing/register-test-user';
 
 /**
  * DB-backed secure session lifecycle test.
@@ -14,6 +21,9 @@ import { createDbAuthRepository } from './auth.repo';
  * against a live PostgreSQL through the real Drizzle repository — covering the
  * persistence invariants the in-memory unit tests cannot: refresh tokens stored
  * hash-only, the atomic rotate-and-swap, and family/session revocation rows.
+ * Users are created through the Sprint 18 two-step registration flow (request
+ * -> emailed completion token -> complete); the first refresh token is issued
+ * by the completion transaction.
  *
  * Skips (with a warning) when no database is reachable. Run via
  * `pnpm test:integration` with infrastructure up.
@@ -35,6 +45,7 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
   const csrfHeader = config.auth.csrfHeaderName;
   let db: ReturnType<typeof createDbClient>;
   let app: FastifyInstance;
+  let mailer: InMemoryAccountMailer;
 
   const credentials = {
     email: 'Lifecycle.User@Example.com',
@@ -42,19 +53,14 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
     displayName: 'Lifecycle User',
   };
 
-  function setCookie(response: LightMyRequestResponse): string {
-    const raw = response.headers['set-cookie'];
-    return Array.isArray(raw) ? raw[0] : (raw ?? '');
+  function cookieValue(setCookie: string | string[] | undefined): string {
+    const raw = Array.isArray(setCookie) ? setCookie.join(';') : (setCookie ?? '');
+    return new RegExp(`${cookieName}=([^;]*)`).exec(raw)?.[1] ?? '';
   }
-  function cookieValue(response: LightMyRequestResponse): string {
-    return new RegExp(`${cookieName}=([^;]*)`).exec(setCookie(response))?.[1] ?? '';
-  }
-  function register() {
-    return app.inject({
-      method: 'POST',
-      url: '/v1/auth/register',
-      payload: credentials,
-    });
+  /** Two-step registration; returns the raw refresh cookie + completion body. */
+  async function register() {
+    const result = await registerTestUser(app, mailer, credentials);
+    return { raw: cookieValue(result.setCookie), completion: result.completion };
   }
   function refresh(token: string) {
     return app.inject({
@@ -68,6 +74,17 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
     await runMigrations(connectionString as string);
     db = createDbClient(connectionString as string);
 
+    mailer = createInMemoryAccountMailer();
+    const registrationService = createRegistrationService({
+      repo: createDbRegistrationRepository(db.db),
+      mailer,
+      webBaseUrl: config.web.url,
+      completionTtlSeconds: config.registration.completionTtlSeconds,
+      jwtSecret: config.auth.jwtSecret,
+      accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+      sessionTtlSeconds: config.auth.sessionTtlSeconds,
+      refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
+    });
     const authService = createAuthService({
       repo: createDbAuthRepository(db.db),
       jwtSecret: config.auth.jwtSecret,
@@ -79,6 +96,7 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
       config,
       readinessProbes: [passingProbe('postgres')],
       authService,
+      registrationService,
       logger: false,
     });
     await app.ready();
@@ -92,15 +110,15 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
   beforeEach(async () => {
     // The seeded `roles` baseline is preserved (not truncated).
     await db.sql.unsafe(
-      'TRUNCATE memberships, organizations, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
+      'TRUNCATE pending_registrations, memberships, organizations, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
     );
+    mailer.messages.length = 0;
   });
 
   it('persists the refresh token hash-only and never returns it in JSON', async () => {
-    const response = await register();
-    const raw = cookieValue(response);
-    expect(response.statusCode).toBe(201);
-    expect(JSON.stringify(response.json())).not.toContain(raw);
+    const { raw, completion } = await register();
+    expect(raw).not.toBe('');
+    expect(JSON.stringify(completion)).not.toContain(raw);
 
     const rows = await db.sql<{ token_hash: string }[]>`
       SELECT token_hash FROM refresh_tokens
@@ -111,7 +129,7 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
   });
 
   it('rotates transactionally: old token used, exactly one successor', async () => {
-    const raw = cookieValue(await register());
+    const { raw } = await register();
     const rotated = await refresh(raw);
     expect(rotated.statusCode).toBe(200);
 
@@ -125,7 +143,7 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
   });
 
   it('detects reuse and revokes the family + session', async () => {
-    const raw = cookieValue(await register());
+    const { raw } = await register();
     await refresh(raw); // consume original
     const reuse = await refresh(raw); // present consumed token again
 
@@ -150,7 +168,7 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
   });
 
   it('cannot mint two successors for concurrent refreshes of one token', async () => {
-    const raw = cookieValue(await register());
+    const { raw } = await register();
     const [a, b] = await Promise.all([refresh(raw), refresh(raw)]);
     expect([a.statusCode, b.statusCode].sort()).toEqual([200, 401]);
 

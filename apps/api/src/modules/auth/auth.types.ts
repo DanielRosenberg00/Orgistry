@@ -1,6 +1,4 @@
 import type {
-  MembershipRow,
-  OrganizationRow,
   RefreshTokenRow,
   SecurityActorType,
   SessionRow,
@@ -23,122 +21,25 @@ export interface RequestContext {
 }
 
 /**
- * Narrow port the auth module uses for registration-with-invitation (Sprint 9).
+ * Narrow port for the verification email the auth service triggers after an
+ * authenticated email change commits (Sprint 17). BEST-EFFORT BY CONTRACT:
+ * implementations must never throw — the change has already committed by the
+ * time this runs, and an email outage must not undo it. A failed delivery is
+ * recorded by the implementation and the user can resend from the
+ * authenticated endpoint. OPTIONAL on the auth service: when absent, email
+ * change behaves identically except that no verification email goes out.
  *
- * Defining the contract HERE keeps the auth module free of any invitation
- * service import — the invitation service structurally satisfies this shape and
- * is injected at wiring time. It is OPTIONAL on the auth service: when absent (or
- * when no token is supplied), registration behaves exactly as before.
- *
- * `prepareForRegistration` runs BEFORE account provisioning. It resolves the raw
- * token to its hash and the organization's `max_members` ceiling, and does an
- * early lifecycle/email-match/quota pre-check so an obviously-bad token fails
- * fast. The ACTUAL acceptance then happens INSIDE the registration transaction
- * (`registerAccount`), re-validating authoritatively under a row lock — so the
- * user, personal workspace, invited membership, and invitation acceptance all
- * commit or roll back together, and no session is issued for a failed accept.
+ * (Until Sprint 18 this port also carried the post-registration verification
+ * email. Verification-first registration made that obsolete: a completed
+ * account is created email-verified, so registration never sends a
+ * verification email at all.)
  */
-export interface RegistrationInvitations {
-  prepareForRegistration(
-    rawToken: string,
-    normalizedEmail: string,
-  ): Promise<{ tokenHash: string; maxMembers: number }>;
-}
-
-/**
- * Narrow port for verification emails the auth service triggers after its own
- * transactions commit: the automatic post-registration email (Sprint 16) and
- * the post-email-change email to the NEW address (Sprint 17). BEST-EFFORT BY
- * CONTRACT: implementations must never throw — the triggering operation has
- * already committed by the time either method runs, and an email outage must
- * not undo it. A failed delivery is recorded by the implementation and the
- * user can resend from the authenticated endpoint. OPTIONAL on the auth
- * service: when absent, registration and email change behave identically
- * except that no verification email goes out (used by suites that don't
- * exercise email).
- */
-export interface RegistrationEmailVerification {
-  sendInitialVerificationEmail(
-    user: { id: string; email: string },
-    ctx: RequestContext,
-  ): Promise<void>;
-  /** Same never-throw contract; `user.email` is the already-committed NEW address. */
+export interface EmailChangeVerification {
+  /** Never throws; `user.email` is the already-committed NEW address. */
   sendEmailChangeVerificationEmail(
     user: { id: string; email: string },
     ctx: RequestContext,
   ): Promise<void>;
-}
-
-/**
- * Optional invitation acceptance bundled INTO the registration transaction. When
- * present, `registerAccount` accepts the invitation (membership + accepted
- * mutation + events) in the SAME transaction that creates the user, so the whole
- * registration-with-invitation is atomic.
- */
-export interface RegistrationInvitationAcceptance {
-  /** SHA-256 hash of the raw token (resolved by `prepareForRegistration`). */
-  tokenHash: string;
-  /** The organization plan's `max_members` ceiling (resolved before the tx). */
-  maxMembers: number;
-  /** Non-secret request metadata for the acceptance action events. */
-  eventContext: {
-    requestId: string | null;
-    ipAddress: string | null;
-    userAgent: string | null;
-  };
-}
-
-/** Values for inserting a new user. */
-export interface NewUser {
-  email: string;
-  normalizedEmail: string;
-  passwordHash: string;
-  displayName: string;
-}
-
-/**
- * Inputs for the transactional account-registration provisioning.
- *
- * Registration must atomically create a user, their personal workspace
- * (organization + active Owner membership), a session, and the first refresh
- * token. Bundling these into one repository call lets the database
- * implementation run them in a single transaction so a partial failure can
- * never leave a user without a personal workspace.
- */
-export interface RegisterAccountParams {
-  user: NewUser;
-  /** Personal workspace to create. `slugBase` is resolved to a unique slug. */
-  personalWorkspace: {
-    name: string;
-    slugBase: string;
-  };
-  session: {
-    ipAddress: string | null;
-    userAgent: string | null;
-    expiresAt: Date;
-  };
-  refreshToken: {
-    /** SHA-256 hash of the raw token. The raw token is never persisted. */
-    tokenHash: string;
-    familyId: string;
-    expiresAt: Date;
-  };
-  /**
-   * Optional invitation to accept IN THE SAME transaction (Sprint 9). When set,
-   * the new user also joins the inviting organization with the invited role and
-   * the invitation is marked accepted atomically with account creation. A failed
-   * acceptance rolls back the entire registration.
-   */
-  invitationAcceptance?: RegistrationInvitationAcceptance | null;
-}
-
-/** Rows created by a successful `registerAccount` transaction. */
-export interface RegisterAccountResult {
-  user: UserRow;
-  organization: OrganizationRow;
-  membership: MembershipRow;
-  session: SessionRow;
-  refreshToken: RefreshTokenRow;
 }
 
 /** Values for inserting a new session. */
@@ -260,16 +161,6 @@ export interface NewSecurityEvent {
 export interface AuthRepository {
   findUserByNormalizedEmail(normalizedEmail: string): Promise<UserRow | null>;
   findUserById(id: string): Promise<UserRow | null>;
-  insertUser(values: NewUser): Promise<UserRow>;
-  /**
-   * Atomically provision a newly registered account: user + personal workspace
-   * (organization + active Owner membership) + session + first refresh token.
-   * Implementations MUST run this as a single transaction — if any step fails,
-   * nothing is persisted, so a user can never exist without a personal
-   * workspace. A duplicate normalized email surfaces as the same conflict as
-   * `insertUser`.
-   */
-  registerAccount(params: RegisterAccountParams): Promise<RegisterAccountResult>;
   insertSession(values: NewSession): Promise<SessionRow>;
   findSessionById(id: string): Promise<SessionRow | null>;
 

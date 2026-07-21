@@ -19,7 +19,8 @@ packages/db/
       index.ts                   schema registry (barrel)
       meta.ts                    app_meta — infrastructure metadata (placeholder)
       auth.ts                    users, sessions, refresh_tokens,
-                                 email_verification_tokens, security_events
+                                 email_verification_tokens, security_events,
+                                 password_reset_tokens, pending_registrations
       organizations.ts           roles, organizations, memberships (Sprint 4)
     migrate.integration.test.ts  migration-from-scratch test (needs PostgreSQL)
   scripts/
@@ -60,13 +61,20 @@ explicit lifecycle state.
 | `users` | Accounts | unique index on `normalized_email`; `password_hash` only |
 | `sessions` | Login sessions (access-token anchor) | indexed by `user_id`, `expires_at` |
 | `refresh_tokens` | Refresh rotation + reuse detection (Sprint 3) | unique `token_hash`; `family_id` lineage; `used_at`/`replacement_token_id`/`revoked_*` |
-| `email_verification_tokens` | Verification scaffolding (no behavior yet) | unique `token_hash` |
+| `email_verification_tokens` | Email-verification lifecycle (Sprint 16) | unique `token_hash`; `used_at`/`invalidated_at` lifecycle (migration `0008`) |
+| `password_reset_tokens` | Password recovery (Sprint 17) | unique `token_hash`; same `used_at`/`invalidated_at` lifecycle (migration `0009`) |
+| `pending_registrations` | Staged verification-first registrations (Sprint 18) | `preg_` ids; unique `token_hash`; partial unique `uq_pending_registrations_usable_email` on `normalized_email WHERE used_at IS NULL AND invalidated_at IS NULL` (one usable generation per email); `expires_at` index for a future sweep (migration `0010_tiresome_thunderbird.sql`) |
 | `security_events` | Durable auth/security records | sanitized `metadata`; indexed by `event_type`, `created_at` |
 
 `refresh_tokens` is now exercised by the Sprint 3 session lifecycle (rotation,
 reuse detection, family/session revocation) — **no migration was needed**, the
-Sprint 2 columns/indexes already modeled it. `email_verification_tokens` remains
-schema-complete scaffolding with no endpoint. See
+Sprint 2 columns/indexes already modeled it. `email_verification_tokens` is
+exercised by the Sprint 16 verification lifecycle. `pending_registrations`
+holds everything needed to create an account at registration completion —
+email, normalized email, Argon2id `password_hash`, display name, the SHA-256
+completion-token hash, and an optional stable invitation id (never the
+invitation token or its hash); no cleanup scheduler exists yet, so
+consumed/expired rows accumulate. See
 [`auth-foundation.md`](auth-foundation.md) and
 [`session-lifecycle.md`](session-lifecycle.md).
 
@@ -128,16 +136,19 @@ Two integration suites (suffix `*.integration.test.ts`, excluded from
   membership invariant, confirms the role seed, and re-runs to confirm
   idempotency. Needs PostgreSQL via `TEST_DATABASE_URL` or `DATABASE_URL`.
 - `apps/api/src/modules/organization/organization.integration.test.ts` —
-  registration-provisioned personal workspaces, atomic registration rollback,
+  registration-completion-provisioned personal workspaces (via the Sprint 18
+  two-step flow), atomic completion rollback,
   team create, membership uniqueness, list/read scoping, and removed-membership
   access against live PostgreSQL. Needs `TEST_DATABASE_URL` or `DATABASE_URL`.
 - `apps/api/src/routes/readiness.integration.test.ts` — boots the app against
   live PostgreSQL + Redis probes and asserts `/ready` returns `200`. Needs
   `DATABASE_URL` and `REDIS_URL`.
-- `apps/api/src/modules/auth/auth.integration.test.ts` — registers/logs in/
-  resolves the current user against live PostgreSQL and asserts hash-only
-  persistence, durable sanitized security events, and DB-level email uniqueness.
-  Needs `TEST_DATABASE_URL` or `DATABASE_URL`.
+- `apps/api/src/modules/auth/auth.integration.test.ts` — drives the Sprint 18
+  two-step registration (request → emailed completion) plus login/current-user
+  against live PostgreSQL and asserts hash-only persistence, durable sanitized
+  security events, and DB-level email uniqueness (see also
+  `registration.integration.test.ts` for the registration-specific
+  concurrency invariants). Needs `TEST_DATABASE_URL` or `DATABASE_URL`.
 
 Both load the root `.env` and **skip with a printed warning** (never a silent
 pass) when their required services are not configured.

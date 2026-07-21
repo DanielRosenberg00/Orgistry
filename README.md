@@ -27,11 +27,13 @@ User → Organization → Membership → Role → Permission → Entitlement →
 
 ## Core capabilities
 
-- **Auth & sessions** — Argon2id passwords, short-lived JWT access tokens, an
+- **Auth & sessions** — verification-first registration (an account exists only
+  after its emailed completion token is redeemed; the public register endpoint
+  is enumeration-safe), Argon2id passwords, short-lived JWT access tokens, an
   opaque hash-only refresh token in an HttpOnly cookie, transactional rotation
   with reuse detection, CSRF defense, and Redis-backed rate limiting.
 - **Organizations & memberships** — a personal workspace auto-provisioned at
-  registration, team organizations, and ID-based tenant isolation.
+  registration completion, team organizations, and ID-based tenant isolation.
 - **Fixed RBAC** — four roles (Owner/Admin/Member/Viewer) over a code-defined
   permission catalog; **permission-first** authorization and a transactional Last
   Owner invariant.
@@ -47,7 +49,9 @@ User → Organization → Membership → Role → Permission → Entitlement →
 - **Email verification** — hash-only, expiring, single-use verification tokens
   with transactional race-safe completion, resend invalidation, and a
   driver-selected account mailer (Mailpit locally; authenticated implicit-TLS
-  SMTP for production; advisory policy — nothing is gated yet).
+  SMTP for production; advisory policy — nothing is gated yet). New accounts
+  are verified at creation (the registration completion link is the mailbox
+  proof), so the flow is exercised mainly after an email change.
 - **Credential management** — enumeration-safe password recovery (hash-only,
   short-lived, single-use reset tokens; completion revokes every session and
   refresh token), plus current-password-gated password change and email change
@@ -147,9 +151,14 @@ interpretation: [docs/validation.md](docs/validation.md).
 `apps/web-demo` is an authenticated React/Vite admin UI and a thin official
 consumer of the Orgistry APIs: login/register, organization switcher, overview,
 members, invitations, projects, plan & entitlements, API keys, and audit log.
-Open <http://localhost:5173>, register (which provisions a personal workspace and
-signs you in), and create a team organization from the switcher. Invitation
-emails land in Mailpit (<http://localhost:8025>). The API's `CORS_ORIGINS` must
+Open <http://localhost:5173> and register: registration is verification-first,
+so the page shows a check-email state, a completion email lands in Mailpit
+(<http://localhost:8025>), and following its link creates your account
+(email-verified), provisions your personal workspace, and signs you in. Then
+create a team organization from the switcher. Invitation emails also land in
+Mailpit; their link opens the invitation landing page, which inspects the
+token and either accepts it (signed in) or carries it into the same
+verification-first registration (signed out). The API's `CORS_ORIGINS` must
 include the web origin. See [docs/web-demo.md](docs/web-demo.md).
 
 ## Documentation
@@ -169,7 +178,9 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   shipped the email-verification lifecycle and the production-shaped mailer
   (see [email & verification](docs/email-and-verification.md)); Sprint 17
   shipped password recovery and password/email change (see
-  [credential management](docs/credential-management.md)); the project
+  [credential management](docs/credential-management.md)); Sprint 18 shipped
+  verification-first registration, closing the register enumeration oracle
+  (see [auth foundation](docs/auth-foundation.md)); the project
   remains not ready for staging or production.
 
 **Authoritative (current):**
@@ -221,13 +232,15 @@ isolation; permission-first authorization with Last Owner protection; separated
 entitlement/quota gates; hash-only one-time API key secrets with scopes;
 hash-only invitation tokens with email-match enforcement; hash-only single-use
 email-verification tokens with transactional completion (advisory in v1);
+enumeration-safe verification-first registration (hash-only staged pending
+registrations; accounts and sessions exist only after mailbox proof);
 sanitized audit metadata. Full detail and non-production caveats:
 [docs/security-model.md](docs/security-model.md).
 
 ## Known limitations
 
 Orgistry is **not production-certified**. Out of scope by design: billing
-(Stripe), OAuth/MFA/password reset, externally validated production email
+(Stripe), OAuth/MFA/passkeys, externally validated production email
 delivery (a production-shaped SMTP adapter exists but has never sent through a
 real provider; verification is advisory), workers/
 queues, PostgreSQL RLS, custom roles, resource-level/ABAC permissions, audit

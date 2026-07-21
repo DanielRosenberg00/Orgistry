@@ -76,9 +76,10 @@ order, each chosen to show a distinct idea:
   slice (routes → service → repository): org-scoped queries, quota-after-permission,
   cursor pagination, soft delete, uniform cross-tenant `404`. If you read one
   module end to end, read this one.
-- **Auth + sessions** (`apps/api/src/modules/auth`) — registration's atomic
-  personal-workspace provisioning, refresh rotation, reuse detection, the CSRF
-  header check.
+- **Auth + sessions** (`apps/api/src/modules/auth`) — verification-first
+  registration (`registration.*`: an enumeration-safe staged request, then a
+  transactional completion that atomically provisions the personal
+  workspace), refresh rotation, reuse detection, the CSRF header check.
 - **Entitlements** (`apps/api/src/modules/entitlements`) — the plan→entitlement/
   quota resolver and the strict separation of the three axes.
 - **API keys + external API** (`apps/api/src/modules/api-keys`) — hash-only
@@ -118,9 +119,11 @@ Detail: [web demo](./web-demo.md). Thin-consumer rationale: the
 Read the [security model](./security-model.md), then verify these in code:
 
 - **Hash-only storage** for passwords, refresh tokens, API key secrets,
-  invitation tokens, and email-verification tokens; raw secrets shown or sent
-  exactly once (verification completion is additionally `FOR UPDATE`
-  race-safe: two concurrent completions can never both succeed).
+  invitation tokens, email-verification tokens, password-reset tokens, and
+  registration-completion tokens (staged `pending_registrations` also hold
+  the password only as an Argon2id hash); raw secrets shown or sent
+  exactly once (verification and registration completion are additionally
+  `FOR UPDATE` race-safe: two concurrent completions can never both succeed).
 - **Refresh rotation + reuse detection** — transactional single-successor
   rotation; a replayed token revokes the whole family and session.
 - **CSRF off the correctness path** — custom-header requirement plus strict CORS
@@ -137,9 +140,9 @@ windows).
 
 ## What tests demonstrate important behavior
 
-The offline suite runs **569 unit tests** and **34 web-demo tests** (counts as of
-the latest validation run; re-run `pnpm validate` to confirm). High-signal areas
-to open:
+The offline suite runs **664 unit tests** and **78 web-demo tests** (counts as of
+the Sprint 18 refinement validation run; re-run `pnpm validate` to confirm).
+High-signal areas to open:
 
 - **Access-control unit tests** — permission vs entitlement vs quota ordering and
   the attributable error codes.
@@ -161,8 +164,9 @@ With infra up and the API running, `pnpm demo:seed` builds a presentable state b
 driving the **real public API** (never the database directly), then prints
 local-only credentials and a ready-to-run `curl` for the external API. Follow the
 [demo walkthrough](./demo-walkthrough.md) for the full reviewer journey:
-register/login → verify your email from the Mailpit link (single-use; resend
-invalidates the old link) → org switcher → overview → projects (hit
+register → complete registration from the single-use Mailpit link (the
+account is created already email-verified and signed in) → org switcher →
+overview → projects (hit
 `QUOTA_EXCEEDED` on Free) → plan change to Pro → invite a user (read it in
 Mailpit) → create an API key (one-time secret) → call the external API → view
 the audit log → observe permission-aware UX with backend-authoritative errors.

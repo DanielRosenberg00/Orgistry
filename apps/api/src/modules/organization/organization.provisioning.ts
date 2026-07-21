@@ -98,6 +98,15 @@ export function personalWorkspaceSlugBase(displayName: string): string {
   return `${slugify(displayName)}-${shortSlugToken()}`;
 }
 
+/**
+ * Friendly default name for a user's auto-provisioned personal workspace.
+ * Lives beside the slug helper so registration completion derives BOTH naming
+ * facts from the same seam.
+ */
+export function personalWorkspaceName(displayName: string): string {
+  return `${displayName}'s Workspace`;
+}
+
 export interface InsertOrganizationParams {
   type: OrganizationType;
   name: string;

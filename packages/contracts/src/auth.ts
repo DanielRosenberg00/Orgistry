@@ -50,21 +50,75 @@ const submittedPasswordSchema = z.string().min(1).max(MAX_PASSWORD_LENGTH);
 
 /** POST /v1/auth/register request body.
  *
- * `invitationToken` is OPTIONAL (Sprint 9): when present, the new account also
- * joins the inviting organization with the invited role. It is the raw
- * invitation token delivered out-of-band in the invitation email. Omitting it
- * preserves the exact Sprint 2 registration behavior, so existing clients are
- * unaffected. The token is validated server-side; the registration email must
- * match the invitation's invited email.
+ * Sprint 18 (verification-first registration): submitting this payload STAGES
+ * a registration and (where policy permits) emails a completion link — it no
+ * longer creates a user or signs anyone in. See
+ * `registerAcceptedResponseSchema` for the deliberately generic response.
+ *
+ * `invitationToken` is OPTIONAL (Sprint 9): the raw invitation token delivered
+ * out-of-band in the invitation email. When present it is validated up front
+ * (lifecycle, email match, quota — failures are explicit, and depend only on
+ * the token + submitted email, never on account state) and the invitation is
+ * accepted at COMPLETION time, after the invited mailbox has proven the email.
  */
 export const registerRequestSchema = z.object({
   email: emailSchema,
   password: newPasswordSchema,
   displayName: displayNameSchema,
-  /** Optional raw invitation token to accept during registration. */
+  /** Optional raw invitation token to carry through to completion. */
   invitationToken: z.string().min(1).optional(),
 });
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
+
+/**
+ * POST /v1/auth/register response body (Sprint 18). Deliberately carries NO
+ * information beyond acknowledgment: `accepted` is true for eligible new
+ * emails, already-registered emails, and every non-disclosable account state
+ * alike — once validation and rate limiting have passed, the response never
+ * reveals whether an account exists, whether an email was sent, or whether a
+ * pending registration was staged. No user, tokens, cookie, organization,
+ * membership, or invitation data is ever part of this response.
+ */
+export const registerAcceptedResponseSchema = z.object({
+  accepted: z.literal(true),
+});
+export type RegisterAcceptedResponse = z.infer<
+  typeof registerAcceptedResponseSchema
+>;
+
+/**
+ * POST /v1/auth/registration/complete request body (public; possession of the
+ * emailed raw completion token IS the proof). The token travels in the body —
+ * never a backend URL path or query string — so it cannot reach API access
+ * logs.
+ */
+export const registrationCompleteRequestSchema = z.object({
+  token: z.string().min(1).max(512),
+});
+export type RegistrationCompleteRequest = z.infer<
+  typeof registrationCompleteRequestSchema
+>;
+
+/**
+ * Invitation outcome on a completed registration. Present (non-null) only when
+ * the original registration request carried an invitation:
+ *  - `accepted`    — the invited-organization membership was created in the
+ *    same transaction as the account;
+ *  - `unavailable` — the invitation could no longer be honored at completion
+ *    time (expired, revoked, already accepted, quota reached, or otherwise
+ *    unusable — deliberately coarse). The account, personal workspace, and
+ *    session were still created; the user can request a fresh invitation.
+ */
+export const registrationInvitationOutcomeSchema = z.discriminatedUnion(
+  'status',
+  [
+    z.object({ status: z.literal('accepted') }),
+    z.object({ status: z.literal('unavailable') }),
+  ],
+);
+export type RegistrationInvitationOutcome = z.infer<
+  typeof registrationInvitationOutcomeSchema
+>;
 
 /** POST /v1/auth/login request body. Password length is not re-validated here. */
 export const loginRequestSchema = z.object({
@@ -88,8 +142,8 @@ export const authUserSchema = z.object({
 export type AuthUser = z.infer<typeof authUserSchema>;
 
 /**
- * Issued access-token payload returned by register and login. `tokenType` is
- * always `Bearer`; `expiresIn` is the token lifetime in seconds.
+ * Issued access-token payload returned by login and registration completion.
+ * `tokenType` is always `Bearer`; `expiresIn` is the token lifetime in seconds.
  *
  * The refresh credential is NEVER part of this (or any) JSON body — it travels
  * only through the HttpOnly refresh cookie (Sprint 3). This shape is therefore
@@ -102,12 +156,32 @@ export const authTokensSchema = z.object({
 });
 export type AuthTokens = z.infer<typeof authTokensSchema>;
 
-/** Register and login share one response shape: the new tokens plus the user. */
+/**
+ * The authenticated-session shape: the new tokens plus the user. Returned by
+ * login, and by registration COMPLETION (never by the initial registration
+ * request — Sprint 18).
+ */
 export const authSessionResponseSchema = z.object({
   user: authUserSchema,
   tokens: authTokensSchema,
 });
 export type AuthSessionResponse = z.infer<typeof authSessionResponseSchema>;
+
+/**
+ * POST /v1/auth/registration/complete response body (Sprint 18). The normal
+ * authenticated registration result — returned ONLY after a valid completion
+ * token has proven the email and the account has been created. The completed
+ * user is always email-verified. `invitation` is null unless the original
+ * request carried an invitation (see the outcome schema above).
+ */
+export const registrationCompleteResponseSchema = authSessionResponseSchema.extend(
+  {
+    invitation: registrationInvitationOutcomeSchema.nullable(),
+  },
+);
+export type RegistrationCompleteResponse = z.infer<
+  typeof registrationCompleteResponseSchema
+>;
 
 /** GET /v1/auth/me response body. */
 export const currentUserResponseSchema = z.object({

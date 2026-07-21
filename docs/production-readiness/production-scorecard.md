@@ -85,3 +85,18 @@ the P1/P2 work and the launch gate (see
 > product code. The overriding rule still yields *not production-ready*; the
 > state remains **C — Ready to continue production implementation** (not
 > ready for staging, not ready for production).
+
+> **Status update (Sprint 18, 2026-07-20).** ORG-PR-030 (P3) closed — public
+> registration is verification-first and the registration account-existence
+> oracle is removed (contract-identical generic acceptance for every
+> post-validation account state; account creation only via the emailed
+> single-use completion token; closure proven by a response-equality test
+> matrix and DB-backed concurrency suites; a residual timing side channel is
+> documented and accepted; a 2026-07-21 refinement pass additionally made
+> invitation-carrying registration fully generic and closed the remaining
+> invitation-state disclosure on the public register endpoint). No P1/P2
+> movement — the sprint targeted a P3 security risk plus its product
+> redesign. **4 P1 blockers remain open
+> (ORG-PR-001, 002, 005, 006).** The overriding rule still yields *not
+> production-ready*; the state remains **C — Ready to continue production
+> implementation** (not ready for staging, not ready for production).

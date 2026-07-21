@@ -13,6 +13,9 @@ import { createAuthService } from './auth.service';
 import { createDbEmailVerificationRepository } from './email-verification.repo';
 import { createEmailVerificationService } from './email-verification.service';
 import { hashEmailVerificationToken } from './email-verification.token';
+import { createDbRegistrationRepository } from './registration.repo';
+import { createRegistrationService } from './registration.service';
+import { registerTestUser } from './testing/register-test-user';
 
 /**
  * DB-backed email-verification integration test.
@@ -24,6 +27,11 @@ import { hashEmailVerificationToken } from './email-verification.token';
  * succeed), resend invalidation at the SQL layer, and durable sanitized
  * security events. The in-memory account mailer stands in for SMTP — the raw
  * token is recovered from the captured email link, the recipient's channel.
+ *
+ * Sprint 18 changed the entry point: registration is verification-FIRST, so a
+ * completed registration yields an already-verified user and sends NO
+ * verification email. To exercise the request/complete flow this suite
+ * un-verifies the user directly in SQL — the state an email CHANGE produces.
  *
  * Destructive (truncates auth tables), so it prefers `TEST_DATABASE_URL`.
  * When no database is reachable it SKIPS with a warning rather than passing
@@ -60,7 +68,7 @@ describe.skipIf(!connectionString)(
       await runMigrations(connectionString as string);
       db = createDbClient(connectionString as string);
       await db.sql.unsafe(
-        'TRUNCATE memberships, organizations, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
+        'TRUNCATE pending_registrations, memberships, organizations, security_events, email_verification_tokens, refresh_tokens, sessions, users RESTART IDENTITY CASCADE',
       );
 
       mailer = createInMemoryAccountMailer();
@@ -69,6 +77,16 @@ describe.skipIf(!connectionString)(
         mailer,
         webBaseUrl: config.web.url,
         ttlSeconds: config.emailVerification.ttlSeconds,
+      });
+      const registrationService = createRegistrationService({
+        repo: createDbRegistrationRepository(db.db),
+        mailer,
+        webBaseUrl: config.web.url,
+        completionTtlSeconds: config.registration.completionTtlSeconds,
+        jwtSecret: config.auth.jwtSecret,
+        accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+        sessionTtlSeconds: config.auth.sessionTtlSeconds,
+        refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,
       });
       const authService = createAuthService({
         repo: createDbAuthRepository(db.db),
@@ -83,18 +101,14 @@ describe.skipIf(!connectionString)(
         readinessProbes: [passingProbe('postgres')],
         authService,
         emailVerificationService,
+        registrationService,
         logger: false,
       });
       await app.ready();
 
-      const registered = await app.inject({
-        method: 'POST',
-        url: '/v1/auth/register',
-        payload: user,
-      });
-      expect(registered.statusCode).toBe(201);
-      accessToken = registered.json().data.tokens.accessToken;
-      userId = registered.json().data.user.id;
+      const registered = await registerTestUser(app, mailer, user);
+      accessToken = registered.accessToken;
+      userId = registered.userId;
     });
 
     afterAll(async () => {
@@ -110,7 +124,40 @@ describe.skipIf(!connectionString)(
       });
     }
 
-    it('registration persisted a hash-only token row for the emailed link', async () => {
+    it('registration completion yields a verified user and sends no verification email', async () => {
+      const rows = await db.sql<{ email_verified_at: Date | null }[]>`
+        SELECT email_verified_at FROM users WHERE id = ${userId}
+      `;
+      expect(rows).toHaveLength(1);
+      // Born verified: mailbox control was proven by the completion token.
+      expect(rows[0].email_verified_at).not.toBeNull();
+
+      // No verification token was minted and no verification email went out —
+      // the only registration mail is the completion link itself.
+      const tokens = await db.sql<{ count: string }[]>`
+        SELECT count(*) FROM email_verification_tokens WHERE user_id = ${userId}
+      `;
+      expect(Number(tokens[0].count)).toBe(0);
+      expect(
+        mailer.messages.every((m) => !m.text.includes('/auth/verify-email')),
+      ).toBe(true);
+    });
+
+    it('an explicit request persists a hash-only token row for the emailed link', async () => {
+      // Recreate the only unverified state Sprint 18 leaves possible (an email
+      // change) directly in SQL, then drive the verification request flow.
+      await db.sql`
+        UPDATE users SET email_verified_at = NULL WHERE id = ${userId}
+      `;
+      mailer.messages.length = 0;
+
+      const requested = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/email-verification/request',
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(requested.statusCode).toBe(200);
+
       const rawToken = mailer.lastLinkToken();
       expect(rawToken).toBeTruthy();
 

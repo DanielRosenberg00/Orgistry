@@ -187,6 +187,12 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   sensitive endpoints, bounded failed-auth event writes, pino logger
   redaction, request-id sanitization, and coarse production `/ready` output
   (see [docs/production-readiness/sprint-19-artifact-package.md](docs/production-readiness/sprint-19-artifact-package.md));
+  Sprint 20 shipped authorization and concurrency correctness — the DG-2
+  Owner role-transition policy enforced in-transaction, atomic quota
+  enforcement serialized per organization and quota kind with real-PostgreSQL
+  race proofs, the DB-enforced one-active-personal-workspace invariant,
+  permission-aligned read paths, and the `security_events` org/time index
+  (see [docs/production-readiness/sprint-20-artifact-package.md](docs/production-readiness/sprint-20-artifact-package.md));
   the project remains not ready for staging or production.
 
 **Authoritative (current):**

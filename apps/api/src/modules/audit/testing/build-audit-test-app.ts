@@ -80,7 +80,6 @@ export async function buildAuditTestApp(): Promise<AuditTestContext> {
   const projectService = createProjectService({
     accessControl: orgRepo,
     projects: projectRepo,
-    entitlements: entitlementService,
   });
   const auditService = createAuditService({
     accessControl: orgRepo,

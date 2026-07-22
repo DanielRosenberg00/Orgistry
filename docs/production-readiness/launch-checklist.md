@@ -29,9 +29,9 @@ column now carries later per-item updates (e.g. Sprint 15). Owner types:
 | LC-2.3 | Secrets manager + rotation runbook | ORG-PR-006 | 21 | no committed secrets in non-local env; rehearsed rotation | Ops/SecEng | Open |
 | LC-2.4 | Least-privilege DB roles (runtime vs migration) | ORG-PR-022 | 21 | runtime role cannot DDL | Ops | Open |
 | LC-2.5 | Production email provider live | ORG-PR-002 | 16 | external-inbox delivery in staging | Eng | Open — advanced (S16): adapter + fail-closed config shipped; external delivery still pending credentials/staging |
-| LC-2.6 | Retention/expiry jobs + audit-read/org indexes | ORG-PR-015, 016, 014 | 22/19 | jobs observable; `EXPLAIN` index use | Eng/Ops | Open |
-| LC-2.7 | Role-transition policy enforced (per DG-2) | ORG-PR-017 | 19 | allow/block promotion tests | Eng | Open |
-| LC-2.8 | Atomic quota enforcement + concurrency tests | ORG-PR-029, 044 | 19 | concurrent-create cannot exceed ceiling | Eng | Open |
+| LC-2.6 | Retention/expiry jobs + audit-read/org indexes | ORG-PR-015, 016, 014 | 22/20 | jobs observable; `EXPLAIN` index use | Eng/Ops | Open — advanced (S20): the audit-read org index shipped (`ix_security_events_org_created_id`, ORG-PR-014 closed with index-existence + EXPLAIN evidence); retention jobs still await a scheduler (ORG-PR-015/016) |
+| LC-2.7 | Role-transition policy enforced (per DG-2) | ORG-PR-017 | 20 | allow/block promotion tests | Eng | **Done (S20)** — in-transaction Owner-authority guard on role change AND removal; full allowed/forbidden matrix in route + live-DB suites |
+| LC-2.8 | Atomic quota enforcement + concurrency tests | ORG-PR-029, 044 | 20 | concurrent-create cannot exceed ceiling | Eng | **Done (S20)** — org+kind advisory-lock serialization on every quota-protected create/accept/complete; five real-PostgreSQL races prove exact ceilings and fail if the lock is removed |
 | LC-2.9 | Data-subject deletion/export path (per DG-3) | ORG-PR-025 | 22 | deletion/export integration tests | Eng/Legal | Open |
 
 ## Stage 3 — Mandatory before public launch

@@ -216,7 +216,6 @@ async function main(): Promise<void> {
   const projectService = createProjectService({
     accessControl: organizationRepo,
     projects: projectRepo,
-    entitlements: entitlementService,
     rateLimiter,
     rateLimits: {
       windowSeconds: config.rateLimit.mutations.windowSeconds,

@@ -121,7 +121,7 @@ apps/api/src/modules/mail/                     shared account mailer (drivers, s
 apps/api/src/modules/auth/registration.*       verification-first registration integration
                                                (internal request-time validation +
                                                completion-time acceptance) — Sprint 18
-apps/api/src/modules/entitlements/            getMaxMembers + reservation quota
+apps/api/src/modules/entitlements/            reservation pre-check + in-tx plan snapshot
 ```
 
 ### How the pieces connect (create)
@@ -347,8 +347,20 @@ re-invite to free the duplicate-pending slot).
   or custom roles are rejected at the contract boundary; the role is applied only
   on acceptance. Subsequent role changes use the existing member role-change
   endpoint.
-- **Quota**: creation blocked at `active + pending >= max_members`; acceptance
-  blocked at `active >= max_members`. A quota failure mutates nothing.
+- **Quota**: creation blocked at `active + pending >= max_members` (seat
+  reservation); acceptance blocked at `active >= max_members`. Since Sprint 20
+  both checks are serialized under the organization's member-quota advisory
+  lock inside their transactions — the lock is acquired by invitation
+  creation, existing-user acceptance, AND invited registration completion,
+  and each transaction resolves the CURRENT `max_members` for itself (plan
+  row `FOR SHARE`; no pre-resolved ceiling crosses into any of these
+  transactions), so concurrent distinct-token acceptances, distinct-email
+  creates, and concurrent plan changes cannot overrun `max_members`. A quota failure mutates nothing. One narrow accepted
+  residual on CREATE: the fail-closed invitation email is deliberately sent
+  before the transaction (a lock must never be held across SMTP I/O), so a
+  request that then loses the serialized re-check has sent a courtesy email
+  whose token was never persisted — the link resolves to `INVITATION_INVALID`
+  and no seat is consumed.
 - **Tenant scoping**: management is scoped by the route `:organizationId`; an
   unknown/cross-tenant invitation id is a uniform `INVITATION_INVALID` (404).
 - **No hard delete**: every transition is a status change.
@@ -389,7 +401,9 @@ member-centric surface; the two are equivalent for Owner/Admin today.
   duplicate-active-membership guard.
 - **RBAC**: authorization is by permission key through the existing
   `requireMembership`/`requirePermission` helpers. No role-name branching.
-- **Entitlements/quotas**: the entitlement service gained `getMaxMembers` and
+- **Entitlements/quotas** *(historical — Sprint 9; the Sprint 20 refinement
+  moved authoritative ceiling resolution into the mutation transactions)*:
+  the entitlement service gained `getMaxMembers` and
   `requireMemberReservationQuota`; acceptance reuses the existing active-member
   quota boundary. No plan/quota model change.
 - **Registration**: `registerRequestSchema` carries an optional

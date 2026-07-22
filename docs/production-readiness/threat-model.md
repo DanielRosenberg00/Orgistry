@@ -90,9 +90,9 @@ P-severity (which also weighs dependency position and effort).
 | T-XSS | Script injection in SPA | A-SESSION | external | injected script | React escaping, in-mem token | no CSP; no error boundary | L | M | Low | ORG-PR-035, 023 |
 | T-KEY | API-key leakage / scope bypass | A-KEY | external/holder | leaked key / scope misuse | hash-only, one-time secret, per-request scope+entitlement | no rotation; no create rate limit | M | M | Medium | ORG-PR-032 |
 | T-INV | Invitation interception / reuse / mismatch / probing | A-INVITE | external/member | intercept link / guess token / spam | 256-bit hash-only token, email-match, single-use (locked), fail-closed send | unauthenticated inspect unthrottled; no create limit | M | M | Medium | ORG-PR-012, 032 |
-| T-PRIV | Privilege escalation (Admin→Owner) | A-TENANT | member/Admin | role-change API | Last-Owner protection, permission-set model | no role-transition guard | M | H | High | ORG-PR-017 |
-| T-BOLA | Broken object-level authorization / cross-tenant | A-TENANT | member | forge IDs/cursors | repo org-scoping, uniform 404, negative tests | two read paths skip permission gate (latent) | L | H | Medium | ORG-PR-053 |
-| T-QUOTA | Quota bypass under concurrency | A-TENANT | member | concurrent creates | per-request quota check | TOCTOU on create/accept | M | L | Low | ORG-PR-029 |
+| T-PRIV | Privilege escalation (Admin→Owner) | A-TENANT | member/Admin | role-change API | Last-Owner protection, permission-set model, DG-2 in-transaction Owner-authority guard (S20) | — (closed S20) | L | H | Low | ORG-PR-017 (closed) |
+| T-BOLA | Broken object-level authorization / cross-tenant | A-TENANT | member | forge IDs/cursors | repo org-scoping, uniform 404, negative tests; read paths permission-aligned, one documented membership-only exception (S20) | — (divergence closed S20) | L | H | Low | ORG-PR-053 (closed) |
+| T-QUOTA | Quota bypass under concurrency | A-TENANT | member | concurrent creates | serialized count+insert transactions under org/kind advisory locks, race-proof suites (S20) | — (closed S20) | L | L | Low | ORG-PR-029 (closed) |
 | T-AUDIT | Audit flooding / metadata leakage / unavailability | A-AUDIT/A-PII | external/auditor | unauth ext requests; email in metadata | sanitized metadata, in-txn writes | pre-auth writes; unindexed org; no retention | M | M | Medium | ORG-PR-013, 014, 015, 043 |
 | T-LOG | Log leakage / correlation spoofing | A-PII | insider/external | inbound request-id; future header logging | request-id echoed; audit sanitized | no logger redaction; trusts inbound id | L | L | Low | ORG-PR-033, 052 |
 | T-DEP | Dependency compromise | all | supply chain | vulnerable/malicious dep | lockfile, `onlyBuiltDependencies` | high advisory in range; no scanning | M | H | High | ORG-PR-018, 020, 054 |
@@ -131,9 +131,10 @@ for the following threats (evidence in
 - **T-AUDIT** — durable failed-auth `security_events` writes from the External
   API are bounded per source IP per window; beyond the allowance (or on store
   outage) the write is skipped and a sanitized warn log retains visibility
-  (ORG-PR-013 closed, DB-backed storm test). Residual: the unindexed org read
-  path (ORG-PR-014), missing retention (ORG-PR-015), and email PII in
-  metadata (ORG-PR-043) remain open.
+  (ORG-PR-013 closed, DB-backed storm test). Sprint 20 added the composite
+  `(organization_id, created_at, id)` index backing the tenant-scoped audit
+  read (ORG-PR-014 closed). Residual: missing retention (ORG-PR-015) and
+  email PII in metadata (ORG-PR-043) remain open.
 - **T-LOG** — inbound `x-request-id` is sanitized centrally (accepted format
   `[A-Za-z0-9._-]{1,128}`, otherwise replaced with a generated `req_<uuid>`)
   and a centralized pino redaction backstop covers credentials, tokens, and
@@ -152,12 +153,12 @@ for the following threats (evidence in
    collapse. *Sprint 19 (2026-07-21): both weaknesses resolved (ORG-PR-010
    closed; production fails closed) — residual is distributed abuse bounded
    per IP only and the missing limiter-outage alerting (ORG-PR-007).*
-4. **T-PRIV (High)** — Admin→Owner escalation pending a policy decision.
+4. **T-PRIV** — *resolved (Sprint 20)*: DG-2 is enforced in-transaction; Admin can no longer grant or remove Owner.
 5. **T-DBLOSS (High)** — no tested restore path.
 
 Residual risk after the roadmap: with Phases 2–3 (lifecycle + hardening) and
 Phase 4–5 (infra + reliability) complete, T-CONF/T-TOKEN-FORGE/T-CRED/T-DBLOSS
 drop to Low–Medium; T-DEP/T-CI drop to Medium with scanning; T-QUOTA and T-BOLA
-remain Low and are closed by ORG-PR-029/053. An external security review
+are Low and closed (Sprint 20, ORG-PR-029/053). An external security review
 (ORG-PR-018 track / standards-matrix) is required before asserting residual risk
 is acceptable for launch.

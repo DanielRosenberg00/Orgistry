@@ -102,9 +102,12 @@ next, and the write happens last so a failure creates nothing):
 ```
 requireMembership                  → active member?           (else ORGANIZATION_NOT_FOUND 404)
   → requirePermission(api_keys.create) → user holds the key?  (else FORBIDDEN 403)
-    → requireApiKeysAccess           → plan grants keys?       (else ENTITLEMENT_REQUIRED 403)
-      → requireApiKeyCreationQuota   → under max_api_keys?     (else QUOTA_EXCEEDED 409)
-        → generate secret + insert (hash only) + record api_key.created
+    → requireApiKeysAccess           → non-authoritative fast-fail (else ENTITLEMENT_REQUIRED 403)
+      → creation transaction (Sprint 20, serialized per org):
+          quota lock → plan snapshot (FOR SHARE; ONE coherent read)
+          → api_keys_access?         (else ENTITLEMENT_REQUIRED 403)
+          → count active keys → under max_api_keys? (else QUOTA_EXCEEDED 409)
+          → insert (hash only) + record api_key.created
 ```
 
 Returns `201` with the key DTO **and** the raw `secret` (the one and only time it
@@ -323,7 +326,11 @@ These are stable interfaces. Changing them is a reviewed contract change.
 - `max_api_keys` counts a key as active iff **`revoked_at IS NULL` AND
   (`expires_at IS NULL OR expires_at > now`)**. Revoked and expired keys never
   count. The count is computed from PostgreSQL with a clock-supplied `now`; it
-  never depends on Redis.
+  never depends on Redis. Since Sprint 20 the plan snapshot (access gate AND
+  ceiling, from one `FOR SHARE` read), the count, and the insert share one
+  transaction under the organization's api-key quota lock, so neither
+  concurrent creates nor a concurrent plan change can exceed the ceiling
+  (proven by real-DB race and plan-coherence tests).
 
 ### Revocation is idempotent
 - The first revoke sets `revoked_at` + `revoked_by_user_id` and records exactly

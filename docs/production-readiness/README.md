@@ -94,6 +94,35 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > blockers remain open (ORG-PR-001/002/005/006); the repository is still
 > **not ready for staging or production** — the state remains
 > **C — Ready to continue production implementation**.
+>
+> **Post-audit status (Sprint 20, 2026-07-21): Sprint 20 is COMPLETE** in its
+> repository scope — authorization and concurrency correctness. Six findings
+> are closed: ORG-PR-017 (ratified DG-2 Owner-transition policy enforced
+> in-transaction against the locked active-owner set — an Admin can no longer
+> grant or remove Owner), ORG-PR-029 (every quota-protected creation
+> serializes its ENTIRE quota decision — the current plan ceiling resolved
+> through the same transaction via a FOR SHARE plan-row snapshot, the count,
+> the comparison, and the insert — under a per-organization, per-quota-kind
+> advisory lock; projects, API keys, invitation seat reservation, and every
+> member-capacity path including distinct-token acceptance and invited
+> registration completion; repository contracts carry no pre-resolved
+> ceilings), ORG-PR-044 (five
+> real-PostgreSQL concurrency races that fail deterministically if the lock
+> is removed), ORG-PR-038 (AT MOST one active personal workspace per user is DB-enforced
+> by partial unique index; the provisioning transaction — tested — creates
+> the one each user has), ORG-PR-053 (org read enforces
+> `org.read`; effective-permissions is the one documented membership-only
+> exception), and ORG-PR-014 (composite `(organization_id, created_at, id)`
+> index backing the audit read path). ORG-PR-015 (retention) remains open —
+> Sprint 20 documents retention readiness only; documentation and indexes are
+> not enforcement. `pnpm validate` and `pnpm validate:integration` exit 0
+> (2026-07-21). See
+> [sprint-20-artifact-package.md](sprint-20-artifact-package.md) and
+> [sprint-20-quota-race-audit.md](sprint-20-quota-race-audit.md). Four P1
+> blockers remain open (ORG-PR-001/002/005/006); the repository is still
+> **not ready for staging or production** — the state remains
+> **C — Ready to continue production implementation**. Recommended next:
+> **Sprint 21 — Supply Chain and CI Hardening**.
 
 ## Audit context
 
@@ -126,6 +155,8 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-17-artifact-package.md](sprint-17-artifact-package.md) | The Sprint 17 closing artifact (password recovery + credential management). |
 | [sprint-18-artifact-package.md](sprint-18-artifact-package.md) | The Sprint 18 closing artifact (verification-first registration; ORG-PR-030 closure). |
 | [sprint-19-artifact-package.md](sprint-19-artifact-package.md) | The Sprint 19 closing artifact (edge and application security hardening). |
+| [sprint-20-artifact-package.md](sprint-20-artifact-package.md) | The Sprint 20 closing artifact (authorization and concurrency correctness). |
+| [sprint-20-quota-race-audit.md](sprint-20-quota-race-audit.md) | The Sprint 20 quota-race map: per-path pre-change state, serialization primitive, lock order. |
 
 ## Source-of-truth hierarchy
 

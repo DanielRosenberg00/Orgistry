@@ -129,11 +129,18 @@ These are intentional non-goals, not bugs:
 
 ## Accepted runtime compromises
 
-- **Quota race windows.** Quota checks (e.g. `max_projects`, `max_members`,
-  `max_api_keys`) read-then-write without a global lock, so two highly concurrent
-  requests could in principle both pass a check at the ceiling. This is an
-  accepted demo-scale trade-off; the invariant is enforced per request, not under
-  adversarial concurrency.
+- **Quota race windows — closed (Sprint 20).** Quota checks (`max_projects`,
+  `max_members`, `max_api_keys`) now serialize their ENTIRE decision — the
+  current plan ceiling (resolved inside the transaction, plan row
+  `FOR SHARE`), the count, and the write — under a per-(organization, quota
+  kind) PostgreSQL advisory lock, proven by real-DB concurrency and
+  plan-coherence suites that fail if the serialization is removed. A plan
+  downgrade never revokes existing rows (creation-time enforcement only, by
+  design). The
+  one accepted residual is on invitation CREATE: the fail-closed invitation
+  email is sent before the transaction, so a request that loses the serialized
+  re-check has sent a courtesy email whose link resolves to
+  `INVITATION_INVALID` (no state, no seat consumed).
 - **Rate-limit failure mode is environment-derived (revised in Sprint 19).**
   The Redis-backed limiters no longer unconditionally fail open. Under
   `RATE_LIMIT_FAILURE_MODE=closed` — derived automatically in production,

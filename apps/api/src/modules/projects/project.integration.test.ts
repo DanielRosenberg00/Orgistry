@@ -19,8 +19,6 @@ import { createDbOrganizationRepository } from '../organization/organization.rep
 import { createProjectService } from './project.service';
 import { createDbProjectRepository } from './project.repo';
 import { PROJECT_EVENT_TYPES } from './project.events';
-import { createEntitlementService } from '../entitlements/entitlement.service';
-import { createDbEntitlementRepository } from '../entitlements/plan.repo';
 
 /**
  * DB-backed Projects integration test.
@@ -150,9 +148,6 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
       projectService: createProjectService({
         accessControl: orgRepo,
         projects: createDbProjectRepository(db.db),
-        entitlements: createEntitlementService({
-          repo: createDbEntitlementRepository(db.db),
-        }),
       }),
       logger: false,
     });

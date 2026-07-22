@@ -228,13 +228,16 @@ export function createMemberService(
       );
 
       // The new role is a fixed system role (validated at the contract boundary);
-      // map it to its stable seeded id. The Last Owner invariant is enforced
-      // transactionally inside the repository.
+      // map it to its stable seeded id. The DG-2 Owner transition guard and the
+      // Last Owner invariant are both enforced transactionally inside the
+      // repository (the actor's membership is checked against the locked
+      // active-owner set when the change touches the Owner role).
       const view = await repo.changeMemberRole({
         organizationId: actor.organizationId,
         membershipId: input.membershipId,
         newRoleId: ROLE_IDS[input.newRole],
         actorUserId: actor.userId,
+        actorMembershipId: actor.membershipId,
         ctx: input.ctx,
       });
 
@@ -260,6 +263,7 @@ export function createMemberService(
         organizationId: actor.organizationId,
         membershipId: input.membershipId,
         actorUserId: actor.userId,
+        actorMembershipId: actor.membershipId,
         ctx: input.ctx,
       });
 

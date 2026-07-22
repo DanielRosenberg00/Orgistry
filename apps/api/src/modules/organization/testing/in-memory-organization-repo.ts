@@ -8,6 +8,10 @@ import { createId } from '@orgistry/shared';
 import { sanitizeSecurityMetadata } from '../../../lib/security-metadata';
 import { lastOwnerRequiredError, memberNotFoundError } from '../member.errors';
 import { MEMBER_EVENT_TYPES } from '../member.events';
+import {
+  assertOwnerChangeAuthority,
+  roleChangeTouchesOwner,
+} from '../owner-transition';
 import { organizationSlugTakenError } from '../organization.errors';
 import { slugify } from '../organization.provisioning';
 import type {
@@ -82,6 +86,20 @@ export function createInMemoryOrganizationRepository(
         m.status === 'active' &&
         m.roleId === ROLE_IDS.owner,
     ).length;
+  }
+
+  /** True when the actor's membership is an active Owner of the organization. */
+  function actorIsActiveOwner(
+    organizationId: string,
+    actorMembershipId: string,
+  ): boolean {
+    return store.memberships.some(
+      (m) =>
+        m.id === actorMembershipId &&
+        m.organizationId === organizationId &&
+        m.status === 'active' &&
+        m.roleId === ROLE_IDS.owner,
+    );
   }
 
   function recordMemberAuditEvent(input: {
@@ -263,6 +281,14 @@ export function createInMemoryOrganizationRepository(
         throw memberNotFoundError();
       }
 
+      // DG-2 Owner transition policy — same order as the database repository:
+      // after target resolution, before the Last Owner invariant.
+      if (roleChangeTouchesOwner(target.roleId, params.newRoleId)) {
+        assertOwnerChangeAuthority(
+          actorIsActiveOwner(params.organizationId, params.actorMembershipId),
+        );
+      }
+
       const demotingOwner =
         target.roleId === ROLE_IDS.owner && params.newRoleId !== ROLE_IDS.owner;
       if (demotingOwner && activeOwnerCount(params.organizationId) <= 1) {
@@ -300,6 +326,13 @@ export function createInMemoryOrganizationRepository(
       // Idempotent: removing an already-removed membership is a safe no-op.
       if (target.status === 'removed') {
         return toMemberView(target);
+      }
+
+      // DG-2: removing an Owner member removes the Owner role — Owner-only.
+      if (target.roleId === ROLE_IDS.owner) {
+        assertOwnerChangeAuthority(
+          actorIsActiveOwner(params.organizationId, params.actorMembershipId),
+        );
       }
 
       if (

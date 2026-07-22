@@ -146,12 +146,18 @@ Phase 6: End-to-End Verification & Security Review
   limits, bound pre-auth external writes, logger redaction, request-id
   sanitization. Closes ORG-PR-010, 011, 012, 013, 032, 033, 052. Exit: header/
   limiter/proxy tests; load test bounds pre-auth writes.
-- **Sprint 19 — Authorization & concurrency correctness.** Role-transition guard
-  (per DG-2), atomic quota enforcement + concurrency tests, personal-workspace
-  constraint, read-path consistency, audit-read index, `security_events` org
-  index. Closes ORG-PR-017, 029, 038, 044, 053, 014. Exit: concurrency suites +
-  `EXPLAIN` shows index use; schema-drift passes.
-- **Sprint 20 — Supply-chain & CI hardening (parallel, can start now).** SHA-pin
+- **Authorization & concurrency correctness — DONE (executed as Sprint 20,
+  2026-07-21).** Role-transition guard (per DG-2, in-transaction against the
+  locked active-owner set), atomic quota enforcement (org+kind advisory-lock
+  serialized count+insert) + five real-PostgreSQL concurrency suites,
+  personal-workspace partial unique constraint, read-path permission
+  consistency (one documented membership-only exception), `security_events`
+  org index. Closed ORG-PR-017, 029, 038, 044, 053, 014. Exit criteria met:
+  concurrency suites pass and fail without the lock; index existence +
+  `EXPLAIN` evidence; schema-drift passes; `pnpm validate` and
+  `pnpm validate:integration` exit 0 (2026-07-21). Artifact:
+  [sprint-20-artifact-package.md](sprint-20-artifact-package.md).
+- **Sprint 21 (next) — Supply-chain & CI hardening (parallel, can start now).** SHA-pin
   actions + `permissions` block, Dependabot/Renovate, `audit`/CodeQL/secret-scan,
   triage & remediate `drizzle-orm`/`esbuild` advisories, pin images, enable
   `noUncheckedIndexedAccess`. Closes ORG-PR-018, 019, 020, 040, 042, 054. Exit:

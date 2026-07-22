@@ -37,12 +37,14 @@ endpoint switches internal plan state and nothing else. See
 | Entitlement repository boundary + internal types | `apps/api/src/modules/entitlements/entitlement.types.ts` |
 | Entitlement/quota/plan service (org-level, role-agnostic) | `apps/api/src/modules/entitlements/entitlement.service.ts` |
 | Pure quota/entitlement policy primitives | `apps/api/src/modules/entitlements/quota.ts` |
+| Organization/quota-kind advisory lock | `apps/api/src/modules/entitlements/quota-lock.ts` |
+| Transaction-aware plan snapshot (`FOR SHARE`) | `apps/api/src/modules/entitlements/entitlement.snapshot.ts` |
 | Plan HTTP service (membership → permission → resolve → DTO) | `apps/api/src/modules/entitlements/plan.service.ts` |
 | DB entitlement repository (plan state, counts, plan change + event) | `apps/api/src/modules/entitlements/plan.repo.ts` |
 | Plan routes (read plan / read entitlements / change demo plan) | `apps/api/src/modules/entitlements/plan.routes.ts` |
 | `plan.changed_demo` action-event type | `apps/api/src/modules/entitlements/plan.events.ts` |
 | Entitlement/quota error factories | `apps/api/src/modules/entitlements/entitlement.errors.ts` |
-| Project-create `max_projects` quota enforcement | `apps/api/src/modules/projects/project.service.ts` |
+| Project-create `max_projects` quota enforcement (in-transaction) | `apps/api/src/modules/projects/project.repo.ts` |
 | In-memory entitlement repo + test app builder | `apps/api/src/modules/entitlements/testing/*` |
 | Service wiring | `apps/api/src/server.ts`, `apps/api/src/app.ts` |
 
@@ -104,18 +106,39 @@ Project create is the worked example:
 ```
 requireMembership
   → requirePermission(projects.create)
-    → requireQuota(max_projects)        // EntitlementService.requireProjectCreationQuota
-      → create project
+    → creation transaction:
+        quota lock (org, 'projects')       // pg_advisory_xact_lock — quota-lock.ts
+        → plan snapshot (FOR SHARE)        // lockOrganizationEntitlements — entitlement.snapshot.ts
+        → count active projects
+        → requireQuota(max_projects)       // same QUOTA_EXCEEDED contract
+        → insert project
         → record project.created
 ```
 
-The quota check runs **after** the permission check and **before** the write, so
-a quota failure creates no project and records no `project.created` event.
+The quota check runs **after** the permission check and — since Sprint 20
+(ORG-PR-029) — **entirely inside the creation transaction**: the transaction
+acquires the (organization, quota kind) advisory lock, resolves the CURRENT
+plan for itself (the `organization_plans` row is read `FOR SHARE`, which
+serializes against a concurrent demo plan change's `FOR UPDATE`), counts,
+compares, and inserts. Plan assignment is runtime-mutable, so no caller may
+supply a pre-resolved ceiling — the repository contracts carry none. Neither
+concurrent creates nor a concurrent plan change can overrun the ceiling. A
+quota failure aborts the transaction: no project, no `project.created` event.
 
 **Demo plan change.** `PATCH …/plan/demo` requires `plan.change_demo`, validates
 the target key against the fixed enum, updates plan state inside a transaction
-that also records `plan.changed_demo`, and returns the new plan and resolved
-entitlements. It calls no billing provider.
+that also records `plan.changed_demo` (the plan row is locked `FOR UPDATE`, so
+it serializes against every in-flight quota decision's `FOR SHARE` snapshot),
+and returns the new plan and resolved entitlements. It calls no billing
+provider.
+
+**Downgrade semantics (deliberate product policy).** Ceilings are enforced
+when capacity is CONSUMED, never retroactively: a downgrade does not revoke
+existing projects/keys/members, so an organization can sit over-quota after a
+downgrade. The serialized creation paths simply reject further creates until
+usage drops below the new ceiling. (The external API's per-request
+`api_keys_access` re-check is the one downgrade effect that applies
+immediately to existing credentials.)
 
 ### HTTP surface
 
@@ -137,10 +160,16 @@ existence cannot be probed.
   column to the `plans`/`PLAN_SEED` schema, regenerate the migration, and append
   the new column to the seed `INSERT`. The resolver and DTOs pick it up
   automatically.
-- **Enforce a new quota on a write.** Add a `requireXxxQuota` method to
-  `EntitlementService` (resolve entitlements → count via the repository →
-  `requireQuota`) and call it after the permission check in that resource's
-  service. Never put the count→limit comparison in a repository.
+- **Enforce a new quota on a write.** Inside the creation transaction,
+  acquire the organization's quota lock (`acquireOrganizationQuotaLock`,
+  `quota-lock.ts`), resolve the current plan with
+  `lockOrganizationEntitlements` (`entitlement.snapshot.ts`), count, and
+  apply `requireQuota` before the insert. NEVER pass a pre-resolved ceiling
+  into the transaction — plan assignment is runtime-mutable and the value
+  would be stale. The POLICY primitives (`evaluateCountQuota`/`requireQuota`
+  and the catalog values) stay in `quota.ts`/contracts; the repository
+  contributes the serialized snapshot + count + mechanical comparison —
+  never its own limit arithmetic.
 - **Add a plan.** Extend `PLAN_KEYS`/`planKeySchema` and `PLAN_CATALOG`, add the
   seed row. Reconsider the demo default only with a documented reason.
 - **Consume an entitlement from a future module (API keys, audit).** Call
@@ -210,12 +239,20 @@ physically: `requirePermission` lives in the RBAC access-control module and
 checks a permission key; `requireQuota`/`requireEntitlement` live in the
 entitlements module and never read a role.
 
-**Why quota policy is service-layer, never in repositories.** Repositories may
-count rows and write rows — both pure data operations. The *decision* (compare a
-count to a plan limit, choose allowed/exceeded, map to `QUOTA_EXCEEDED`) is
-policy and lives in `quota.ts` + `EntitlementService`. Embedding the limit in a
-generic repository would scatter policy, couple persistence to the plan catalog,
-and make the rule untestable in isolation.
+**Where quota policy lives (revised in Sprint 20).** The policy DEFINITION —
+the limit values, the `current >= limit` rule, and the `QUOTA_EXCEEDED`
+contract — stays in `quota.ts` + the plan catalog. What moved in Sprint 20 is
+the AUTHORITATIVE RESOLUTION AND ENFORCEMENT POINT: the quota-protected
+transaction resolves the current plan for itself
+(`lockOrganizationEntitlements`, plan row `FOR SHARE`) after taking the
+per-(organization, quota kind) advisory lock, then counts and applies
+`requireQuota` — because a service-level check (or a service-resolved
+ceiling handed into the transaction) is TOCTOU-racy against both concurrent
+creates and concurrent plan changes (ORG-PR-029). `EntitlementService`
+remains the resolver for every NON-transactional consumer (reads, external
+API entitlement checks, advisory pre-checks); repositories never invent
+limits — they map the snapshot's plan key through the same
+`entitlementsForPlan` catalog everything else uses.
 
 **Rejected alternatives.**
 - *Default an org with no plan state to Free in the resolver.* Rejected: it would
@@ -224,9 +261,15 @@ and make the rule untestable in isolation.
 - *Store resolved entitlement values on the organization row.* Rejected: values
   would drift from the catalog the moment the catalog changed. Resolve from the
   plan key on read instead.
-- *Enforce quota inside the project repository's transaction body.* Rejected:
-  that puts plan policy in persistence. The service checks quota immediately
-  before the write; for v1 scale this is safe (see [§E](#e-known-limitations)).
+- *Enforce quota inside the project repository's transaction body.* Originally
+  rejected to keep plan policy out of persistence — **reversed in Sprint 20**
+  (ORG-PR-029): the service-level check demonstrably overruns the ceiling
+  under real concurrency, and a service-resolved ceiling handed into the
+  transaction can be STALE against a concurrent plan change, so the
+  transaction now resolves the current plan itself (`FOR SHARE` snapshot)
+  and counts + compares under the quota lock. The original concern is
+  answered by keeping the policy VALUES in the shared contracts catalog —
+  persistence resolves a plan key, never invents a limit.
 - *A separate "billing" table now.* Rejected as out of scope. `organization_plans`
   is billing-agnostic and forward-compatible without any billing fields.
 

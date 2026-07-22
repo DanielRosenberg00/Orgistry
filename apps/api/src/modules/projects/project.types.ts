@@ -72,7 +72,15 @@ export interface ProjectRepository {
    */
   listActiveProjects(params: ListProjectsParams): Promise<ProjectRow[]>;
 
-  /** Create a project under `organizationId` and record `project.created`. */
+  /**
+   * Create a project under `organizationId` and record `project.created`, with
+   * the `max_projects` quota enforced atomically: one transaction acquires the
+   * organization's project-quota lock, resolves the CURRENT plan ceiling
+   * through the same transaction (plan row `FOR SHARE` — a pre-resolved limit
+   * could be stale, since plan assignment is runtime-mutable), counts active
+   * projects, rejects with `QUOTA_EXCEEDED` at the ceiling, then inserts. A
+   * quota failure writes nothing.
+   */
   createProject(params: CreateProjectParams): Promise<ProjectRow>;
 
   /**

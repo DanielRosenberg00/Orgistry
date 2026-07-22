@@ -131,7 +131,6 @@ describe.skipIf(!connectionString)(
         projectService: createProjectService({
           accessControl: orgRepo,
           projects: projectRepo,
-          entitlements,
         }),
         apiKeyService: createApiKeyService({
           accessControl: orgRepo,

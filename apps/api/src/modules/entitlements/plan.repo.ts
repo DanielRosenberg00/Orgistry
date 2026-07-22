@@ -1,7 +1,7 @@
 import type { Database, DbExecutor, OrganizationPlanRow } from '@orgistry/db';
 import { schema } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
-import { and, count, eq, isNull } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
 import { planStateMissingError } from './entitlement.errors';
 import { PLAN_EVENT_TYPES, type PlanEventType } from './plan.events';
@@ -82,19 +82,6 @@ export function createDbEntitlementRepository(
         .where(eq(schema.organizationPlans.organizationId, organizationId))
         .limit(1);
       return row ? toPlanState(row) : null;
-    },
-
-    async countActiveProjects(organizationId) {
-      const [row] = await db
-        .select({ value: count() })
-        .from(schema.projects)
-        .where(
-          and(
-            eq(schema.projects.organizationId, organizationId),
-            isNull(schema.projects.deletedAt),
-          ),
-        );
-      return row?.value ?? 0;
     },
 
     async countActiveMembers(organizationId) {

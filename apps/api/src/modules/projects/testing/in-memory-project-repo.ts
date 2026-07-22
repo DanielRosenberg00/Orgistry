@@ -1,7 +1,12 @@
 import type { ProjectRow } from '@orgistry/db';
+import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { sanitizeSecurityMetadata } from '../../../lib/security-metadata';
-import type { InMemoryOrgStore } from '../../organization/testing/in-memory-org-store';
+import { evaluateCountQuota, requireQuota } from '../../entitlements/quota';
+import {
+  resolveStoreEntitlements,
+  type InMemoryOrgStore,
+} from '../../organization/testing/in-memory-org-store';
 import { projectNotFoundError } from '../project.errors';
 import {
   PROJECT_EVENT_TYPES,
@@ -94,7 +99,20 @@ export function createInMemoryProjectRepository(
       return afterCursor.slice(0, params.limit + 1);
     },
 
+    // Synchronous resolve-count-check-insert (no await before the mutation) ->
+    // atomic under Node's single-threaded loop, mirroring the DB transaction's
+    // quota lock + in-transaction plan snapshot.
     async createProject(params: CreateProjectParams): Promise<ProjectRow> {
+      const values = resolveStoreEntitlements(store, params.organizationId);
+      const activeCount = store.projects.filter(
+        (p) =>
+          p.organizationId === params.organizationId && p.deletedAt === null,
+      ).length;
+      requireQuota(
+        ENTITLEMENT_KEYS.maxProjects,
+        evaluateCountQuota(activeCount, values.max_projects),
+      );
+
       const now = new Date();
       const project: ProjectRow = {
         id: createId('prj'),

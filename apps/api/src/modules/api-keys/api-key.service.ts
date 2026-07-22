@@ -45,9 +45,9 @@ import type {
  *   requireMembership                 (active member of this org? -> actor)
  *     -> requirePermission(api_keys.*) (does the user hold the permission key?)
  *       -> requireApiKeysAccess         (does the org's PLAN grant API keys?)   [create/list/revoke]
- *         -> requireApiKeyCreationQuota (is the org under max_api_keys?)        [create only]
- *           -> tenant-scoped key write  (always scoped by the route org id)
- *             -> map row to public DTO  (NEVER the secret hash)
+ *         -> tenant-scoped key write    (create: max_api_keys enforced INSIDE
+ *            the creation transaction under the org's quota lock — ORG-PR-029)
+ *           -> map row to public DTO    (NEVER the secret hash)
  *
  * Authorization is ALWAYS by permission key, never role name. The organization
  * id comes from the route (`OrganizationActor.organizationId`), never a request
@@ -245,25 +245,22 @@ export function createApiKeyService(
         limits.windowSeconds,
       );
 
-      // Entitlement THEN quota, both AFTER the permission check. A user without
-      // api_keys.create is already blocked; an authorized user is blocked when
-      // the org's plan lacks api_keys_access, then again when it is at the
-      // max_api_keys ceiling. Both throw BEFORE any write, so a failure creates
-      // no key and records no api_key.created event.
+      // Entitlement THEN quota, both AFTER the permission check. This
+      // service-level access check is a NON-AUTHORITATIVE optimization: it
+      // fails fast (before a secret is even generated) with the correctly
+      // attributed ENTITLEMENT_REQUIRED. The AUTHORITATIVE decision — the
+      // CURRENT plan's api_keys_access gate AND max_api_keys ceiling, from
+      // one coherent snapshot — runs INSIDE the creation transaction under
+      // the organization's api-key-quota lock (ORG-PR-029), so neither
+      // concurrent creates nor a concurrent plan change can race it. A
+      // failure creates no key and records no api_key.created event.
       await entitlements.requireApiKeysAccess(actor.organizationId);
-      // Active = not revoked AND not expired, so a revoked or expired key never
-      // blocks creation. `clock.now()` keeps the count deterministic in tests.
-      const activeCount = await apiKeys.countActiveApiKeys(
-        actor.organizationId,
-        clock.now(),
-      );
-      await entitlements.requireApiKeyCreationQuota(
-        actor.organizationId,
-        activeCount,
-      );
 
       // Generate the secret. The raw value is returned to the client ONCE; only
-      // the hash and the display-safe prefix are persisted.
+      // the hash and the display-safe prefix are persisted. Generation before
+      // the transaction is safe: it is a pure CSPRNG draw with no side
+      // effects — on any transaction failure the hash was never written and
+      // the raw value is discarded with this scope, so no usable key exists.
       const generated = generateApiKeySecret();
       const row = await apiKeys.createApiKey({
         organizationId: actor.organizationId,
@@ -273,6 +270,9 @@ export function createApiKeyService(
         scopes: input.scopes,
         expiresAt: input.expiresAt,
         createdByUserId: actor.userId,
+        // `clock.now()` keeps the active-key (non-expired) count deterministic
+        // in tests.
+        now: clock.now(),
         ctx: actionContext(actor, input.ctx),
       });
 

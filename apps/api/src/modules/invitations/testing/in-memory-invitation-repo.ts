@@ -1,7 +1,12 @@
 import { type InvitationRow, type RoleRow } from '@orgistry/db';
+import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { sanitizeSecurityMetadata } from '../../../lib/security-metadata';
-import type { InMemoryOrgStore } from '../../organization/testing/in-memory-org-store';
+import { evaluateCountQuota, requireQuota } from '../../entitlements/quota';
+import {
+  resolveStoreEntitlements,
+  type InMemoryOrgStore,
+} from '../../organization/testing/in-memory-org-store';
 import {
   duplicatePendingInvitationError,
   invitationInvalidError,
@@ -101,6 +106,26 @@ export function createInMemoryInvitationRepository(
         throw duplicatePendingInvitationError();
       }
 
+      // Seat-reservation re-check (mirrors the DB repository's serialized
+      // count + in-transaction plan snapshot under the member-quota lock):
+      // active members + non-expired pending invitations must stay under the
+      // store's CURRENT max_members.
+      const values = resolveStoreEntitlements(store, params.organizationId);
+      const activeMembers = store.memberships.filter(
+        (m) =>
+          m.organizationId === params.organizationId && m.status === 'active',
+      ).length;
+      const pendingReservations = store.invitations.filter(
+        (inv) =>
+          inv.organizationId === params.organizationId &&
+          inv.status === 'pending' &&
+          !isExpired(inv, now),
+      ).length;
+      requireQuota(
+        ENTITLEMENT_KEYS.maxMembers,
+        evaluateCountQuota(activeMembers + pendingReservations, values.max_members),
+      );
+
       const invitation: InvitationRow = {
         id: createId('inv'),
         organizationId: params.organizationId,
@@ -195,7 +220,6 @@ export function createInMemoryInvitationRepository(
         selector: params.selector,
         acceptingUserId: params.acceptingUserId,
         acceptingUserNormalizedEmail: params.acceptingUserNormalizedEmail,
-        maxMembers: params.maxMembers,
       });
       const { membership, organization, role } =
         applyInvitationAcceptanceInStore(store, invitation, {

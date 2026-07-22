@@ -140,8 +140,8 @@ windows).
 
 ## What tests demonstrate important behavior
 
-The offline suite runs **664 unit tests** and **78 web-demo tests** (counts as of
-the Sprint 18 refinement validation run; re-run `pnpm validate` to confirm).
+The offline suite runs **820 unit tests** and **78 web-demo tests** (counts as of
+the Sprint 20 validation run; re-run `pnpm validate` to confirm).
 High-signal areas to open:
 
 - **Access-control unit tests** — permission vs entitlement vs quota ordering and

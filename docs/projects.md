@@ -212,12 +212,17 @@ renaming or recolumning an index.
 entitlements / plan enforcement are a separate concern that attaches *on top of*
 the permission check. Sprint 6 left the seam untouched to avoid conflating "may
 this actor act?" with "is this tenant allowed more of this resource?". **Sprint 7
-fills exactly that seam**: `createProject` now runs
-`EntitlementService.requireProjectCreationQuota(organizationId)` **after**
-`requirePermission(projects.create)` and **before** the write, enforcing the plan's
-`max_projects` ceiling (`QUOTA_EXCEEDED` on overflow — no project, no
-`project.created` event). The permission check is unchanged; the quota check is a
-distinct, plan-derived guard. See
+filled exactly that seam** with a service-level `max_projects` check, and
+**Sprint 20 made it atomic** (ORG-PR-029): after
+`requirePermission(projects.create)`, the creation transaction acquires the
+organization's project-quota advisory lock, resolves the CURRENT plan's
+`max_projects` through the same transaction (plan row `FOR SHARE` — plan
+assignment is runtime-mutable, so no pre-resolved ceiling is accepted),
+counts active projects, and applies the same `QUOTA_EXCEEDED` contract
+**before the insert** — so neither concurrent creates nor a concurrent plan
+change can overrun the ceiling, and a quota failure creates no project and
+no `project.created` event. The permission check is
+unchanged; the quota is still a distinct, plan-derived guard. See
 [`entitlements-plans-quotas.md`](entitlements-plans-quotas.md) and
 [§D](#d-integration-notes).
 

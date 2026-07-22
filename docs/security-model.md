@@ -66,17 +66,43 @@ omits production concerns (see [known limitations](./known-limitations.md)).
 - **Permission-first authorization.** Organization routes compose
   `requireMembership → requirePermission(actor, "<permission.key>")` — authorization
   is keyed on **permission**, never a role-name check. The four fixed roles map to
-  a code-defined permission catalog, seeded idempotently. The single place a role
-  name is consulted is the Last Owner invariant.
+  a code-defined permission catalog, seeded idempotently. Role identity is
+  consulted only for the two structural invariants below (Last Owner, DG-2).
+  The organization read route enforces `org.read` like every other surface;
+  the ONE intentional membership-only read is
+  `…/permissions/effective` — a member reading their OWN effective
+  permissions, which cannot be permission-gated without circularity (a stable,
+  documented contract — Sprint 20, ORG-PR-053).
+- **Owner role-transition policy (DG-2, enforced Sprint 20).** Only an active
+  Owner may grant the Owner role, and only an active Owner may remove it —
+  including by removing an Owner member. An Admin holds `members.change_role`
+  but may not confer or strip Owner (self or others). Permission to change
+  roles and AUTHORITY over the Owner role are distinct: the permission gate
+  runs first (403 for Member/Viewer), then, inside the mutation transaction,
+  any Owner-touching change requires the actor's membership to be in the
+  LOCKED active-owner set — so a concurrently demoted actor cannot still
+  confer Owner. Violations return the standard safe 403 after target
+  resolution (cross-tenant probes keep the uniform 404).
 - **Last Owner protection.** Every active organization keeps at least one active
   Owner. Role changes and member removals that would drop the last Owner are
-  rejected **transactionally**.
+  rejected **transactionally** (`LAST_OWNER_REQUIRED` is unchanged and checked
+  after the DG-2 authority rule).
 - **Entitlement and quota separation.** Three orthogonal checks: **permission**
   (what the user may do), **entitlement** (what the plan unlocks, e.g.
   `api_keys_access`, `audit_log_access`), and **quota** (how much may be used,
   e.g. `max_projects`, `max_members`, `max_api_keys`). Permission is checked
   before entitlement before quota, so failures are attributed correctly
-  (`FORBIDDEN` vs `ENTITLEMENT_REQUIRED` vs `QUOTA_EXCEEDED`).
+  (`FORBIDDEN` vs `ENTITLEMENT_REQUIRED` vs `QUOTA_EXCEEDED`). Since Sprint 20
+  every quota-protected creation serializes its ENTIRE quota decision in one
+  transaction under a per-(organization, quota kind) advisory lock
+  (`quota-lock.ts`): the CURRENT plan ceiling is resolved through the same
+  transaction (plan row `FOR SHARE`, serialized against concurrent plan
+  changes — no pre-resolved limit crosses into the transaction), then the
+  count, comparison, and insert follow, so neither concurrent requests nor a
+  concurrent plan change can overrun a ceiling. A plan DOWNGRADE never
+  revokes existing rows (creation-time enforcement only — documented product
+  policy); the lock order and deadlock rationale are documented in
+  [sprint-20-quota-race-audit.md](production-readiness/sprint-20-quota-race-audit.md).
 
 ## Machine access (API keys)
 
@@ -325,8 +351,9 @@ production email delivery (the production SMTP adapter exists but has never
 sent through a real provider), verification **enforcement** (the flag is
 advisory), cleanup/retention jobs for consumed or expired token and
 pending-registration rows, database RLS, audit retention enforcement/export,
-custom roles, resource-level permissions, and hardened concurrency on quota
-checks. Quotas accept race-window trade-offs; non-sensitive rate limiting
+custom roles, and resource-level permissions. Quota checks are serialized
+in-transaction since Sprint 20 (no race-window trade-off remains — see
+[entitlements](./entitlements-plans-quotas.md)); non-sensitive rate limiting
 fails open on a Redis outage (sensitive endpoints fail closed in production,
 with no alerting on that state yet). See
 [known limitations](./known-limitations.md) for the full list. Do not treat

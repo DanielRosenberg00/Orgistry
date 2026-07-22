@@ -168,15 +168,15 @@ export interface RegistrationInvitationGuard {
     normalizedEmail: string,
   ): Promise<{ invitationId: string; organizationName: string }>;
   /**
-   * Resolve the context the COMPLETION transaction needs to accept the stored
-   * invitation: the plan's `max_members` ceiling. Returns null when the
-   * invitation reference no longer resolves (the completion then reports the
-   * invitation as unavailable). Deliberately does NOT pre-validate lifecycle —
-   * the acceptance transaction re-validates authoritatively under a row lock.
+   * Whether the stored invitation reference still resolves at COMPLETION
+   * time. False/null-equivalent means the completion settles the invitation
+   * as unavailable without attempting acceptance. Deliberately does NOT
+   * pre-validate lifecycle or quota — the acceptance transaction re-validates
+   * everything authoritatively under its own locks, including the plan
+   * ceiling, which it resolves for itself (Sprint 20: no plan-derived value
+   * crosses this port, so none can go stale).
    */
-  resolveCompletionContext(
-    invitationId: string,
-  ): Promise<{ maxMembers: number } | null>;
+  resolveCompletionContext(invitationId: string): Promise<boolean>;
 }
 
 export interface InvitationService extends RegistrationInvitationGuard {
@@ -424,7 +424,12 @@ export function createInvitationService(
       }
 
       // v1 reservation policy: active members + pending invitations must stay
-      // under max_members. Throws QUOTA_EXCEEDED before any write.
+      // under max_members. This PRE-check throws QUOTA_EXCEEDED before the
+      // fail-closed email below (a lock must never be held across SMTP I/O);
+      // the creation transaction re-checks the reservation authoritatively
+      // under the organization's member-quota lock (ORG-PR-029). Under a lost
+      // race the courtesy email was already sent but its token was never
+      // persisted, so the emailed link resolves to INVITATION_INVALID.
       const pendingCount = await invitations.countPendingInvitations(
         actor.organizationId,
       );
@@ -574,14 +579,10 @@ export function createInvitationService(
         throw invitationEmailMismatchError();
       }
 
-      const maxMembers = await entitlements.getMaxMembers(
-        context.invitation.organizationId,
-      );
       const result = await invitations.acceptInvitation({
         selector: { tokenHash },
         acceptingUserId: input.userId,
         acceptingUserNormalizedEmail: normalized,
-        maxMembers,
         ctx: {
           actorUserId: input.userId,
           actorMembershipId: null,
@@ -623,13 +624,7 @@ export function createInvitationService(
 
     async resolveCompletionContext(invitationId) {
       const invitation = await invitations.findInvitationById(invitationId);
-      if (!invitation) {
-        return null;
-      }
-      const maxMembers = await entitlements.getMaxMembers(
-        invitation.organizationId,
-      );
-      return { maxMembers };
+      return invitation !== null;
     },
   };
 }

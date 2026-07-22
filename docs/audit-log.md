@@ -33,7 +33,11 @@ GET /v1/organizations/:organizationId/audit-events
 | In-memory read repo + test app builder | `apps/api/src/modules/audit/testing/*` |
 | Service wiring | `apps/api/src/server.ts`, `apps/api/src/app.ts` |
 
-No new error codes, tables, columns, indexes, or migrations were added.
+No new error codes, tables, or columns were added. (Sprint 20 later added
+the composite index `ix_security_events_org_created_id` on
+`security_events (organization_id, created_at, id)` — closing ORG-PR-014 —
+which backs exactly this read path: the tenant filter plus the
+`created_at DESC, id DESC` keyset ordering.)
 
 ### How it works
 
@@ -72,8 +76,9 @@ name to its public type, and derives safe actor/target summaries.
 - **Add a new filter**: extend `auditListQuerySchema` (validation lives in the
   contract), thread it through `ListAuditEventsInput` → `ListAuditEventsParams`,
   and implement it in **both** repositories (DB + in-memory) so behavior stays
-  identical. Keep filters index-conscious — prefer the indexed `event_type` /
-  `created_at` columns over JSON extraction.
+  identical. Keep filters index-conscious — the org-scoped scan itself rides
+  `ix_security_events_org_created_id` (Sprint 20); prefer the indexed
+  `event_type` / `created_at` columns over JSON extraction for filters.
 - **Never** widen the repository to accept a query without an organization id,
   and never move permission/entitlement checks into it.
 

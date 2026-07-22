@@ -69,9 +69,6 @@ export interface EntitlementRepository {
     organizationId: string,
   ): Promise<OrganizationPlanState | null>;
 
-  /** Count the organization's ACTIVE (non-deleted) projects. */
-  countActiveProjects(organizationId: string): Promise<number>;
-
   /** Count the organization's ACTIVE memberships (removed members excluded). */
   countActiveMembers(organizationId: string): Promise<number>;
 

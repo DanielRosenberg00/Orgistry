@@ -163,6 +163,13 @@ export const organizations = pgTable(
     uniqueIndex('uq_organizations_slug').on(table.slug),
     index('ix_organizations_created_by').on(table.createdByUserId),
     index('ix_organizations_status').on(table.status),
+    // Structural invariant (Sprint 20, ORG-PR-038): a user has at most ONE
+    // active personal workspace. Partial so team organizations are never
+    // constrained and an archived/suspended personal workspace does not block
+    // a future lifecycle flow from provisioning a replacement.
+    uniqueIndex('uq_organizations_active_personal_owner')
+      .on(table.createdByUserId)
+      .where(sql`${table.type} = 'personal' AND ${table.status} = 'active'`),
   ],
 );
 

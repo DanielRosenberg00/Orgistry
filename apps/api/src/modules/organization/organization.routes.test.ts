@@ -298,3 +298,73 @@ describe('membership invariants', () => {
     expect(names).not.toContain('Acme');
   });
 });
+
+describe('GET /v1/organizations/:organizationId — org.read permission gate (ORG-PR-053)', () => {
+  /** Directly seed an active membership with the given role. */
+  function addMembership(
+    organizationId: string,
+    userId: string,
+    roleId: string,
+  ): void {
+    const now = new Date();
+    ctx.orgStore.memberships.push({
+      id: `mem_test_${userId}`,
+      userId,
+      organizationId,
+      roleId,
+      status: 'active',
+      invitedByUserId: null,
+      joinedAt: now,
+      removedAt: null,
+      removedByUserId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  it.each([
+    ['admin', 'role_admin'],
+    ['member', 'role_member'],
+    ['viewer', 'role_viewer'],
+  ])('an active %s (holding org.read) reads the organization', async (_label, roleId) => {
+    const owner = await registerUser('Owner');
+    const other = await registerUser('Other');
+    const created = await createOrg(owner.token, { name: 'Acme' });
+    const orgId = created.json().data.organization.id;
+    addMembership(orgId, other.userId, roleId);
+
+    const response = await readOrg(other.token, orgId);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.organization.id).toBe(orgId);
+  });
+
+  it('an active membership WITHOUT org.read is rejected with the safe 403', async () => {
+    const owner = await registerUser('Owner');
+    const viewer = await registerUser('Viewer');
+    const created = await createOrg(owner.token, { name: 'Acme' });
+    const orgId = created.json().data.organization.id;
+    addMembership(orgId, viewer.userId, 'role_viewer');
+
+    // Simulate a future narrowing of org.read: strip it from the Viewer role.
+    // The route must fail closed on the permission, not fall back to
+    // membership-only authorization.
+    const orgRead = ctx.orgStore.permissions.find((p) => p.key === 'org.read')!;
+    ctx.orgStore.rolePermissions = ctx.orgStore.rolePermissions.filter(
+      (rp) => !(rp.roleId === 'role_viewer' && rp.permissionId === orgRead.id),
+    );
+
+    const response = await readOrg(viewer.token, orgId);
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('FORBIDDEN');
+  });
+
+  it('a disabled actor is rejected at the auth boundary (401)', async () => {
+    const owner = await registerUser('Owner');
+    const created = await createOrg(owner.token, { name: 'Acme' });
+    const orgId = created.json().data.organization.id;
+
+    ctx.orgStore.users.find((u) => u.id === owner.userId)!.status = 'disabled';
+    const response = await readOrg(owner.token, orgId);
+    expect(response.statusCode).toBe(401);
+  });
+});

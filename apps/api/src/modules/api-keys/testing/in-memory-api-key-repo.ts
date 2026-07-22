@@ -1,7 +1,16 @@
 import type { ApiKeyRow } from '@orgistry/db';
+import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { sanitizeSecurityMetadata } from '../../../lib/security-metadata';
-import type { InMemoryOrgStore } from '../../organization/testing/in-memory-org-store';
+import {
+  evaluateCountQuota,
+  requireEntitlement,
+  requireQuota,
+} from '../../entitlements/quota';
+import {
+  resolveStoreEntitlements,
+  type InMemoryOrgStore,
+} from '../../organization/testing/in-memory-org-store';
 import { apiKeyNotFoundError } from '../api-key.errors';
 import {
   API_KEY_EVENT_TYPES,
@@ -55,7 +64,25 @@ export function createInMemoryApiKeyRepository(
   }
 
   return {
+    // Synchronous resolve-gate-count-check-insert (no await before the
+    // mutation) -> atomic under Node's single-threaded loop, mirroring the DB
+    // transaction's quota lock + in-transaction plan snapshot.
     async createApiKey(params: CreateApiKeyParams): Promise<ApiKeyRow> {
+      const values = resolveStoreEntitlements(store, params.organizationId);
+      requireEntitlement(values, ENTITLEMENT_KEYS.apiKeysAccess);
+      // Active = not revoked AND not expired (mirrors the DB repository).
+      const nowMs = params.now.getTime();
+      const activeCount = store.apiKeys.filter(
+        (k) =>
+          k.organizationId === params.organizationId &&
+          k.revokedAt === null &&
+          (k.expiresAt === null || k.expiresAt.getTime() > nowMs),
+      ).length;
+      requireQuota(
+        ENTITLEMENT_KEYS.maxApiKeys,
+        evaluateCountQuota(activeCount, values.max_api_keys),
+      );
+
       const now = new Date();
       const key: ApiKeyRow = {
         id: createId('key'),
@@ -106,20 +133,6 @@ export function createInMemoryApiKeyRepository(
         : ordered;
 
       return afterCursor.slice(0, params.limit + 1);
-    },
-
-    async countActiveApiKeys(
-      organizationId: string,
-      now: Date,
-    ): Promise<number> {
-      // Active = not revoked AND not expired (mirrors the DB repository).
-      const nowMs = now.getTime();
-      return store.apiKeys.filter(
-        (k) =>
-          k.organizationId === organizationId &&
-          k.revokedAt === null &&
-          (k.expiresAt === null || k.expiresAt.getTime() > nowMs),
-      ).length;
     },
 
     async findBySecretHash(secretHash: string): Promise<ApiKeyRow | null> {

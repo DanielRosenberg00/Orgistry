@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "uq_organizations_active_personal_owner" ON "organizations" USING btree ("created_by_user_id") WHERE "organizations"."type" = 'personal' AND "organizations"."status" = 'active';--> statement-breakpoint
+CREATE INDEX "ix_security_events_org_created_id" ON "security_events" USING btree ("organization_id","created_at","id");

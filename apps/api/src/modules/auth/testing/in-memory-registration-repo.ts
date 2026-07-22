@@ -169,7 +169,6 @@ export function createInMemoryRegistrationRepository(options?: {
                 selector: { invitationId: pending.invitationId },
                 acceptingUserId: user.id,
                 acceptingUserNormalizedEmail: pending.normalizedEmail,
-                maxMembers: context.maxMembers,
               },
             );
             invitationOutcome = 'accepted';

@@ -12,9 +12,10 @@ import type {
   OrganizationReadResponse,
   RoleSummary,
 } from '@orgistry/contracts';
-import { ERROR_CODES } from '@orgistry/contracts';
+import { ERROR_CODES, PERMISSION_KEYS } from '@orgistry/contracts';
 import { decodeCursor, encodeCursor } from '@orgistry/shared';
 import { AppError, rateLimitedError } from '../../lib/errors';
+import { permissionDeniedError } from './member.errors';
 import {
   createNoopRateLimiter,
   enforceStoreAvailability,
@@ -216,6 +217,19 @@ export function createOrganizationService(
         userId,
         organizationId,
       });
+
+      // Permission gate (Sprint 20, ORG-PR-053): reads follow the same
+      // membership -> permission composition as every other org-scoped
+      // surface. Every fixed role currently holds org.read, so this changes
+      // no observable behavior today — it exists so a future narrowing of
+      // org.read cannot silently mis-authorize this route.
+      const permissionKeys = await repo.findPermissionKeysForRole(
+        context.role.id,
+      );
+      if (!permissionKeys.includes(PERMISSION_KEYS.orgRead)) {
+        throw permissionDeniedError();
+      }
+
       return {
         organization: toOrganization(context.organization),
         membership: toMembershipSummary(context.membership, context.role),

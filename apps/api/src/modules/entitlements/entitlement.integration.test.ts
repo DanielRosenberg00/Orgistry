@@ -115,7 +115,6 @@ describe.skipIf(!connectionString)('entitlements against live PostgreSQL', () =>
       projectService: createProjectService({
         accessControl: orgRepo,
         projects: createDbProjectRepository(db.db),
-        entitlements: entitlementService,
       }),
       planService: createPlanService({
         accessControl: orgRepo,

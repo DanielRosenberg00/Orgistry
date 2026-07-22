@@ -431,8 +431,11 @@ export function createRegistrationService(
   /**
    * Resolve the invitation context the completion transaction needs, from the
    * pending row's stored invitation ID. Never throws for invitation-state
-   * reasons: an unresolvable or errored context yields null and the
-   * completion settles the invitation as unavailable.
+   * reasons: an unresolvable or errored reference yields null and the
+   * completion settles the invitation as unavailable. This is an EXISTENCE
+   * check only — lifecycle, email match, and quota (including the plan
+   * ceiling, resolved inside the acceptance transaction) are re-validated
+   * authoritatively by the transaction itself.
    */
   async function resolveCompletionInvitation(
     invitationId: string | null,
@@ -441,21 +444,20 @@ export function createRegistrationService(
     if (invitationId === null || !invitations) {
       return null;
     }
-    let context: { maxMembers: number } | null;
+    let resolves: boolean;
     try {
-      context = await invitations.resolveCompletionContext(invitationId);
+      resolves = await invitations.resolveCompletionContext(invitationId);
     } catch (error) {
       if (error instanceof AppError) {
         return null;
       }
       throw error;
     }
-    if (!context) {
+    if (!resolves) {
       return null;
     }
     return {
       invitationId,
-      maxMembers: context.maxMembers,
       eventContext: {
         requestId: ctx.requestId,
         ipAddress: ctx.ipAddress,
@@ -599,9 +601,10 @@ export function createRegistrationService(
 
       const tokenHash = hashRegistrationCompletionToken(input.token);
 
-      // Non-locking pre-read to resolve invitation completion context (plan
-      // ceilings live outside the transaction). The transaction re-reads the
-      // row under a lock and is the sole authority on token validity.
+      // Non-locking pre-read to resolve the invitation completion context
+      // (an existence check only). The transaction re-reads the pending row
+      // under a lock and is the sole authority on token validity; the
+      // acceptance savepoint resolves the plan ceiling for itself.
       const pending = await repo.findPendingRegistrationByTokenHash(tokenHash);
       const invitationContext = await resolveCompletionInvitation(
         pending?.invitationId ?? null,

@@ -120,10 +120,10 @@ ready for staging or production. See
 | [ORG-PR-011](#org-pr-011) | No HTTP security headers (helmet) — **Closed (Sprint 19)** | App security | Security risk | P2 | High |
 | [ORG-PR-012](#org-pr-012) | No global/edge rate limiting; unauthenticated `invitations/inspect` oracle unthrottled — **Closed (Sprint 19)** | App security | Security risk | P2 | High |
 | [ORG-PR-013](#org-pr-013) | External API writes an un-throttled `security_events` row per unauthenticated request — **Closed (Sprint 19)** | App security/Reliability | Reliability risk | P2 | High |
-| [ORG-PR-014](#org-pr-014) | `security_events` lacks an `organization_id` index backing the audit read path | Database/Perf | Reliability risk | P2 | High |
+| [ORG-PR-014](#org-pr-014) | `security_events` lacks an `organization_id` index backing the audit read path — **Closed (Sprint 20)** | Database/Perf | Reliability risk | P2 | High |
 | [ORG-PR-015](#org-pr-015) | No retention/cleanup for unbounded tables | Data governance | Operational gap | P2 | High |
 | [ORG-PR-016](#org-pr-016) | No background-processing runtime (workers/scheduler) | Reliability | Operational gap | P2 | High |
-| [ORG-PR-017](#org-pr-017) | Admin can escalate self/others to Owner (no role-transition guard) | Authorization | Security risk | P2 | Medium |
+| [ORG-PR-017](#org-pr-017) | Admin can escalate self/others to Owner (no role-transition guard) — **Closed (Sprint 20)** | Authorization | Security risk | P2 | Medium |
 | [ORG-PR-018](#org-pr-018) | `drizzle-orm` high-severity advisory (installed `<0.45.2`) | Supply chain | Security risk | P2 | Medium |
 | [ORG-PR-019](#org-pr-019) | CI actions pinned to mutable tags; no workflow `permissions` block | CI/CD | Security risk | P2 | High |
 | [ORG-PR-020](#org-pr-020) | No dependency/vuln/secret/SAST scanning in CI | Supply chain | Operational gap | P2 | High |
@@ -135,7 +135,7 @@ ready for staging or production. See
 | [ORG-PR-026](#org-pr-026) | No failure-injection / degraded-dependency integration tests | Testing | Reliability risk | P2 | Medium |
 | [ORG-PR-027](#org-pr-027) | No production operations documentation | Documentation | Operational gap | P2 | High |
 | [ORG-PR-028](#org-pr-028) | No migration rollback / recovery strategy | Database | Operational gap | P2 | High |
-| [ORG-PR-029](#org-pr-029) | Quota ceilings are TOCTOU-racy under concurrency | Concurrency | Data-integrity risk | P3 | High |
+| [ORG-PR-029](#org-pr-029) | Quota ceilings are TOCTOU-racy under concurrency — **Closed (Sprint 20)** | Concurrency | Data-integrity risk | P3 | High |
 | [ORG-PR-030](#org-pr-030) | User enumeration on registration — **Closed (Sprint 18): verification-first registration; public register is contract-identical for all account states** | Auth | Security risk | P3 | High |
 | [ORG-PR-031](#org-pr-031) | No idempotency keys on create operations | API | Reliability risk | P3 | Medium |
 | [ORG-PR-032](#org-pr-032) | Spammable authenticated mutations lack rate limits — **Closed (Sprint 19)** | App security | Security risk | P3 | High |
@@ -144,13 +144,13 @@ ready for staging or production. See
 | [ORG-PR-035](#org-pr-035) | No CSP / security meta in the web demo | Frontend | Security risk | P3 | Medium |
 | [ORG-PR-036](#org-pr-036) | Frontend UX/robustness gaps (revoke confirm, deep-link, expiry UX, a11y) | Frontend | Developer-experience issue | P3 | High |
 | [ORG-PR-037](#org-pr-037) | `reset-test` destructive guard weaker than documented | Database/DX | Maintainability issue | P3 | High |
-| [ORG-PR-038](#org-pr-038) | "One personal workspace per user" invariant unenforced | Database | Data-integrity risk | P3 | Medium |
+| [ORG-PR-038](#org-pr-038) | "One personal workspace per user" invariant unenforced — **Closed (Sprint 20)** | Database | Data-integrity risk | P3 | Medium |
 | [ORG-PR-039](#org-pr-039) | No password-change / email-change flows — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P3 | High |
 | [ORG-PR-040](#org-pr-040) | `noUncheckedIndexedAccess` disabled | Type safety/DX | Maintainability issue | P3 | High |
 | [ORG-PR-041](#org-pr-041) | Mailpit / live SMTP path never exercised in CI | Testing | Operational gap | P3 | High |
 | [ORG-PR-042](#org-pr-042) | Docker infra images pinned by floating tags | Supply chain | Maintainability issue | P3 | High |
 | [ORG-PR-043](#org-pr-043) | PII in audit/security metadata with no retention | Privacy | Compliance dependency | P3 | Medium |
-| [ORG-PR-044](#org-pr-044) | Narrow concurrency test coverage | Testing | Reliability risk | P3 | High |
+| [ORG-PR-044](#org-pr-044) | Narrow concurrency test coverage — **Closed (Sprint 20)** | Testing | Reliability risk | P3 | High |
 | [ORG-PR-045](#org-pr-045) | No MFA/passkeys and no security notifications | Account lifecycle | Product completeness gap | P3 | High |
 | [ORG-PR-046](#org-pr-046) | Stale/contradictory subsystem documentation | Documentation | Developer-experience issue | P4 | High |
 | [ORG-PR-047](#org-pr-047) | `COOKIE_SECRET` required but never used (unsigned cookies) — **Closed (Sprint 15)** | Config | Maintainability issue | P4 | High |
@@ -159,7 +159,7 @@ ready for staging or production. See
 | [ORG-PR-050](#org-pr-050) | Concurrent legitimate refresh revokes family + session (multi-tab logout) | Auth | Reliability risk | P4 | High |
 | [ORG-PR-051](#org-pr-051) | Redundant unique index duplicates PK on `role_permissions` | Database | Optional enhancement | P4 | High |
 | [ORG-PR-052](#org-pr-052) | Minor API disclosures (`/ready` deps, inbound `x-request-id`, no shutdown timeout) — **Closed (Sprint 19)** | API | Maintainability issue | P4 | Medium |
-| [ORG-PR-053](#org-pr-053) | Two read paths skip the permission gate (divergence, no current gap) | Authorization | Maintainability issue | P4 | High |
+| [ORG-PR-053](#org-pr-053) | Two read paths skip the permission gate (divergence, no current gap) — **Closed (Sprint 20)** | Authorization | Maintainability issue | P4 | High |
 | [ORG-PR-054](#org-pr-054) | `esbuild` moderate dev-only advisory (via `drizzle-kit`) | Supply chain | Optional enhancement | P4 | High |
 
 ---
@@ -436,6 +436,16 @@ Standards · Threats.
 - **Risk:** Audit list latency degrades over time, amplified by ORG-PR-013/ORG-PR-015.
 - **Remediation:** Add the composite index in a new forward migration. **Not implemented during the Sprint 14 audit** (schema/migration change).
 - **Dependencies:** informs ORG-PR-013/015. **Effort:** S. **Validation:** `EXPLAIN` shows index usage; schema-drift check passes; migrate-from-scratch test updated. **Roadmap:** Phase 3. **Standards:** ASVS V7 (log availability). **Threats:** T-AUDIT, T-DOS.
+- **Resolution (Sprint 20 — Closed):** migration `0011_calm_gressill.sql` adds
+  `ix_security_events_org_created_id` on `security_events (organization_id,
+  created_at, id)` — exactly the audit read shape (`WHERE organization_id = ?
+  … ORDER BY created_at DESC, id DESC` with the keyset tie-breaker;
+  `audit.repo.ts`). Proven by `migrate.integration.test.ts`: index existence +
+  `indexdef` column/order assertion, plus an `enable_seqscan = off` EXPLAIN
+  showing the audit-shaped query is answerable through the index (plan choice
+  on tiny fixtures is deliberately not asserted). The jsonb `metadata->>`
+  target filter remains unindexed by design — it is applied on top of the
+  narrow org/time scan. Retention is still ORG-PR-015.
 
 <a id="org-pr-015"></a>
 ### ORG-PR-015 — No retention/cleanup for unbounded tables
@@ -446,6 +456,13 @@ Standards · Threats.
 - **Risk:** Storage/index bloat, slow scans (compounds ORG-PR-014), and unmet retention promises (privacy — ORG-PR-043).
 - **Remediation:** Introduce scheduled cleanup once a background runtime exists (ORG-PR-016). **Not implemented during the Sprint 14 audit.**
 - **Dependencies:** ORG-PR-016. **Effort:** M. **Validation:** job tests (idempotency, lock, metrics) + retention enforcement test. **Roadmap:** Phase 5. **Standards:** ASVS V7.3; privacy retention. **Threats:** T-AUDIT, T-PRIV.
+- **Status (Sprint 20 — OPEN, retention-readiness documented only):** no
+  cleanup runtime exists and none was added (a scheduler is out of scope —
+  ORG-PR-016). Sprint 20 documents the retention-readiness map — unbounded
+  tables, their lifecycle timestamps, and the indexes future batched cleanup
+  can use — in [sprint-20-artifact-package.md](sprint-20-artifact-package.md).
+  Documentation and indexes do NOT constitute retention enforcement; this
+  finding stays open until an actual cleanup runtime lands.
 
 <a id="org-pr-016"></a>
 ### ORG-PR-016 — No background-processing runtime (workers/scheduler)
@@ -467,6 +484,20 @@ Standards · Threats.
 - **Remediation:** Add a role-transition guard and negative tests. **Policy decision required** (see [production-target.md](production-target.md) decision gates).
 - **Dependencies:** none. **Effort:** S. **Validation:** tests for allowed/blocked promotions. **Roadmap:** Phase 3. **Standards:** ASVS V4.1 (access control), V1.2. **Threats:** T-PRIV.
 - **Policy update (Sprint 15, 2026-07-18):** the required policy decision now exists — **DG-2 was ratified by the Project Owner** ([sprint-15-decisions.md](sprint-15-decisions.md)): only an active Owner may grant or remove the Owner role; Admins may not confer Owner on themselves or others; last-owner protection remains mandatory. **This finding remains OPEN**: the code still permits Admin→Owner promotion; enforcement and negative tests are Sprint 19 work.
+- **Resolution (Sprint 20 — Closed):** DG-2 is enforced server-side, inside the
+  member-mutation transaction. `owner-transition.ts` is the single policy
+  definition; `organization.repo.ts` applies it in `changeMemberRole` AND
+  `removeMember` — any change that grants or removes the Owner role (including
+  removing an Owner member, and the Owner→Owner no-op) requires the ACTOR's
+  membership to be in the transaction's LOCKED active-owner set, so a
+  concurrently demoted actor cannot still confer Owner. Rejection is the
+  standard safe 403 `FORBIDDEN`, checked AFTER target resolution (cross-tenant
+  probes keep the uniform 404) and BEFORE Last-Owner (which is unchanged and
+  still 409 `LAST_OWNER_REQUIRED`). Frontend unchanged and non-authoritative.
+  Evidence: `member.routes.test.ts` (15-case allowed/forbidden matrix incl.
+  Admin self/other promotion, Admin demote/remove Owner, Member/Viewer,
+  removed membership, disabled user, cross-tenant), `member.integration.test.ts`
+  (live-PostgreSQL DG-2 + ownership hand-off), `owner-transition.test.ts`.
 
 <a id="org-pr-018"></a>
 ### ORG-PR-018 — `drizzle-orm` high-severity advisory (installed `<0.45.2`)
@@ -594,6 +625,34 @@ Standards · Threats.
 - **Risk:** Bounded ceiling overrun; not a tenant/auth breach today, but becomes material if quotas gate billing.
 - **Remediation:** Serialize the count+insert (lock plan row or use an atomic conditional write); add concurrency tests.
 - **Dependencies:** none. **Effort:** M. **Validation:** concurrent-create integration tests cannot exceed the ceiling. **Roadmap:** Phase 3. **Standards:** ASVS V11.1 (business-logic limits). **Threats:** T-QUOTA.
+- **Resolution (Sprint 20 — Closed, incl. same-sprint correctness
+  refinement):** every quota-protected creation now evaluates its ENTIRE
+  quota decision inside ONE transaction: a transaction-scoped PostgreSQL
+  advisory lock keyed by organization and quota kind (`quota-lock.ts`;
+  `pg_advisory_xact_lock(hashtextextended('quota:<kind>:<org>', 0))`), then
+  the CURRENT plan resolved through that same transaction
+  (`entitlement.snapshot.ts — lockOrganizationEntitlements`, plan row
+  `FOR SHARE` — plan assignment is runtime-mutable, so a pre-transaction
+  ceiling could be stale; the refinement removed every `max*` parameter from
+  the repository mutation contracts so a stale ceiling is structurally
+  impossible), then the count, comparison, write, and success event:
+  projects (`project.repo.ts`), API keys (`api-key.repo.ts` — access gate and
+  ceiling from ONE snapshot), invitation creation/seat reservation
+  (`invitation.repo.ts`), and every member-capacity consumer via the shared
+  acceptance body (`invitation.acceptance.ts` — `members` lock, then plan
+  snapshot, then the invitation row lock; covers existing-user acceptance AND
+  invited registration completion). Counting bases unchanged (active
+  projects; non-revoked+non-expired keys; active members + non-expired
+  pending invitations). `QUOTA_EXCEEDED` semantics unchanged. Lock order,
+  plan-mutation interaction, and downgrade semantics:
+  [sprint-20-quota-race-audit.md](sprint-20-quota-race-audit.md). Proven by
+  `quota-concurrency.integration.test.ts` (see ORG-PR-044) — a lock-removed
+  build fails deterministically — and by
+  `quota-plan-coherence.integration.test.ts` (committed downgrade/upgrade
+  honored by the very next create; an IN-FLIGHT plan change serializes
+  against the create via FOR SHARE vs FOR UPDATE; API-key access + ceiling
+  coherent; acceptance ceiling transaction-resolved; PLAN_STATE_MISSING
+  fail-safe).
 
 <a id="org-pr-030"></a>
 ### ORG-PR-030 — User enumeration on registration
@@ -718,6 +777,27 @@ Standards · Threats.
 - **Risk:** A future/edited code path silently creates duplicate personal workspaces.
 - **Remediation:** Add a partial unique index in a forward migration.
 - **Dependencies:** none. **Effort:** S. **Validation:** migrate-from-scratch test asserts the constraint rejects a second personal org. **Roadmap:** Phase 3. **Standards:** ASVS V11 (data integrity). **Threats:** T-QUOTA.
+- **Resolution (Sprint 20 — Closed):** the finding's requirement — a DB
+  constraint so no future code path or backfill can create a DUPLICATE
+  personal workspace — is met by migration `0011_calm_gressill.sql`: partial
+  unique index `uq_organizations_active_personal_owner` on
+  `organizations (created_by_user_id) WHERE type = 'personal' AND status =
+  'active'`. Precisely stated, the two guarantees are SEPARATE: (1)
+  DATABASE-enforced — **at most one** active personal workspace per user
+  identity (`created_by_user_id`, written once at insert; no code path
+  mutates it and no ownership-transfer feature exists); (2)
+  APPLICATION-enforced and transaction-tested — the registration-completion
+  transaction CREATES the personal workspace, so every completed user has
+  one (existence is provisioning logic, not a database constraint). Team
+  organizations are unconstrained; an archived/suspended personal workspace
+  frees the slot (lifecycle-compatible); seeds/demo data drive the real API
+  and remain valid. Proven by `migrate.integration.test.ts` (duplicate-active
+  rejected at the SQL level; team orgs unaffected; archived-then-new allowed;
+  the 0011 DDL also applies FORWARD over a populated pre-Sprint-20 dataset,
+  with the reviewer preflight duplicate query executed first) and by the
+  completion concurrency test (each completed registrant ends with exactly
+  one active personal workspace — the provisioning guarantee under
+  concurrency).
 
 <a id="org-pr-039"></a>
 ### ORG-PR-039 — No password-change / email-change flows
@@ -779,6 +859,23 @@ Standards · Threats.
 - **Risk:** Regressions in race-safety land undetected.
 - **Remediation:** Add targeted concurrency integration tests alongside ORG-PR-029 fixes.
 - **Dependencies:** ORG-PR-029. **Effort:** M. **Validation:** the new suites pass and fail if locking is removed. **Roadmap:** Phase 3 / Phase 6. **Standards:** SSDF PW.8. **Threats:** T-QUOTA.
+- **Resolution (Sprint 20 — Closed):** `quota-concurrency.integration.test.ts`
+  adds five real-PostgreSQL races, each firing 4–6 genuinely parallel attempts
+  at a remaining capacity of ONE: project create, API key create (with revoked
+  + expired decoys proving the counting basis), acceptance of DISTINCT
+  invitation tokens, invited registration completion (all accounts commit;
+  exactly one membership; losers surface the documented `unavailable`
+  outcome), and invitation-create seat reservation. Every test asserts the
+  exact success count, `QUOTA_EXCEEDED` on the losers, final database state
+  (ceilings, no orphaned users/workspaces/sessions/pending rows, single-use
+  invitations), and that success events exactly match committed mutations.
+  Genuine overlap is guaranteed by a pool warm-up (`warmPool`) — discovered
+  during execution: on a COLD postgres.js pool, connection handshakes stagger
+  the racers enough that a lock-free build still passed; with the warmed pool
+  a lock-removed build fails 100% of runs (verified as a negative control:
+  6/6 attempts succeeded and the ceiling was breached 8→3 without the lock).
+  The pre-existing races (double-refresh, Last-Owner demotion, same-token
+  issuance/completion) are unchanged.
 
 <a id="org-pr-045"></a>
 ### ORG-PR-045 — No MFA/passkeys and no security notifications
@@ -893,6 +990,18 @@ Standards · Threats.
 - **Risk:** Latent — becomes a real gap only if `org.read` is ever narrowed.
 - **Remediation:** Add the explicit permission check (or document the exception) for consistency.
 - **Dependencies:** none. **Effort:** S. **Validation:** test asserts the permission is enforced. **Roadmap:** Phase 3. **Standards:** ASVS V4.1. **Threats:** T-BOLA.
+- **Resolution (Sprint 20 — Closed):** `organization.service.readOrganization`
+  now enforces `org.read` after membership resolution (matching the canonical
+  membership→permission composition and the long-documented `api-surface.md`
+  contract — the drift is resolved in the CODE direction; no observable
+  behavior change today since every fixed role holds `org.read`).
+  `org-rbac.service.getEffectivePermissions` is retained as the ONE
+  intentional membership-only surface, now explicitly documented as a stable
+  contract (self-introspection gated on a permission would be circular).
+  Evidence: `organization.routes.test.ts` (all roles allowed; a role stripped
+  of `org.read` fails closed with the safe 403; disabled actor 401; removed
+  membership / cross-tenant keep the uniform 404). Docs:
+  [rbac-permissions.md](../rbac-permissions.md), [api-surface.md](../api-surface.md).
 
 <a id="org-pr-054"></a>
 ### ORG-PR-054 — `esbuild` moderate dev-only advisory (via `drizzle-kit`)

@@ -261,8 +261,9 @@ from the **seeded rows**, so what it shows is what `requirePermission` enforces.
 
 The structural invariant — *every active organization has at least one active
 Owner* — is about **role identity itself**, not a capability. "Owner" is the
-protected domain concept, so the check necessarily references the Owner role. This
-is the one sanctioned role-name check, and it lives in the repository transaction,
+protected domain concept, so the check necessarily references the Owner role.
+Together with the DG-2 Owner-transition guard below, these are the only
+sanctioned role-identity checks, and both live in the repository transaction,
 not in route authorization.
 
 ### Transactional Last Owner protection
@@ -280,6 +281,32 @@ read-before-write pre-check (which would race). Both `changeMemberRole` and
 
 A DB integration test fires two concurrent Owner demotions and asserts exactly one
 succeeds and one active Owner survives — the behavior a pre-check cannot guarantee.
+
+### DG-2 Owner role-transition policy (Sprint 20)
+
+Holding `members.change_role` is **permission to change roles**; it is not
+**authority over the Owner role**. The ratified DG-2 policy
+([sprint-15-decisions.md](production-readiness/sprint-15-decisions.md)) is
+enforced in code:
+
+- only an active Owner may grant the Owner role (including the Owner→Owner
+  no-op — assigning Owner is an Owner-only act);
+- only an active Owner may remove the Owner role, **including by removing an
+  Owner member**;
+- an Admin may not promote themselves or anyone else to Owner, and may not
+  demote or remove an Owner;
+- every Owner demotion/removal remains subject to Last Owner protection.
+
+Enforcement is central and transactional: `owner-transition.ts` is the single
+policy definition, applied by both `changeMemberRole` and `removeMember`
+inside the same transaction that locks the active-Owner set — the actor's
+membership must be **in the locked set** when the change touches Owner, so a
+concurrently demoted actor cannot still confer Owner. The order is: target
+resolution (unknown/cross-tenant → uniform `MEMBER_NOT_FOUND` 404) → DG-2
+authority (safe `FORBIDDEN` 403, the same error every missing permission
+produces) → Last Owner (`LAST_OWNER_REQUIRED` 409) → mutation + audit event.
+The full allowed/forbidden matrix is proven in `member.routes.test.ts` and,
+against live PostgreSQL, in `member.integration.test.ts`.
 
 ### Tradeoffs & rejected alternatives
 
@@ -302,8 +329,19 @@ succeeds and one active Owner survives — the behavior a pre-check cannot guara
 ### Stable role keys
 
 `owner`, `admin`, `member`, `viewer` (`roleKeySchema`). Clients/code may branch on
-these **only** for structural role-identity invariants (Last Owner) — never for
-ordinary authorization.
+these **only** for structural role-identity invariants (Last Owner, DG-2 Owner
+transitions) — never for ordinary authorization.
+
+### Owner-transition contract (DG-2 — must not change)
+
+- Only an active Owner can grant Owner.
+- Only an active Owner can remove Owner (role change OR member removal).
+- The last active Owner cannot be removed or demoted.
+- Forbidden transitions return the standard safe `FORBIDDEN` 403; unknown or
+  cross-tenant targets keep the uniform `MEMBER_NOT_FOUND` 404 (target
+  resolution precedes the authority check).
+- The authority check runs inside the mutation transaction against the locked
+  active-owner set — never as a route-level or frontend-only rule.
 
 ### Stable permission keys
 

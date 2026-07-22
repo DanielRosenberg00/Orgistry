@@ -221,6 +221,7 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
         membershipId: memA,
         newRoleId: ROLE_IDS.admin,
         actorUserId: owner.userId,
+        actorMembershipId: memA,
         ctx,
       }),
       orgRepo.changeMemberRole({
@@ -228,6 +229,7 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
         membershipId: memB,
         newRoleId: ROLE_IDS.admin,
         actorUserId: second.userId,
+        actorMembershipId: memB,
         ctx,
       }),
     ]);
@@ -320,5 +322,84 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
     expect(userIds).toContain(owner.userId);
     expect(userIds).toContain(member.userId);
     expect(JSON.stringify(response.json())).not.toContain('passwordHash');
+  });
+
+  it('enforces DG-2 transactionally: an Admin can neither self-promote to Owner nor demote an Owner', async () => {
+    const owner = await registerUser('Owner');
+    const admin = await registerUser('Admin');
+    const orgId = await createTeamOrg(owner.token, 'Acme');
+    const ownerMem = await ownerMembershipId(orgId, owner.userId);
+    const adminMem = await addMembership(orgId, admin.userId, ROLE_IDS.admin);
+
+    // Self-promotion to Owner → the safe 403, and the row is untouched.
+    const selfPromote = await app.inject({
+      method: 'PATCH',
+      url: `/v1/organizations/${orgId}/members/${adminMem}/role`,
+      headers: authHeader(admin.token),
+      payload: { role: 'owner' },
+    });
+    expect(selfPromote.statusCode).toBe(403);
+    expect(selfPromote.json().error.code).toBe('FORBIDDEN');
+
+    // Demoting the Owner → the same safe 403 (authority, not Last Owner).
+    const demoteOwner = await app.inject({
+      method: 'PATCH',
+      url: `/v1/organizations/${orgId}/members/${ownerMem}/role`,
+      headers: authHeader(admin.token),
+      payload: { role: 'admin' },
+    });
+    expect(demoteOwner.statusCode).toBe(403);
+    expect(demoteOwner.json().error.code).toBe('FORBIDDEN');
+
+    // Removing the Owner member → 403 as well.
+    const removeOwner = await app.inject({
+      method: 'DELETE',
+      url: `/v1/organizations/${orgId}/members/${ownerMem}`,
+      headers: authHeader(admin.token),
+    });
+    expect(removeOwner.statusCode).toBe(403);
+
+    const roles = await db.sql<{ id: string; role_id: string; status: string }[]>`
+      SELECT id, role_id, status FROM memberships WHERE organization_id = ${orgId} ORDER BY id`;
+    const byId = new Map(roles.map((r) => [r.id, r]));
+    expect(byId.get(adminMem)?.role_id).toBe(ROLE_IDS.admin);
+    expect(byId.get(ownerMem)?.role_id).toBe(ROLE_IDS.owner);
+    expect(byId.get(ownerMem)?.status).toBe('active');
+    // No forbidden attempt produced a role-change audit event.
+    const events = await db.sql<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM security_events
+      WHERE event_type = 'org.member_role_changed'`;
+    expect(events[0].count).toBe('0');
+  });
+
+  it('an Owner can promote a member to Owner and then hand off (demote self)', async () => {
+    const owner = await registerUser('Owner');
+    const successor = await registerUser('Successor');
+    const orgId = await createTeamOrg(owner.token, 'Acme');
+    const ownerMem = await ownerMembershipId(orgId, owner.userId);
+    const successorMem = await addMembership(orgId, successor.userId, ROLE_IDS.member);
+
+    const promote = await app.inject({
+      method: 'PATCH',
+      url: `/v1/organizations/${orgId}/members/${successorMem}/role`,
+      headers: authHeader(owner.token),
+      payload: { role: 'owner' },
+    });
+    expect(promote.statusCode).toBe(200);
+    expect(promote.json().data.member.role.key).toBe('owner');
+
+    // With a second active Owner in place, the original Owner may step down.
+    const stepDown = await app.inject({
+      method: 'PATCH',
+      url: `/v1/organizations/${orgId}/members/${ownerMem}/role`,
+      headers: authHeader(owner.token),
+      payload: { role: 'admin' },
+    });
+    expect(stepDown.statusCode).toBe(200);
+
+    const owners = await db.sql<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM memberships
+      WHERE organization_id = ${orgId} AND status = 'active' AND role_id = ${ROLE_IDS.owner}`;
+    expect(owners[0].count).toBe('1');
   });
 });

@@ -60,15 +60,15 @@ defined under `apps/api/src/routes` and `apps/api/src/modules/*`.
 | --- | --- | --- | --- | --- |
 | POST | `/v1/organizations` | Bearer | — | Create a team org (Free plan; caller becomes Owner). **429**: throttled per user (`RATE_LIMIT_ORG_CREATE_PER_USER_MAX`, default 10/min; Sprint 19). |
 | GET | `/v1/organizations` | Bearer | — | List orgs where the caller has an active membership. |
-| GET | `/v1/organizations/:organizationId` | Bearer | `org.read` | Read one org (requires active membership). |
+| GET | `/v1/organizations/:organizationId` | Bearer | `org.read` | Read one org (requires active membership). `org.read` is enforced in code since Sprint 20 (all fixed roles hold it — no behavior change). |
 
 ## Members
 
 | Method | Path | Auth | Permission | Purpose / notes |
 | --- | --- | --- | --- | --- |
 | GET | `/v1/organizations/:organizationId/members` | Bearer | `members.read` | List members (cursor-paginated; soft-removed omitted). |
-| PATCH | `/v1/organizations/:organizationId/members/:membershipId/role` | Bearer | `members.change_role` | Change a member's role; Last Owner invariant enforced transactionally. **429**: shares the per-acting-user member-admin bucket (`RATE_LIMIT_MEMBER_MUTATION_PER_USER_MAX`, default 30/min; Sprint 19 refinement). |
-| DELETE | `/v1/organizations/:organizationId/members/:membershipId` | Bearer | `members.remove` | Soft-remove a member; Last Owner protected. **429**: shares the member-admin bucket above (Sprint 19 refinement). |
+| PATCH | `/v1/organizations/:organizationId/members/:membershipId/role` | Bearer | `members.change_role` | Change a member's role; DG-2 Owner-transition policy (Sprint 20: only an active Owner may grant or remove Owner — safe 403 otherwise) and the Last Owner invariant enforced transactionally. **429**: shares the per-acting-user member-admin bucket (`RATE_LIMIT_MEMBER_MUTATION_PER_USER_MAX`, default 30/min; Sprint 19 refinement). |
+| DELETE | `/v1/organizations/:organizationId/members/:membershipId` | Bearer | `members.remove` | Soft-remove a member; removing an Owner member requires Owner authority (DG-2, Sprint 20); Last Owner protected. **429**: shares the member-admin bucket above (Sprint 19 refinement). |
 
 ## Roles and Permissions
 
@@ -88,14 +88,14 @@ Organization-scoped, permission-gated:
 | GET | `/v1/organizations/:organizationId/roles` | Bearer | `roles.read` | Roles in org context. |
 | GET | `/v1/organizations/:organizationId/permissions` | Bearer | `permissions.read` | Permission catalog in org context. |
 | GET | `/v1/organizations/:organizationId/permissions/matrix` | Bearer | `permissions.read` | Matrix in org context. |
-| GET | `/v1/organizations/:organizationId/permissions/effective` | Bearer | active membership | The caller's effective permissions in this org (drives UI hints). |
+| GET | `/v1/organizations/:organizationId/permissions/effective` | Bearer | active membership | The caller's OWN effective permissions (drives UI hints). Intentionally membership-only — the documented ORG-PR-053 exception: self-introspection cannot be permission-gated without circularity. |
 
 ## Projects
 
 | Method | Path | Auth | Permission | Entitlement / quota | Purpose / notes |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/v1/organizations/:organizationId/projects` | Bearer | `projects.read` | — | List projects (cursor-paginated; soft-deleted omitted). |
-| POST | `/v1/organizations/:organizationId/projects` | Bearer | `projects.create` | `max_projects` quota | Create a project; quota checked after permission; records `project.created`. **429**: throttled per user after the permission check (`RATE_LIMIT_PROJECT_CREATE_PER_USER_MAX`, default 30/min; Sprint 19). |
+| POST | `/v1/organizations/:organizationId/projects` | Bearer | `projects.create` | `max_projects` quota | Create a project; quota checked after permission and enforced atomically inside the creation transaction (Sprint 20); records `project.created`. **429**: throttled per user after the permission check (`RATE_LIMIT_PROJECT_CREATE_PER_USER_MAX`, default 30/min; Sprint 19). |
 | GET | `/v1/organizations/:organizationId/projects/:projectId` | Bearer | `projects.read` | — | Read a project; cross-tenant/deleted → uniform `404`. |
 | PATCH | `/v1/organizations/:organizationId/projects/:projectId` | Bearer | `projects.update` | — | Rename a project. **429**: shares the per-acting-user project-mutation bucket (`RATE_LIMIT_PROJECT_MUTATION_PER_USER_MAX`, default 60/min; Sprint 19 refinement). |
 | DELETE | `/v1/organizations/:organizationId/projects/:projectId` | Bearer | `projects.delete` | — | Soft-delete; records `project.deleted`; no hard delete/restore. **429**: shares the project-mutation bucket above (Sprint 19 refinement). |
@@ -112,7 +112,7 @@ Organization-scoped, permission-gated:
 
 | Method | Path | Auth | Permission | Entitlement / quota | Purpose / notes |
 | --- | --- | --- | --- | --- | --- |
-| POST | `/v1/organizations/:organizationId/api-keys` | Bearer | `api_keys.create` | `api_keys_access` + `max_api_keys` quota | Create a key; raw secret returned **once**; checks permission → entitlement → quota. **429**: throttled per user after the permission check (`RATE_LIMIT_API_KEY_CREATE_PER_USER_MAX`, default 10/min; Sprint 19). |
+| POST | `/v1/organizations/:organizationId/api-keys` | Bearer | `api_keys.create` | `api_keys_access` + `max_api_keys` quota | Create a key; raw secret returned **once**; checks permission → entitlement → quota (quota enforced atomically inside the creation transaction since Sprint 20). **429**: throttled per user after the permission check (`RATE_LIMIT_API_KEY_CREATE_PER_USER_MAX`, default 10/min; Sprint 19). |
 | GET | `/v1/organizations/:organizationId/api-keys` | Bearer | `api_keys.read` | `api_keys_access` | List keys (cursor-paginated; secrets never returned). |
 | DELETE | `/v1/organizations/:organizationId/api-keys/:apiKeyId` | Bearer | `api_keys.revoke` | `api_keys_access` | Revoke a key (audited, idempotent). |
 
@@ -130,7 +130,7 @@ Organization-scoped, permission-gated:
 | GET | `/v1/organizations/:organizationId/invitations` | Bearer | `invitations.read` | — | List pending invitations (cursor-paginated). |
 | DELETE | `/v1/organizations/:organizationId/invitations/:invitationId` | Bearer | `invitations.revoke` | — | Revoke a pending invitation (idempotent). |
 | POST | `/v1/invitations/inspect` | none | — | — | Public, safe token inspection (no token/hash leaked); supports new-user onboarding. **429**: throttled per trusted IP (`RATE_LIMIT_INVITATION_INSPECT_PER_IP_MAX`, default 30/min) and per token digest across all IPs (`RATE_LIMIT_INVITATION_INSPECT_PER_TOKEN_MAX`, default 10/min); response contract unchanged (Sprint 19). |
-| POST | `/v1/invitations/accept` | Bearer | active user | `max_members` quota | Accept; email must match; creates membership transactionally; does **not** create a session. **429**: throttled per user (`RATE_LIMIT_INVITATION_ACCEPT_PER_USER_MAX`, default 10/min; Sprint 19). |
+| POST | `/v1/invitations/accept` | Bearer | active user | `max_members` quota | Accept; email must match; creates membership transactionally under the org member-quota lock (Sprint 20 — distinct tokens cannot overrun the ceiling); does **not** create a session. **429**: throttled per user (`RATE_LIMIT_INVITATION_ACCEPT_PER_USER_MAX`, default 10/min; Sprint 19). |
 
 ## Audit Log
 

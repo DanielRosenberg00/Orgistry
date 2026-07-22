@@ -16,7 +16,10 @@ import {
 import { INVITATION_EVENT_TYPES } from '../invitation.events';
 import { assertAcceptable } from '../invitation.lifecycle';
 import type { InvitationSelector } from '../invitation.types';
-import type { InMemoryOrgStore } from '../../organization/testing/in-memory-org-store';
+import {
+  resolveStoreEntitlements,
+  type InMemoryOrgStore,
+} from '../../organization/testing/in-memory-org-store';
 
 /**
  * In-memory mirror of the database acceptance transaction
@@ -37,7 +40,6 @@ export interface StoreAcceptanceParams {
   selector: InvitationSelector;
   acceptingUserId: string;
   acceptingUserNormalizedEmail: string;
-  maxMembers: number;
 }
 
 /**
@@ -74,13 +76,19 @@ export function validateInvitationForAcceptanceInStore(
   if (alreadyMember) {
     throw alreadyActiveMemberError();
   }
+  // The ceiling comes from the store's CURRENT plan state at validation time,
+  // mirroring the DB acceptance transaction's in-transaction plan snapshot.
+  const { max_members: maxMembers } = resolveStoreEntitlements(
+    store,
+    invitation.organizationId,
+  );
   const activeMembers = store.memberships.filter(
     (m) => m.organizationId === invitation.organizationId && m.status === 'active',
   ).length;
-  if (activeMembers >= params.maxMembers) {
+  if (activeMembers >= maxMembers) {
     throw quotaExceededError({
       quota: ENTITLEMENT_KEYS.maxMembers,
-      limit: params.maxMembers,
+      limit: maxMembers,
       current: activeMembers,
     });
   }

@@ -5,8 +5,12 @@ import type {
   RoleRow,
 } from '@orgistry/db';
 import { schema } from '@orgistry/db';
+import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { and, count, desc, eq, gt, lt, or } from 'drizzle-orm';
+import { evaluateCountQuota, requireQuota } from '../entitlements/quota';
+import { acquireOrganizationQuotaLock } from '../entitlements/quota-lock';
+import { lockOrganizationEntitlements } from '../entitlements/entitlement.snapshot';
 import {
   acceptInvitationWithinTransaction,
   recordInvitationEvent,
@@ -82,11 +86,54 @@ export function createDbInvitationRepository(
     ): Promise<InvitationView> {
       try {
         return await db.transaction(async (tx) => {
+          const now = new Date();
+
+          // Seat-reservation re-check under the member-quota lock (Sprint 20,
+          // ORG-PR-029): the service's pre-check runs before the fail-closed
+          // email and can race for DISTINCT emails (and against plan
+          // changes); this serialized, transaction-resolved decision is the
+          // authoritative guard. Reservation basis: active members plus
+          // non-expired pending invitations (Sprint 9 policy, unchanged).
+          await acquireOrganizationQuotaLock(
+            tx,
+            params.organizationId,
+            'members',
+          );
+          const { values } = await lockOrganizationEntitlements(
+            tx,
+            params.organizationId,
+          );
+          const [memberRow] = await tx
+            .select({ value: count() })
+            .from(schema.memberships)
+            .where(
+              and(
+                eq(schema.memberships.organizationId, params.organizationId),
+                eq(schema.memberships.status, 'active'),
+              ),
+            );
+          const [pendingRow] = await tx
+            .select({ value: count() })
+            .from(schema.invitations)
+            .where(
+              and(
+                eq(schema.invitations.organizationId, params.organizationId),
+                eq(schema.invitations.status, 'pending'),
+                gt(schema.invitations.expiresAt, now),
+              ),
+            );
+          requireQuota(
+            ENTITLEMENT_KEYS.maxMembers,
+            evaluateCountQuota(
+              (memberRow?.value ?? 0) + (pendingRow?.value ?? 0),
+              values.max_members,
+            ),
+          );
+
           // Lazy expiry: free the partial-unique slot held by any STALE (expired)
           // pending invitation for this email before inserting the new one. A
           // still-valid pending row is left intact, so the unique index then
           // rejects the insert (mapped to a duplicate-pending conflict below).
-          const now = new Date();
           await tx
             .update(schema.invitations)
             .set({ status: 'expired', updatedAt: now })

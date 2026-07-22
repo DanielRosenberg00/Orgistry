@@ -41,26 +41,6 @@ function makeOrg(store: InMemoryOrgStore, planKey: PlanKey): string {
   return org.id;
 }
 
-function addActiveProjects(
-  store: InMemoryOrgStore,
-  organizationId: string,
-  count: number,
-): void {
-  const now = new Date();
-  for (let i = 0; i < count; i += 1) {
-    store.projects.push({
-      id: createId('prj'),
-      organizationId,
-      name: `P${i}`,
-      createdByUserId: createId('user'),
-      deletedAt: null,
-      deletedByUserId: null,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-}
-
 function addActiveMembers(
   store: InMemoryOrgStore,
   organizationId: string,
@@ -117,57 +97,6 @@ describe('resolveEntitlements', () => {
     // No membership, role, or actor is supplied; resolution still succeeds.
     const resolution = await service.resolveEntitlements(orgId);
     expect(resolution.values.max_projects).toBe(20);
-  });
-});
-
-describe('requireProjectCreationQuota', () => {
-  it('allows when the active project count is below max_projects', async () => {
-    const { store, service } = buildService();
-    const orgId = makeOrg(store, 'free'); // max_projects = 3
-    addActiveProjects(store, orgId, 2);
-    await expect(
-      service.requireProjectCreationQuota(orgId),
-    ).resolves.toBeUndefined();
-  });
-
-  it('rejects with QUOTA_EXCEEDED when the count is at max_projects', async () => {
-    const { store, service } = buildService();
-    const orgId = makeOrg(store, 'free'); // max_projects = 3
-    addActiveProjects(store, orgId, 3);
-    await expect(
-      service.requireProjectCreationQuota(orgId),
-    ).rejects.toMatchObject({
-      code: 'QUOTA_EXCEEDED',
-      details: { quota: 'max_projects', limit: 3, current: 3 },
-    });
-  });
-
-  it('counts only active projects — soft-deleted ones do not count', async () => {
-    const { store, service } = buildService();
-    const orgId = makeOrg(store, 'free'); // max_projects = 3
-    addActiveProjects(store, orgId, 3);
-    // Soft-delete one: now 2 active, so a creation is allowed again.
-    store.projects.find((p) => p.organizationId === orgId)!.deletedAt =
-      new Date();
-    await expect(
-      service.requireProjectCreationQuota(orgId),
-    ).resolves.toBeUndefined();
-  });
-
-  it('a plan upgrade raises the ceiling and re-allows creation', async () => {
-    const { store, service } = buildService();
-    const orgId = makeOrg(store, 'free');
-    addActiveProjects(store, orgId, 3);
-    await expect(
-      service.requireProjectCreationQuota(orgId),
-    ).rejects.toMatchObject({ code: 'QUOTA_EXCEEDED' });
-
-    // Upgrade to Pro (max_projects = 20): the same usage now fits.
-    store.organizationPlans.find((p) => p.organizationId === orgId)!.planKey =
-      'pro';
-    await expect(
-      service.requireProjectCreationQuota(orgId),
-    ).resolves.toBeUndefined();
   });
 });
 

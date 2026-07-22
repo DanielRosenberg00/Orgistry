@@ -142,8 +142,14 @@ Three orthogonal concepts kept strictly separate: **permission** (may the user),
 **entitlement** (does the plan unlock it), **quota** (is there capacity). Fixed
 demo plans carry the values; an organization-level entitlement resolver maps plan
 → values (fail-safe, role-independent); reusable `requireEntitlement` /
-`requireQuota` helpers enforce them after the permission check. No billing. See
-[entitlements](./entitlements-plans-quotas.md).
+`requireQuota` helpers enforce them after the permission check. Since Sprint 20,
+quota-protected creations evaluate the ENTIRE quota decision INSIDE the
+creation transaction, serialized per (organization, quota kind) by a
+transaction-scoped PostgreSQL advisory lock (`quota-lock.ts`): the
+transaction resolves the current plan for itself (`entitlement.snapshot.ts`,
+plan row `FOR SHARE` — serialized against concurrent plan changes), counts,
+compares, and writes. Repository contracts carry no pre-resolved ceilings.
+No billing. See [entitlements](./entitlements-plans-quotas.md).
 
 ## Project resource pattern
 

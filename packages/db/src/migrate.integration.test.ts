@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import postgres from 'postgres';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -260,6 +261,8 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
       'uq_api_keys_secret_hash',
       'ix_api_keys_org_created',
       'ix_api_keys_org_active',
+      'uq_organizations_active_personal_owner',
+      'ix_security_events_org_created_id',
     ];
     const rows = await sql<{ indexname: string }[]>`
       SELECT indexname FROM pg_indexes WHERE schemaname = 'public'
@@ -336,6 +339,150 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
     await sql`DELETE FROM api_keys`;
     await sql`DELETE FROM organizations`;
     await sql`DELETE FROM users WHERE id = 'user_key_test'`;
+  });
+
+  it('enforces at most one ACTIVE personal workspace per user (ORG-PR-038)', async () => {
+    await sql`DELETE FROM memberships`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id = 'user_pw_test'`;
+    await sql`
+      INSERT INTO users (id, email, normalized_email, password_hash, display_name)
+      VALUES ('user_pw_test', 'pw@x.com', 'pw@x.com', 'hash', 'PW')
+    `;
+    await sql`
+      INSERT INTO organizations (id, name, slug, type, status, created_by_user_id)
+      VALUES ('org_pw_1', 'PW', 'pw-1', 'personal', 'active', 'user_pw_test')
+    `;
+
+    // A second ACTIVE personal workspace for the same user is rejected by the
+    // partial unique index — the invariant is DATABASE-enforced, not a
+    // service-level convention.
+    await expect(
+      sql`
+        INSERT INTO organizations (id, name, slug, type, status, created_by_user_id)
+        VALUES ('org_pw_2', 'PW2', 'pw-2', 'personal', 'active', 'user_pw_test')
+      `,
+    ).rejects.toThrow();
+
+    // Team organizations are NOT constrained: the same user may create many.
+    await expect(
+      sql`
+        INSERT INTO organizations (id, name, slug, type, status, created_by_user_id)
+        VALUES ('org_pw_t1', 'T1', 'pw-t1', 'team', 'active', 'user_pw_test'),
+               ('org_pw_t2', 'T2', 'pw-t2', 'team', 'active', 'user_pw_test')
+      `,
+    ).resolves.toBeDefined();
+
+    // An archived personal workspace frees the slot (lifecycle-compatible):
+    // the index is partial on status = 'active'.
+    await sql`UPDATE organizations SET status = 'archived', archived_at = now() WHERE id = 'org_pw_1'`;
+    await expect(
+      sql`
+        INSERT INTO organizations (id, name, slug, type, status, created_by_user_id)
+        VALUES ('org_pw_3', 'PW3', 'pw-3', 'personal', 'active', 'user_pw_test')
+      `,
+    ).resolves.toBeDefined();
+
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id = 'user_pw_test'`;
+  });
+
+  it('applies the 0011 DDL forward over a populated pre-Sprint-20 state', async () => {
+    // Forward-migration evidence for 0011_calm_gressill.sql: the two Sprint 20
+    // indexes must build over a POPULATED valid pre-Sprint-20 dataset (users
+    // each owning one active personal workspace, team organizations, existing
+    // org-scoped security events) — not only over an empty schema. The exact
+    // committed migration SQL is executed statement-by-statement.
+    await sql`DELETE FROM security_events`;
+    await sql`DELETE FROM memberships`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id LIKE 'user_fwd_%'`;
+    await sql`
+      INSERT INTO users (id, email, normalized_email, password_hash, display_name)
+      VALUES ('user_fwd_1', 'f1@x.com', 'f1@x.com', 'hash', 'F1'),
+             ('user_fwd_2', 'f2@x.com', 'f2@x.com', 'hash', 'F2')
+    `;
+    await sql`
+      INSERT INTO organizations (id, name, slug, type, status, created_by_user_id)
+      VALUES ('org_fwd_p1', 'P1', 'fwd-p1', 'personal', 'active', 'user_fwd_1'),
+             ('org_fwd_p2', 'P2', 'fwd-p2', 'personal', 'active', 'user_fwd_2'),
+             ('org_fwd_t1', 'T1', 'fwd-t1', 'team', 'active', 'user_fwd_1'),
+             ('org_fwd_t2', 'T2', 'fwd-t2', 'team', 'active', 'user_fwd_1')
+    `;
+    await sql`
+      INSERT INTO security_events (id, organization_id, actor_type, event_type, metadata)
+      VALUES ('sevt_fwd_1', 'org_fwd_t1', 'user', 'project.created', '{}'),
+             ('sevt_fwd_2', 'org_fwd_t1', 'user', 'project.created', '{}'),
+             ('sevt_fwd_3', NULL, 'anonymous', 'auth.login_failed', '{}')
+    `;
+
+    // Reviewer PREFLIGHT (documented in the Sprint 20 artifact): before
+    // applying the unique index over legacy data, detect duplicate active
+    // personal workspaces. Zero rows means the index will build; any row
+    // is an explicit operational precondition to resolve FIRST — the
+    // migration never deletes or merges data.
+    const duplicates = await sql<{ created_by_user_id: string }[]>`
+      SELECT created_by_user_id, count(*) AS n FROM organizations
+      WHERE type = 'personal' AND status = 'active'
+      GROUP BY created_by_user_id HAVING count(*) > 1
+    `;
+    expect(duplicates).toHaveLength(0);
+
+    // Re-apply the EXACT committed 0011 statements over the populated state.
+    await sql`DROP INDEX IF EXISTS uq_organizations_active_personal_owner`;
+    await sql`DROP INDEX IF EXISTS ix_security_events_org_created_id`;
+    const migrationSql = readFileSync(
+      new URL('../migrations/0011_calm_gressill.sql', import.meta.url),
+      'utf8',
+    );
+    for (const statement of migrationSql.split('--> statement-breakpoint')) {
+      await sql.unsafe(statement);
+    }
+
+    const rows = await sql<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes WHERE schemaname = 'public'
+    `;
+    const present = new Set(rows.map((row) => row.indexname));
+    expect(present.has('uq_organizations_active_personal_owner')).toBe(true);
+    expect(present.has('ix_security_events_org_created_id')).toBe(true);
+
+    // The seeded rows are untouched (the migration mutates no data).
+    const counts = await sql<{ orgs: string; events: string }[]>`
+      SELECT (SELECT count(*)::text FROM organizations) AS orgs,
+             (SELECT count(*)::text FROM security_events) AS events
+    `;
+    expect(counts[0]).toEqual({ orgs: '4', events: '3' });
+
+    await sql`DELETE FROM security_events`;
+    await sql`DELETE FROM organizations`;
+    await sql`DELETE FROM users WHERE id LIKE 'user_fwd_%'`;
+  });
+
+  it('backs the org-scoped audit read with a matching composite index (ORG-PR-014)', async () => {
+    // The index definition must match the read path exactly:
+    // WHERE organization_id = ? … ORDER BY created_at DESC, id DESC.
+    const [index] = await sql<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes
+      WHERE schemaname = 'public' AND indexname = 'ix_security_events_org_created_id'
+    `;
+    expect(index?.indexdef).toContain(
+      'ON public.security_events USING btree (organization_id, created_at, id)',
+    );
+
+    // Planner evidence, kept non-brittle for tiny fixtures: with sequential
+    // scans disabled inside this transaction, the audit-shaped query must be
+    // answerable through the composite index (plan choice on a large table is
+    // captured in the Sprint 20 docs, not asserted here).
+    await sql.begin(async (tx) => {
+      await tx`SET LOCAL enable_seqscan = off`;
+      const plan = await tx<{ 'QUERY PLAN': string }[]>`
+        EXPLAIN SELECT id FROM security_events
+        WHERE organization_id = 'org_plan_probe'
+        ORDER BY created_at DESC, id DESC LIMIT 50
+      `;
+      const planText = plan.map((row) => row['QUERY PLAN']).join('\n');
+      expect(planText).toContain('ix_security_events_org_created_id');
+    });
   });
 
   it('enforces normalized-email uniqueness', async () => {

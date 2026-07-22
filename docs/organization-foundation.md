@@ -212,12 +212,21 @@ and the partial index, so those flows can be added without a redesign.
 ### Invariants (do not change without a deliberate migration/design review)
 
 1. Every newly registered user has exactly one personal workspace
-   (`type=personal`, `status=active`) with an active Owner membership.
+   (`type=personal`, `status=active`) with an active Owner membership. Two
+   distinct guarantees back this (Sprint 20): the DATABASE enforces **at
+   most one** active personal workspace per creator (partial unique index
+   `uq_organizations_active_personal_owner` on `created_by_user_id`, which is
+   written once and never mutated; team organizations are unconstrained; an
+   archived personal workspace frees the slot), while EXISTENCE — that each
+   registered user has one — is the tested registration-completion
+   transaction's provisioning guarantee, not a database constraint.
 2. Every new organization has an active Owner membership for its creator.
 3. At most one **active** membership per `(user, organization)` (partial unique
    index).
 4. An **active membership** is required to list or read an organization through
-   the user-facing API.
+   the user-facing API; the single-organization read additionally enforces the
+   `org.read` permission (Sprint 20 — no behavior change while every fixed
+   role holds it).
 5. Organization **ID** is the authority boundary; **slug is never** an
    authorization input.
 6. Slug is globally unique.

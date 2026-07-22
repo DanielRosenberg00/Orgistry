@@ -73,8 +73,11 @@ export function createOrganizationRbacService(
     },
 
     async getEffectivePermissions(input) {
-      // Any active member may read THEIR OWN effective permissions; membership is
-      // the only requirement (no additional permission gate).
+      // INTENTIONAL membership-only exception (ORG-PR-053, documented stable
+      // contract): any active member may read THEIR OWN effective permissions.
+      // Gating self-introspection on a permission would be circular — a member
+      // whose role granted nothing could never learn that — so membership is
+      // the only requirement, by design and not by omission.
       const actor = await requireMembership(repo, input);
       return {
         organizationId: actor.organizationId,

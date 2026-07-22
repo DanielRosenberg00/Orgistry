@@ -94,11 +94,17 @@ quota; authorization is pure permission-set membership (no role-name branching i
 business logic); all repo lookups scope by `organizationId`; cross-tenant access
 returns a uniform 404 with negative tests across every module.
 
-**Gaps:** Admin can confer Owner with no role-transition guard (ORG-PR-017 —
-the governing policy, DG-2, was ratified by the Project Owner in Sprint 15:
-only active Owners may grant/remove Owner; enforcement remains open until
-Sprint 19). Two read paths authorize on membership alone, diverging
-from the pattern (ORG-PR-053; also a doc drift, ORG-PR-046).
+**Resolved (Sprint 20):** the ratified DG-2 policy is now enforced
+server-side, inside the member-mutation transaction — any role change that
+grants or removes Owner (and any removal of an Owner member) requires the
+actor's membership to be in the transaction's locked active-owner set
+(`owner-transition.ts` + `organization.repo.ts`), rejected with the standard
+safe 403 after target resolution (ORG-PR-017 closed). The two
+membership-only read paths were aligned: `GET /v1/organizations/:id` now
+enforces `org.read` (matching `api-surface.md`), and
+`…/permissions/effective` is the ONE documented intentional membership-only
+exception — self-introspection cannot be permission-gated without circularity
+(ORG-PR-053 closed).
 
 ## Concurrency correctness
 
@@ -107,10 +113,20 @@ from the pattern (ORG-PR-053; also a doc drift, ORG-PR-046).
 of a single token is atomic (row lock + single-use mutation + unique membership
 index).
 
-**Gaps:** quota ceilings for project/API-key/invitation *creation* check counts
-outside the write transaction, and acceptance across *distinct* invitations races
-under READ COMMITTED — all can overrun the ceiling (ORG-PR-029). Concurrency
-tests are narrow (ORG-PR-044).
+**Resolved (Sprint 20):** every quota-protected creation now serializes its
+ENTIRE quota decision inside one transaction under a transaction-scoped
+advisory lock keyed by (organization, quota kind): the CURRENT plan ceiling
+is resolved through the same transaction (plan row `FOR SHARE`, serialized
+against concurrent plan changes — repository contracts accept no
+pre-resolved ceilings), then the count, comparison, and insert follow —
+projects, API keys, invitation seat reservation, and every member-capacity
+consumer (distinct-token acceptance and invited registration completion
+share the locked acceptance body). Five real-PostgreSQL race suites prove
+the exact ceilings and fail deterministically when the lock is removed, and
+a six-test plan-coherence suite proves stale ceilings cannot be used
+(ORG-PR-029/044 closed). Lock order, plan-mutation interaction, and
+downgrade semantics:
+[sprint-20-quota-race-audit.md](sprint-20-quota-race-audit.md).
 
 ## Database & migrations
 
@@ -119,12 +135,15 @@ active-membership and pending-invitation invariants; additive, transactional
 migrations; a thorough migrate-from-scratch integration test; keyset pagination
 everywhere with bounded limits.
 
-**Gaps:** `security_events.organization_id` is unindexed on the audit read path
-(ORG-PR-014); no retention for unbounded tables (ORG-PR-015); one app+migration
+**Gaps:** no retention for unbounded tables (ORG-PR-015); one app+migration
 superuser (ORG-PR-022); no pool/statement/lock timeouts (ORG-PR-021); no
-rollback strategy (ORG-PR-028); the personal-workspace invariant is unenforced
-(ORG-PR-038); `reset-test` guard weaker than documented (ORG-PR-037); dead
-`email_verification_tokens` (ORG-PR-048) and a redundant index (ORG-PR-051).
+rollback strategy (ORG-PR-028); `reset-test` guard weaker than documented
+(ORG-PR-037); dead `email_verification_tokens` (ORG-PR-048) and a redundant
+index (ORG-PR-051). *Sprint 20 closed two former gaps:* the audit read path
+is now backed by `ix_security_events_org_created_id` (ORG-PR-014), and at most one
+ACTIVE personal workspace per user is enforced by the partial unique index
+`uq_organizations_active_personal_owner` (existence per user remains the
+tested provisioning transaction's guarantee — ORG-PR-038).
 
 ## APIs
 

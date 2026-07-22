@@ -6,6 +6,10 @@ import { and, desc, eq, lt, or } from 'drizzle-orm';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
 import { memberNotFoundError, lastOwnerRequiredError } from './member.errors';
 import { MEMBER_EVENT_TYPES, type MemberEventType } from './member.events';
+import {
+  assertOwnerChangeAuthority,
+  roleChangeTouchesOwner,
+} from './owner-transition';
 import { organizationSlugTakenError } from './organization.errors';
 import {
   insertOrganizationWithOwnerMembership,
@@ -326,6 +330,17 @@ export function createDbOrganizationRepository(
           throw memberNotFoundError();
         }
 
+        // DG-2 Owner transition policy (after target resolution, so cross-
+        // tenant probes keep the uniform 404; before the Last Owner check, so
+        // a non-Owner actor is rejected regardless of Owner count). The
+        // actor's Owner status is read from the LOCKED active-owner set, so a
+        // concurrently demoted actor cannot still confer Owner.
+        if (roleChangeTouchesOwner(target.roleId, params.newRoleId)) {
+          assertOwnerChangeAuthority(
+            activeOwnerIds.includes(params.actorMembershipId),
+          );
+        }
+
         const demotingOwner =
           target.roleId === ROLE_IDS.owner &&
           params.newRoleId !== ROLE_IDS.owner;
@@ -384,6 +399,13 @@ export function createDbOrganizationRepository(
             throw new Error('Member view missing for removed membership.');
           }
           return existing;
+        }
+
+        // DG-2: removing an Owner member removes the Owner role — Owner-only.
+        if (target.roleId === ROLE_IDS.owner) {
+          assertOwnerChangeAuthority(
+            activeOwnerIds.includes(params.actorMembershipId),
+          );
         }
 
         // Last Owner invariant: removing the only active Owner is forbidden.

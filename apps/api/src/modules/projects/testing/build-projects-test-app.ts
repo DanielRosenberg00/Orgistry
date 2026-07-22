@@ -13,8 +13,6 @@ import {
   createInMemoryOrgStore,
   type InMemoryOrgStore,
 } from '../../organization/testing/in-memory-org-store';
-import { createEntitlementService } from '../../entitlements/entitlement.service';
-import { createInMemoryEntitlementRepository } from '../../entitlements/testing/in-memory-plan-repo';
 import {
   createProjectService,
   type ProjectRateLimits,
@@ -83,15 +81,9 @@ export async function buildProjectsTestApp(
     mailer,
   });
   const organizationService = createOrganizationService({ repo: orgRepo });
-  // The entitlement service enforces the max_projects quota on project create,
-  // reading plan state and counting active projects from the same shared store.
-  const entitlementService = createEntitlementService({
-    repo: createInMemoryEntitlementRepository(orgStore),
-  });
   const projectService = createProjectService({
     accessControl: orgRepo,
     projects: projectRepo,
-    entitlements: entitlementService,
     rateLimiter: options.rateLimiter,
     rateLimits: options.projectRateLimits,
     rateLimitFailureMode: options.rateLimitFailureMode,

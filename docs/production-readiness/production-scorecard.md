@@ -25,12 +25,12 @@ average — do not read a high domain score as launch clearance.
 | --- | --- | --- | --- | --- | --- | --- |
 | Product completeness | 2 | Yes | Full org/RBAC/quota/keys/invitations/audit implemented & tested | No account recovery class | ORG-PR-004, 024, 025, 039, 045 | High |
 | Authentication | 2 | Yes | Argon2id, hardened login, immediate revocation | Recovery absent; prod secret guards | ORG-PR-003, 004, 009 | High |
-| Authorization | 3 | Partly | Permission-first, path-derived tenancy, negative tests | Admin→Owner unguarded | ORG-PR-017 | High |
-| Tenant isolation | 3 | No | Repo org-scoping, uniform 404, real-DB tests | Read-path divergence (latent) | ORG-PR-053 | High |
-| Data integrity | 2 | Partly | Partial-unique invariants, Last-Owner locking | Quota TOCTOU; workspace invariant | ORG-PR-029, 038 | High |
+| Authorization | 3 | Partly | Permission-first, path-derived tenancy, DG-2 Owner-transition guard in-transaction (S20), negative tests | (Owner-transition gap closed S20) | — | High |
+| Tenant isolation | 3 | No | Repo org-scoping, uniform 404, real-DB tests; read paths permission-aligned (S20) | (read-path divergence closed S20) | — | High |
+| Data integrity | 3 | Partly | Partial-unique invariants (incl. at-most-one-active-personal-workspace, S20), Last-Owner locking, serialized quota transactions with in-tx plan snapshots and race proofs (S20) | Retention absent | ORG-PR-015 | High |
 | Application security | 2 | Yes | Safe error handler, no DTO leaks, in-mem token | No headers/proxy/global limit | ORG-PR-010, 011, 012, 013 | High |
 | Frontend | 1 | No (target: demo) | Exemplary token/secret handling | No error boundary/CSP | ORG-PR-023, 035, 036 | High |
-| Testing | 2 | Partly | 67 files, strong negative/isolation coverage | No failure-injection/E2E/concurrency breadth | ORG-PR-026, 044 | High |
+| Testing | 2 | Partly | Strong negative/isolation coverage + real-DB quota/authz concurrency races (S20) | No failure-injection/E2E | ORG-PR-026 | High |
 | CI/CD | 2 | Yes | Two-job CI mirrors validation | No release pipeline; pinning/permissions | ORG-PR-001, 019 | High |
 | Supply chain | 2 | Yes | Lockfile, `onlyBuiltDependencies` | Unscanned; high advisory in range | ORG-PR-018, 020 | Medium |
 | Infrastructure | 0 | Yes | (local Compose only) | No deploy artifact/IaC | ORG-PR-001, 022 | High |

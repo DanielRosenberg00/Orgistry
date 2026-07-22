@@ -34,10 +34,13 @@ export interface RegistrationInvitations {
     rawToken: string,
     normalizedEmail: string,
   ): Promise<{ invitationId: string; organizationName: string }>;
-  /** Completion-time context resolution. Null when the reference is dead. */
-  resolveCompletionContext(
-    invitationId: string,
-  ): Promise<{ maxMembers: number } | null>;
+  /**
+   * Completion-time existence check: whether the stored invitation reference
+   * still resolves. The acceptance transaction re-validates everything else
+   * (lifecycle, email, quota — with the plan ceiling resolved inside that
+   * transaction) authoritatively.
+   */
+  resolveCompletionContext(invitationId: string): Promise<boolean>;
 }
 
 /** Inputs for staging (or re-staging) a pending registration. */
@@ -58,16 +61,16 @@ export interface IssuePendingRegistrationParams {
 }
 
 /**
- * Invitation acceptance context for the completion transaction, resolved by
- * the service BEFORE the transaction (plan ceilings live outside the token
- * tables). When the stored invitation reference could not be resolved the
- * service passes `null` context and the repository reports `unavailable`
- * without attempting acceptance.
+ * Invitation acceptance context for the completion transaction. The service
+ * confirms the stored reference still RESOLVES before the transaction; when
+ * it does not, it passes `null` context and the repository reports
+ * `unavailable` without attempting acceptance. No plan-derived value crosses
+ * this boundary — the acceptance transaction resolves the `max_members`
+ * ceiling for itself (Sprint 20), so a stale pre-transaction plan read is
+ * structurally impossible.
  */
 export interface CompletionInvitationContext {
   invitationId: string;
-  /** The organization plan's `max_members` ceiling (resolved before the tx). */
-  maxMembers: number;
   /** Non-secret request metadata for the acceptance action events. */
   eventContext: {
     requestId: string | null;

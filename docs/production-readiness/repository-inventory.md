@@ -51,13 +51,13 @@ except generated/derived artifacts and test-only harness files (reason given).
 | Module | Responsibility | Maturity | Key findings |
 | --- | --- | --- | --- |
 | `auth` | Register/login/refresh/logout/sessions/security-events | Partial | Recovery surface absent (ORG-PR-004/024/039/045); fail-open limits (ORG-PR-009); enumeration (ORG-PR-030). |
-| `organization` | Org context, membership, org-RBAC, provisioning | Production-capable* | Solid tenant isolation & Last-Owner; role-transition gap (ORG-PR-017); read-path divergence (ORG-PR-053). |
+| `organization` | Org context, membership, org-RBAC, provisioning | Production-capable | Solid tenant isolation & Last-Owner; DG-2 Owner-transition guard in-transaction and read paths permission-aligned (Sprint 20). |
 | `rbac` | Global role/permission catalog reads | Production-capable | Authenticated, intentionally not permission-gated. |
-| `projects` | Canonical org-scoped resource | Production-capable | Quota race (ORG-PR-029). |
-| `entitlements` | Plans, entitlements, quotas | Partial | Quota TOCTOU (ORG-PR-029); demo plan-change endpoint. |
+| `projects` | Canonical org-scoped resource | Production-capable | Create quota serialized in-transaction (Sprint 20). |
+| `entitlements` | Plans, entitlements, quotas (+ `quota-lock.ts` serialization) | Partial | Quota TOCTOU closed (Sprint 20); demo plan-change endpoint. |
 | `invitations` | Invitation lifecycle + mailer | Partial | Mailpit-only mailer (ORG-PR-002); no rate limit (ORG-PR-012/032). |
 | `api-keys` | Machine credentials + external read API | Partial | Pre-auth event write (ORG-PR-013); best-effort writes not isolated (ORG-PR-034). |
-| `audit` | Org-scoped audit read API | Partial | Backing table unindexed on org (ORG-PR-014); no retention (ORG-PR-015). |
+| `audit` | Org-scoped audit read API | Partial | Org/time composite index shipped (Sprint 20, ORG-PR-014 closed); no retention (ORG-PR-015). |
 
 *Production-capable at the authorization/isolation layer; the app as a whole is Partial.
 
@@ -71,11 +71,11 @@ are in `docs/api-surface.md` (accurate except the `org.read` drift, ORG-PR-046/0
 | --- | --- | --- | --- |
 | Health | `GET /health`, `GET /ready` | none | `/ready` probes PG+Redis; exposes dep names (ORG-PR-052). |
 | Auth | `POST /v1/auth/register`,`/login`; `GET /me`; `POST /refresh`,`/logout`; `GET /sessions`; `DELETE /sessions/:id` | mixed | register/login rate-limited; refresh/logout require CSRF header + cookie. |
-| Organizations | `POST /v1/organizations`; `GET /v1/organizations`; `GET /:organizationId` | Bearer | list scoped to active memberships; read is membership-only (ORG-PR-053). |
-| Members | `GET/PATCH :id/role/DELETE :id` under `/:organizationId/members` | Bearer | `members.*` perms; Last-Owner protected; role-transition gap (ORG-PR-017). |
+| Organizations | `POST /v1/organizations`; `GET /v1/organizations`; `GET /:organizationId` | Bearer | list scoped to active memberships; read enforces `org.read` (Sprint 20). |
+| Members | `GET/PATCH :id/role/DELETE :id` under `/:organizationId/members` | Bearer | `members.*` perms; Last-Owner protected; DG-2 Owner-transition guard (Sprint 20). |
 | Org-RBAC | `GET …/roles`,`/permissions`,`/permissions/matrix`,`/permissions/effective` | Bearer | effective is membership-only by design. |
 | Global RBAC | `GET /v1/roles`,`/permissions`,`/permissions/matrix` | Bearer | authenticated, not permission-gated (intentional). |
-| Projects | `GET`/`POST`/`GET :id`/`PATCH :id`/`DELETE :id` under `/:organizationId/projects` | Bearer | `projects.*` + `max_projects` quota (race: ORG-PR-029). |
+| Projects | `GET`/`POST`/`GET :id`/`PATCH :id`/`DELETE :id` under `/:organizationId/projects` | Bearer | `projects.*` + `max_projects` quota (serialized in-transaction, Sprint 20). |
 | Plans | `GET …/plan`,`/entitlements`; `PATCH …/plan/demo` | Bearer | `plan.change_demo` Owner-only; demo-only endpoint. |
 | API keys | `POST`/`GET`/`DELETE :id` under `/:organizationId/api-keys` | Bearer | `api_keys.*` + `api_keys_access` + `max_api_keys`; no rate limit (ORG-PR-032). |
 | External API | `GET /v1/external/projects` | API key | scope `projects:read`; per-key/per-org fail-open limits; pre-auth event write (ORG-PR-013). |
@@ -94,7 +94,7 @@ seed-supplied catalog tables. **All FKs `ON DELETE no action`** (no cascades).
 | `sessions` | login sessions | `expires_at`, `revoked_at`; idx user_id, expires_at. |
 | `refresh_tokens` | rotating tokens | hash-only, `family_id`, `used_at`, `replacement_token_id`; `uq_refresh_tokens_token_hash`. |
 | `email_verification_tokens` | **unused scaffolding** | ORG-PR-048; never read/written. |
-| `security_events` | auth + audit backing store | `organization_id` (no FK, **no index** — ORG-PR-014); append-only, no retention (ORG-PR-015). |
+| `security_events` | auth + audit backing store | `organization_id` (no FK; composite `(organization_id, created_at, id)` index — Sprint 20); append-only, no retention (ORG-PR-015). |
 | `roles` | fixed 4 roles | `uq_roles_key`; seeded `0001`. |
 | `organizations` | orgs | `type` (personal/team), `status` (active/archived/suspended — inert), `uq_organizations_slug` (no name unique). |
 | `memberships` | user↔org | partial unique `uq_memberships_active_user_org`; soft-remove. |
@@ -109,7 +109,7 @@ seed-supplied catalog tables. **All FKs `ON DELETE no action`** (no cascades).
 Invariant enforcement summary: DB-enforced (email uniqueness, slug uniqueness,
 active-membership uniqueness, pending-invitation uniqueness, one plan per org);
 app-only transactional (Last-Owner, refresh single-use, invitation single-use,
-quotas); **unenforced convention** (one personal workspace per user — ORG-PR-038).
+quotas); AT MOST one active personal workspace per user is DB-enforced (partial unique `uq_organizations_active_personal_owner`, Sprint 20 — existence per user is the tested provisioning transaction's guarantee).
 
 ## Migration inventory
 
@@ -164,7 +164,7 @@ floating tags (ORG-PR-042). `infra/postgres-init/01-create-test-db.sql` creates
 
 Strong negative/tenant-isolation/security-event coverage. **Absent:** browser
 E2E, load, fuzz, live failure-injection (ORG-PR-026), broad concurrency
-(ORG-PR-044), live SMTP (ORG-PR-041).
+(ORG-PR-044 closed in Sprint 20 — real-PostgreSQL quota/authz races), live SMTP (ORG-PR-041).
 
 ## Documentation inventory
 

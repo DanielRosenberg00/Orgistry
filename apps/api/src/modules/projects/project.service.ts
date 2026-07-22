@@ -17,7 +17,6 @@ import {
   type RateLimiter,
   type RateLimitFailureMode,
 } from '../../lib/rate-limit';
-import type { EntitlementService } from '../entitlements/entitlement.service';
 import {
   type OrganizationActor,
   requireMembership,
@@ -64,13 +63,6 @@ export interface ProjectServiceOptions {
    * `config.rateLimit.failureMode`; defaults open for test usability.
    */
   rateLimitFailureMode?: RateLimitFailureMode;
-  /**
-   * Organization-level entitlement/quota service. Project CREATE enforces the
-   * `max_projects` quota through it, AFTER the permission check. This is the
-   * Sprint 7 separation made concrete: permission says the user may create a
-   * project; the quota says the organization's plan still has room.
-   */
-  entitlements: EntitlementService;
 }
 
 /** Per-request security metadata threaded from the route into action events. */
@@ -188,7 +180,6 @@ export function createProjectService(
   const {
     accessControl,
     projects,
-    entitlements,
     rateLimiter = createNoopRateLimiter(),
     rateLimitFailureMode = 'open',
   } = options;
@@ -273,11 +264,12 @@ export function createProjectService(
 
       // Enforcement order: permission (above) THEN quota. A user without
       // projects.create is already blocked; an authorized user is still blocked
-      // when the organization's plan is at its max_projects ceiling. The quota
-      // check throws QUOTA_EXCEEDED and runs BEFORE any write, so a quota failure
-      // creates no project and records no project.created event.
-      await entitlements.requireProjectCreationQuota(actor.organizationId);
-
+      // when the organization's plan is at its max_projects ceiling. The whole
+      // quota decision — CURRENT plan ceiling, active-project count, and the
+      // comparison — runs INSIDE the creation transaction under the
+      // organization's project-quota lock (ORG-PR-029), so neither concurrent
+      // creates nor a concurrent plan change can race it, and a quota failure
+      // creates no project and records no event.
       const project = await projects.createProject({
         organizationId: actor.organizationId,
         name: input.name,

@@ -97,8 +97,6 @@ export interface AcceptInvitationParams {
   acceptingUserId: string;
   /** The accepting account's normalized email (for the email-match invariant). */
   acceptingUserNormalizedEmail: string;
-  /** The plan's `max_members` ceiling, resolved before the transaction. */
-  maxMembers: number;
   ctx: InvitationActionContext;
 }
 
@@ -123,7 +121,16 @@ export interface RevokeInvitationParams {
  * hard-deleted.
  */
 export interface InvitationRepository {
-  /** Create a pending invitation under `organizationId` and record `invitation.created`. */
+  /**
+   * Create a pending invitation under `organizationId` and record
+   * `invitation.created`, with the seat-reservation quota enforced atomically:
+   * one transaction acquires the organization's member-quota lock, resolves
+   * the CURRENT plan's `max_members` through the same transaction (plan row
+   * `FOR SHARE` — a pre-resolved limit could be stale, since plan assignment
+   * is runtime-mutable), counts active members + non-expired pending
+   * invitations, rejects with `QUOTA_EXCEEDED` at the ceiling, then inserts.
+   * A quota failure writes nothing.
+   */
   createInvitation(params: CreateInvitationParams): Promise<InvitationView>;
 
   /**

@@ -4,6 +4,8 @@ import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { and, count, eq } from 'drizzle-orm';
 import { createId } from '@orgistry/shared';
 import { quotaExceededError } from '../entitlements/entitlement.errors';
+import { acquireOrganizationQuotaLock } from '../entitlements/quota-lock';
+import { lockOrganizationEntitlements } from '../entitlements/entitlement.snapshot';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
 import {
   alreadyActiveMemberError,
@@ -34,11 +36,14 @@ import type {
  *    acceptance all commit or roll back together (no partial state).
  *
  * The checks run in a fixed, auditable order:
+ *   0. organization member-quota lock (Sprint 20 — serializes DISTINCT-token
+ *      acceptances and every other member-capacity consumer), then the plan
+ *      snapshot resolved through THIS transaction (plan row FOR SHARE)
  *   1. lookup (locked by token hash)
  *   2. lifecycle validation (accepted / revoked / expired)
  *   3. email match
  *   4. duplicate active membership prevention
- *   5. active-member quota
+ *   5. active-member quota (now race-free under the step-0 lock)
  *   6. membership creation
  *   7. invitation accepted mutation
  *   8. event recording (invitation.accepted + membership.created_from_invitation)
@@ -98,14 +103,43 @@ export async function acceptInvitationWithinTransaction(
 ): Promise<AcceptInvitationResult> {
   const now = new Date();
 
-  // 1. Lookup — lock the invitation row so two concurrent acceptances of the
-  //    same invitation serialize. The selector is either the presented token's
-  //    hash (existing-user accept) or the stable invitation ID a pending
-  //    registration stored at request time (Sprint 18 completion).
   const lookup =
     'tokenHash' in params.selector
       ? eq(schema.invitations.tokenHash, params.selector.tokenHash)
       : eq(schema.invitations.id, params.selector.invitationId);
+
+  // 0. Member-quota serialization (Sprint 20, ORG-PR-029): the row lock below
+  //    only serializes acceptances of the SAME invitation; two DISTINCT valid
+  //    tokens for one organization would each count `limit - 1` members and
+  //    both insert. The organization's member-quota lock serializes all
+  //    member-capacity consumers. The organization id comes from a non-locking
+  //    pre-read (it is immutable on an invitation row), so the quota lock is
+  //    acquired BEFORE any invitation row lock — the documented lock order.
+  const [preRead] = await tx
+    .select({ organizationId: schema.invitations.organizationId })
+    .from(schema.invitations)
+    .where(lookup)
+    .limit(1);
+  if (!preRead) {
+    throw invitationInvalidError();
+  }
+  await acquireOrganizationQuotaLock(tx, preRead.organizationId, 'members');
+
+  // 0b. Plan snapshot — the `max_members` ceiling is resolved INSIDE this
+  //     transaction (plan row FOR SHARE), never captured by a caller
+  //     beforehand: plan assignment is runtime-mutable, so a pre-resolved
+  //     limit could reflect a plan state that no longer exists. The FOR SHARE
+  //     lock also blocks a concurrent plan change from committing between
+  //     this read and the membership insert.
+  const { values } = await lockOrganizationEntitlements(
+    tx,
+    preRead.organizationId,
+  );
+
+  // 1. Lookup — lock the invitation row so two concurrent acceptances of the
+  //    same invitation serialize. The selector is either the presented token's
+  //    hash (existing-user accept) or the stable invitation ID a pending
+  //    registration stored at request time (Sprint 18 completion).
   const [invitation] = await tx
     .select()
     .from(schema.invitations)
@@ -144,7 +178,8 @@ export async function acceptInvitationWithinTransaction(
   }
 
   // 5. Active-member quota — counted inside the transaction, atomic with the
-  //    membership insert below, against the resolved plan ceiling.
+  //    membership insert below, against the ceiling this SAME transaction
+  //    resolved in step 0b.
   const [memberCountRow] = await tx
     .select({ value: count() })
     .from(schema.memberships)
@@ -155,10 +190,10 @@ export async function acceptInvitationWithinTransaction(
       ),
     );
   const activeMembers = memberCountRow?.value ?? 0;
-  if (activeMembers >= params.maxMembers) {
+  if (activeMembers >= values.max_members) {
     throw quotaExceededError({
       quota: ENTITLEMENT_KEYS.maxMembers,
-      limit: params.maxMembers,
+      limit: values.max_members,
       current: activeMembers,
     });
   }

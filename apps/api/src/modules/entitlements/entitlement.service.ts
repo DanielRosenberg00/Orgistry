@@ -62,27 +62,12 @@ export interface EntitlementService {
   resolveEntitlements(organizationId: string): Promise<EntitlementResolution>;
 
   /**
-   * Require that creating one more project fits under `max_projects`, or reject
-   * with `QUOTA_EXCEEDED`. Resolves entitlements (fail-safe) then compares the
-   * active project count to the plan ceiling.
-   */
-  requireProjectCreationQuota(organizationId: string): Promise<void>;
-
-  /**
    * Require that adding one more member fits under `max_members`, or reject with
    * `QUOTA_EXCEEDED`. The reusable membership-creation quota boundary: invitation
    * ACCEPTANCE composes this (it counts only active members), and it is checked
    * again at the moment a membership is created.
    */
   requireMemberAdditionQuota(organizationId: string): Promise<void>;
-
-  /**
-   * The organization plan's `max_members` ceiling. Exposed so the invitation
-   * acceptance transaction can re-check the active-member count against the limit
-   * atomically with the membership insert (the count happens inside the
-   * transaction; this only resolves the plan-derived limit).
-   */
-  getMaxMembers(organizationId: string): Promise<number>;
 
   /**
    * Require that RESERVING one more seat fits under `max_members`, or reject with
@@ -107,17 +92,6 @@ export interface EntitlementService {
    * external API request so a downgraded plan disables existing keys.
    */
   requireApiKeysAccess(organizationId: string): Promise<void>;
-
-  /**
-   * Require that creating one more API key fits under `max_api_keys`, or reject
-   * with `QUOTA_EXCEEDED`. The active-key count is supplied by the caller (the
-   * API key repository owns that count); this method owns only the policy
-   * comparison, keeping the entitlement/quota model unchanged.
-   */
-  requireApiKeyCreationQuota(
-    organizationId: string,
-    activeApiKeyCount: number,
-  ): Promise<void>;
 
   /** Resolve audit entitlements (access flag + modeled retention window). */
   resolveAuditEntitlements(organizationId: string): Promise<AuditEntitlements>;
@@ -181,15 +155,6 @@ export function createEntitlementService(
     getPlanState,
     resolveEntitlements,
 
-    async requireProjectCreationQuota(organizationId) {
-      const { values } = await resolveEntitlements(organizationId);
-      const current = await repo.countActiveProjects(organizationId);
-      requireQuota(
-        ENTITLEMENT_KEYS.maxProjects,
-        evaluateCountQuota(current, values.max_projects),
-      );
-    },
-
     async requireMemberAdditionQuota(organizationId) {
       const { values } = await resolveEntitlements(organizationId);
       const current = await repo.countActiveMembers(organizationId);
@@ -197,11 +162,6 @@ export function createEntitlementService(
         ENTITLEMENT_KEYS.maxMembers,
         evaluateCountQuota(current, values.max_members),
       );
-    },
-
-    async getMaxMembers(organizationId) {
-      const { values } = await resolveEntitlements(organizationId);
-      return values.max_members;
     },
 
     async requireMemberReservationQuota(organizationId, pendingInvitationCount) {
@@ -225,14 +185,6 @@ export function createEntitlementService(
     async requireApiKeysAccess(organizationId) {
       const { values } = await resolveEntitlements(organizationId);
       requireEntitlement(values, ENTITLEMENT_KEYS.apiKeysAccess);
-    },
-
-    async requireApiKeyCreationQuota(organizationId, activeApiKeyCount) {
-      const { values } = await resolveEntitlements(organizationId);
-      requireQuota(
-        ENTITLEMENT_KEYS.maxApiKeys,
-        evaluateCountQuota(activeApiKeyCount, values.max_api_keys),
-      );
     },
 
     async resolveAuditEntitlements(organizationId) {

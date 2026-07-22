@@ -125,6 +125,32 @@ pnpm validate:integration    # db:reset:test + test:integration
   equality matrix lives in `invitation.routes.test.ts`, and the web demo's
   registration flows — plain and invitation-aware — are covered by
   `registration.test.tsx` and `invitation-registration.test.tsx`).
+- The Sprint 20 authorization & concurrency guarantees hold against live
+  PostgreSQL: `quota-concurrency.integration.test.ts` fires 4–6 genuinely
+  parallel attempts at a remaining capacity of ONE for project creation, API
+  key creation, DISTINCT-token invitation acceptance, invited registration
+  completion, and invitation-create seat reservation — asserting the exact
+  success count, `QUOTA_EXCEEDED` (or the documented invitation-`unavailable`
+  completion outcome) on the losers, final DB state (no ceiling overrun, no
+  orphans), and success events matching committed mutations. The suite warms
+  the connection pool first so the transactions genuinely overlap, and it
+  fails deterministically if the quota lock is removed.
+  `quota-plan-coherence.integration.test.ts` proves the quota decision uses
+  the TRANSACTION-CURRENT plan (repository contracts carry no pre-resolved
+  ceilings): a committed downgrade/upgrade is honored by the very next
+  create/acceptance, an IN-FLIGHT plan change serializes against the create
+  (`FOR SHARE` snapshot vs the plan mutation's `FOR UPDATE`), the API-key
+  access gate and ceiling come from one coherent snapshot, and missing plan
+  state fails safe inside the transaction.
+  `migrate.integration.test.ts` additionally proves the Sprint 20 schema
+  invariants: the at-most-one-active-personal-workspace partial unique index
+  (with team-org and archived-lifecycle counter-cases), forward application
+  of the exact committed 0011 DDL over a POPULATED pre-Sprint-20 dataset
+  (preceded by the reviewer preflight duplicate-workspace query), and the
+  `ix_security_events_org_created_id` audit-read index (definition + an
+  `enable_seqscan = off` EXPLAIN). `member.integration.test.ts` proves DG-2
+  transactionally (Admin can neither self-promote to Owner nor demote/remove
+  one; Owner promotion + hand-off works).
 - The Sprint 19 edge hardening holds: a failed-auth **storm** integration test
   proves the per-IP durable-write bound on external API-key auth failures
   (writes stop at the allowance while the uniform 401 contract holds). The

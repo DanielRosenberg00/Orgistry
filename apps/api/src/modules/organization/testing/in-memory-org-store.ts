@@ -16,7 +16,12 @@ import {
   ROLE_PERMISSION_SEED,
   ROLE_SEED,
 } from '@orgistry/db';
+import {
+  entitlementsForPlan,
+  type EntitlementValues,
+} from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
+import { planStateMissingError } from '../../entitlements/entitlement.errors';
 
 /**
  * Shared in-memory organization persistence for unit/route tests.
@@ -157,4 +162,26 @@ export function provisionDefaultOrganizationPlan(
   };
   store.organizationPlans.push(planState);
   return planState;
+}
+
+/**
+ * In-memory mirror of the transaction-aware entitlement snapshot
+ * (`entitlements/entitlement.snapshot.ts — lockOrganizationEntitlements`):
+ * resolve the organization's CURRENT plan to its entitlement values at the
+ * moment a quota-protected mutation runs. Fail-safe like the real seam — a
+ * missing plan row throws `PLAN_STATE_MISSING`. The synchronous read inside
+ * the fake repositories' no-await mutation sections mirrors the FOR SHARE
+ * coherence of the database transaction under Node's single-threaded loop.
+ */
+export function resolveStoreEntitlements(
+  store: InMemoryOrgStore,
+  organizationId: string,
+): EntitlementValues {
+  const planState = store.organizationPlans.find(
+    (row) => row.organizationId === organizationId,
+  );
+  if (!planState) {
+    throw planStateMissingError();
+  }
+  return entitlementsForPlan(planState.planKey);
 }

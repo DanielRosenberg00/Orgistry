@@ -1,8 +1,12 @@
 import type { Database, DbExecutor, ProjectRow } from '@orgistry/db';
 import { schema } from '@orgistry/db';
+import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
-import { and, desc, eq, isNull, lt, or } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, lt, or } from 'drizzle-orm';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
+import { evaluateCountQuota, requireQuota } from '../entitlements/quota';
+import { acquireOrganizationQuotaLock } from '../entitlements/quota-lock';
+import { lockOrganizationEntitlements } from '../entitlements/entitlement.snapshot';
 import { projectNotFoundError } from './project.errors';
 import {
   PROJECT_EVENT_TYPES,
@@ -99,6 +103,30 @@ export function createDbProjectRepository(db: Database): ProjectRepository {
 
     async createProject(params: CreateProjectParams): Promise<ProjectRow> {
       return db.transaction(async (tx) => {
+        // Serialize concurrent creates for this organization, then resolve the
+        // CURRENT plan ceiling, count, and insert in the SAME transaction —
+        // neither a concurrent create nor a concurrent plan change can race
+        // the decision (Sprint 20, ORG-PR-029). A quota rejection aborts
+        // before any write.
+        await acquireOrganizationQuotaLock(tx, params.organizationId, 'projects');
+        const { values } = await lockOrganizationEntitlements(
+          tx,
+          params.organizationId,
+        );
+        const [row] = await tx
+          .select({ value: count() })
+          .from(schema.projects)
+          .where(
+            and(
+              eq(schema.projects.organizationId, params.organizationId),
+              isNull(schema.projects.deletedAt),
+            ),
+          );
+        requireQuota(
+          ENTITLEMENT_KEYS.maxProjects,
+          evaluateCountQuota(row?.value ?? 0, values.max_projects),
+        );
+
         const [project] = await tx
           .insert(schema.projects)
           .values({

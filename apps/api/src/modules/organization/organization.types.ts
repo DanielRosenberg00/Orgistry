@@ -55,6 +55,12 @@ export interface ChangeMemberRoleParams {
   newRoleId: string;
   /** The acting user (for the audit event). */
   actorUserId: string;
+  /**
+   * The acting user's membership in this organization. The DG-2 Owner
+   * transition guard verifies it against the transaction's locked
+   * active-owner set when the change grants or removes the Owner role.
+   */
+  actorMembershipId: string;
   ctx: MemberAuditContext;
 }
 
@@ -64,6 +70,8 @@ export interface RemoveMemberParams {
   membershipId: string;
   /** The acting user (recorded as `removedByUserId` and in the audit event). */
   actorUserId: string;
+  /** The acting user's membership (DG-2 guard — removing an Owner is Owner-only). */
+  actorMembershipId: string;
   ctx: MemberAuditContext;
 }
 
@@ -143,21 +151,25 @@ export interface OrganizationRepository extends AccessControlRepository {
   listActiveMembers(params: ListMembersParams): Promise<MemberView[]>;
 
   /**
-   * Change a member's role, transactionally enforcing the Last Owner invariant.
+   * Change a member's role, transactionally enforcing the DG-2 Owner
+   * transition policy and the Last Owner invariant.
    *
    * Within a single transaction it locks the organization's active-owner set,
-   * validates the target is an active member of the organization, rejects a
-   * demotion that would remove the last active Owner (`LAST_OWNER_REQUIRED`),
-   * applies the change, and records an audit event. Throws `MEMBER_NOT_FOUND`
-   * when the target is not an active member of the organization.
+   * validates the target is an active member of the organization, rejects an
+   * Owner-touching change by a non-Owner actor (safe 403), rejects a demotion
+   * that would remove the last active Owner (`LAST_OWNER_REQUIRED`), applies
+   * the change, and records an audit event. Throws `MEMBER_NOT_FOUND` when the
+   * target is not an active member of the organization.
    */
   changeMemberRole(params: ChangeMemberRoleParams): Promise<MemberView>;
 
   /**
-   * Soft-remove a member, transactionally enforcing the Last Owner invariant.
+   * Soft-remove a member, transactionally enforcing the DG-2 Owner transition
+   * policy and the Last Owner invariant.
    *
    * Within a single transaction it locks the organization's active-owner set,
-   * validates the target belongs to the organization, rejects removing the last
+   * validates the target belongs to the organization, rejects removal of an
+   * Owner member by a non-Owner actor (safe 403), rejects removing the last
    * active Owner (`LAST_OWNER_REQUIRED`), marks the membership removed (status +
    * removedAt + removedByUserId), and records an audit event. Idempotent: an
    * already-removed membership is returned unchanged. Throws `MEMBER_NOT_FOUND`

@@ -21,20 +21,20 @@ not implemented**, **Explicitly deferred**, **No longer applicable**.
 | Password recovery | **Implemented (S17)** | `password-recovery.{service,repo,routes}.ts`; `password_reset_tokens` (hash-only, single-use, 1 h TTL); enumeration-safe request; `FOR UPDATE` completion revokes all sessions/refresh tokens; web flow | External delivery unvalidated; request-timing residual documented | ORG-PR-004 closed; ORG-PR-002 |
 | Password change | Implemented (S17) | `POST /v1/auth/change-password`; current-password re-auth; keep-current-session revocation policy | — | ORG-PR-039 closed |
 | Email change | Implemented (S17) | `POST /v1/auth/change-email`; current-password re-auth; verification reset + re-issue to new address | — | ORG-PR-039 closed |
-| Personal workspace | Implemented | `auth.repo.ts registerAccount` (txn) | Invariant unenforced at DB | ORG-PR-038 |
+| Personal workspace | Implemented | registration-completion txn (`registration.repo.ts`) provisions it; DB partial unique `uq_organizations_active_personal_owner` enforces at-most-one-active (S20) | — | ORG-PR-038 closed |
 | Team organizations | Implemented | `organization.repo.ts createTeamOrganization` | — | — |
 | Organization update | **Partially** | read/create exist; archive/suspend states inert (`organizations.ts status`) | No lifecycle transitions | (roadmap) |
 | Membership lifecycle | Implemented | invite-accept / removal; per-request membership re-check | No self-leave route for Member/Viewer | (noted) |
 | Invitations | Implemented | full lifecycle, hash-only token, email-match; delivery via the shared account mailer (S16) | External provider delivery unvalidated | ORG-PR-002 |
-| Roles | Implemented | fixed 4 roles (`access.ts`) | Admin→Owner unguarded | ORG-PR-017 |
-| Permissions | Implemented | 23-key catalog, permission-first checks | Two read paths skip gate | ORG-PR-053 |
-| Projects | Implemented | soft-delete, cursor pagination, uniform 404 | Quota race | ORG-PR-029 |
+| Roles | Implemented | fixed 4 roles (`access.ts`); DG-2 Owner-transition guard in-transaction (S20) | — | ORG-PR-017 closed |
+| Permissions | Implemented | 23-key catalog, permission-first checks; read paths aligned, one documented membership-only exception (S20) | — | ORG-PR-053 closed |
+| Projects | Implemented | soft-delete, cursor pagination, uniform 404; serialized create quota (S20) | — | ORG-PR-029 closed |
 | Plans | Implemented (demo) | 3 fixed plans; `PATCH …/plan/demo` (Owner-only) | Demo-only; no billing (by design) | — |
 | Entitlements | Implemented | `entitlement.service.ts`; separated from permission/quota | — | — |
-| Quotas | Implemented | `quota.ts`; max_projects/members/api_keys | TOCTOU under concurrency | ORG-PR-029 |
+| Quotas | Implemented | `quota.ts` policy + in-transaction plan snapshot (FOR SHARE) and serialized enforcement under org/kind advisory locks (S20) | — | ORG-PR-029 closed |
 | API keys | **Partially** | create/list/revoke, hash-only, one-time secret | No rotation; pre-auth event write; no create rate limit | ORG-PR-013, ORG-PR-032 |
 | External API | Implemented (read-only) | `GET /v1/external/projects`, tenant-derived | Fail-open limits; pre-auth write | ORG-PR-013 |
-| Audit log | Implemented (read-only) | `audit.routes.ts`; sanitized; perm+entitlement gated | Unindexed org filter; no retention | ORG-PR-014, ORG-PR-015 |
+| Audit log | Implemented (read-only) | `audit.routes.ts`; sanitized; perm+entitlement gated; org/time composite index (S20) | No retention | ORG-PR-014 closed; ORG-PR-015 |
 | Security events | Implemented | `security-events.ts` → `security_events` | No alerting; PII retained | ORG-PR-007, ORG-PR-043 |
 | Web demo surfaces | Implemented (demo) | all pages present | Robustness/a11y gaps | ORG-PR-023, ORG-PR-036 |
 | Demo credentials / seed | Implemented | `tooling/demo-seed.mjs` | Local-only, non-secret | — |

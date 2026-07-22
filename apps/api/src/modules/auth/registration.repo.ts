@@ -328,7 +328,6 @@ async function settleInvitation(
         selector: { invitationId: pendingInvitationId },
         acceptingUserId: newUserId,
         acceptingUserNormalizedEmail: normalizedEmail,
-        maxMembers: context.maxMembers,
         ctx: {
           actorUserId: newUserId,
           actorMembershipId: null,

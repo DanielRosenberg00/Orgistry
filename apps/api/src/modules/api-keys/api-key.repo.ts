@@ -1,8 +1,16 @@
 import type { Database, DbExecutor, ApiKeyRow } from '@orgistry/db';
 import { schema } from '@orgistry/db';
+import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { and, count, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
+import {
+  evaluateCountQuota,
+  requireEntitlement,
+  requireQuota,
+} from '../entitlements/quota';
+import { acquireOrganizationQuotaLock } from '../entitlements/quota-lock';
+import { lockOrganizationEntitlements } from '../entitlements/entitlement.snapshot';
 import { apiKeyNotFoundError } from './api-key.errors';
 import {
   API_KEY_EVENT_TYPES,
@@ -71,9 +79,55 @@ export function createDbApiKeyRepository(db: Database): ApiKeyRepository {
     });
   }
 
+  /**
+   * Count the organization's ACTIVE keys — the `max_api_keys` quota basis.
+   * Active = not revoked AND not expired at `now`, so a revoked or expired key
+   * never occupies a quota slot. The partial index on (organization_id) WHERE
+   * revoked_at IS NULL narrows the scan to non-revoked rows.
+   */
+  async function countActiveApiKeys(
+    executor: DbExecutor,
+    organizationId: string,
+    now: Date,
+  ): Promise<number> {
+    const [row] = await executor
+      .select({ value: count() })
+      .from(schema.apiKeys)
+      .where(
+        and(
+          eq(schema.apiKeys.organizationId, organizationId),
+          isNull(schema.apiKeys.revokedAt),
+          or(isNull(schema.apiKeys.expiresAt), gt(schema.apiKeys.expiresAt, now)),
+        ),
+      );
+    return row?.value ?? 0;
+  }
+
   return {
     async createApiKey(params: CreateApiKeyParams): Promise<ApiKeyRow> {
       return db.transaction(async (tx) => {
+        // Serialize concurrent creates for this organization, then resolve the
+        // CURRENT plan, gate, count, and insert in the SAME transaction —
+        // neither concurrent creates nor a concurrent plan change can race
+        // the decision (Sprint 20, ORG-PR-029). Both the access gate and the
+        // ceiling come from ONE snapshot, so they can never reflect two
+        // different plan states. A rejection aborts before any write.
+        await acquireOrganizationQuotaLock(tx, params.organizationId, 'api_keys');
+        const { values } = await lockOrganizationEntitlements(
+          tx,
+          params.organizationId,
+        );
+        requireEntitlement(values, ENTITLEMENT_KEYS.apiKeysAccess);
+        const activeCount = await countActiveApiKeys(
+          tx,
+          params.organizationId,
+          params.now,
+        );
+        requireQuota(
+          ENTITLEMENT_KEYS.maxApiKeys,
+          evaluateCountQuota(activeCount, values.max_api_keys),
+        );
+
         const [key] = await tx
           .insert(schema.apiKeys)
           .values({
@@ -129,27 +183,6 @@ export function createDbApiKeyRepository(db: Database): ApiKeyRepository {
         )
         .orderBy(desc(schema.apiKeys.createdAt), desc(schema.apiKeys.id))
         .limit(params.limit + 1);
-    },
-
-    async countActiveApiKeys(
-      organizationId: string,
-      now: Date,
-    ): Promise<number> {
-      // Active = not revoked AND not expired. The partial index on
-      // (organization_id) WHERE revoked_at IS NULL narrows the scan to
-      // non-revoked rows; the expiry predicate then drops expired keys so a key
-      // past its expiry never blocks the quota.
-      const [row] = await db
-        .select({ value: count() })
-        .from(schema.apiKeys)
-        .where(
-          and(
-            eq(schema.apiKeys.organizationId, organizationId),
-            isNull(schema.apiKeys.revokedAt),
-            or(isNull(schema.apiKeys.expiresAt), gt(schema.apiKeys.expiresAt, now)),
-          ),
-        );
-      return row?.value ?? 0;
     },
 
     async findBySecretHash(secretHash: string): Promise<ApiKeyRow | null> {

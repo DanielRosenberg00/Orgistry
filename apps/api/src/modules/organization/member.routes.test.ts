@@ -398,3 +398,165 @@ describe('DELETE /v1/organizations/:id/members/:membershipId (removal)', () => {
     expect(effective.statusCode).toBe(404);
   });
 });
+
+describe('DG-2 Owner role-transition policy (ORG-PR-017)', () => {
+  /** org with: Owner (creator), Admin, Member, Viewer. Returns ids + tokens. */
+  async function setupOrg() {
+    const owner = await registerUser('Owner');
+    const admin = await registerUser('Admin');
+    const member = await registerUser('Member');
+    const viewer = await registerUser('Viewer');
+    const orgId = await createTeamOrg(owner.token, 'Acme');
+    return {
+      orgId,
+      owner,
+      admin,
+      member,
+      viewer,
+      ownerMem: ownerMembershipId(orgId, owner.userId),
+      adminMem: addMembership(orgId, admin.userId, ROLE_IDS.admin),
+      memberMem: addMembership(orgId, member.userId, ROLE_IDS.member),
+      viewerMem: addMembership(orgId, viewer.userId, ROLE_IDS.viewer),
+    };
+  }
+
+  function changeRole(token: string, orgId: string, membershipId: string, role: string) {
+    return app.inject({
+      method: 'PATCH',
+      url: `/v1/organizations/${orgId}/members/${membershipId}/role`,
+      headers: authHeader(token),
+      payload: { role },
+    });
+  }
+
+  it('an Owner promotes a Member to Owner', async () => {
+    const s = await setupOrg();
+    const response = await changeRole(s.owner.token, s.orgId, s.memberMem, 'owner');
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.member.role.key).toBe('owner');
+  });
+
+  it('an Owner promotes an Admin to Owner', async () => {
+    const s = await setupOrg();
+    const response = await changeRole(s.owner.token, s.orgId, s.adminMem, 'owner');
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.member.role.key).toBe('owner');
+  });
+
+  it('an Owner demotes another Owner while an active Owner remains', async () => {
+    const s = await setupOrg();
+    expect((await changeRole(s.owner.token, s.orgId, s.memberMem, 'owner')).statusCode).toBe(200);
+    const response = await changeRole(s.owner.token, s.orgId, s.memberMem, 'member');
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.member.role.key).toBe('member');
+  });
+
+  it('an Owner cannot demote the last active Owner', async () => {
+    const s = await setupOrg();
+    const response = await changeRole(s.owner.token, s.orgId, s.ownerMem, 'admin');
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('LAST_OWNER_REQUIRED');
+  });
+
+  it('an Admin cannot promote themselves to Owner', async () => {
+    const s = await setupOrg();
+    const response = await changeRole(s.admin.token, s.orgId, s.adminMem, 'owner');
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('FORBIDDEN');
+    // The membership is untouched and no role-change event was recorded.
+    const target = ctx.orgStore.memberships.find((m) => m.id === s.adminMem);
+    expect(target?.roleId).toBe(ROLE_IDS.admin);
+    expect(
+      ctx.orgStore.securityEvents.some(
+        (e) => e.eventType === MEMBER_EVENT_TYPES.memberRoleChanged,
+      ),
+    ).toBe(false);
+  });
+
+  it('an Admin cannot promote another member to Owner', async () => {
+    const s = await setupOrg();
+    const response = await changeRole(s.admin.token, s.orgId, s.memberMem, 'owner');
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('FORBIDDEN');
+  });
+
+  it.each(['admin', 'member', 'viewer'] as const)(
+    'an Admin cannot demote an Owner to %s',
+    async (role) => {
+      const s = await setupOrg();
+      // A second Owner exists, so this is NOT a Last-Owner rejection — it is
+      // purely the DG-2 authority rule.
+      expect((await changeRole(s.owner.token, s.orgId, s.memberMem, 'owner')).statusCode).toBe(200);
+      const response = await changeRole(s.admin.token, s.orgId, s.ownerMem, role);
+      expect(response.statusCode).toBe(403);
+      expect(response.json().error.code).toBe('FORBIDDEN');
+    },
+  );
+
+  it('an Admin can still perform non-Owner transitions', async () => {
+    const s = await setupOrg();
+    const response = await changeRole(s.admin.token, s.orgId, s.memberMem, 'viewer');
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.member.role.key).toBe('viewer');
+  });
+
+  it('an Admin cannot remove an Owner member (removal removes the Owner role)', async () => {
+    const s = await setupOrg();
+    // Two Owners exist — the rejection is DG-2 authority, not Last Owner.
+    expect((await changeRole(s.owner.token, s.orgId, s.memberMem, 'owner')).statusCode).toBe(200);
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/v1/organizations/${s.orgId}/members/${s.ownerMem}`,
+      headers: authHeader(s.admin.token),
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('FORBIDDEN');
+    const target = ctx.orgStore.memberships.find((m) => m.id === s.ownerMem);
+    expect(target?.status).toBe('active');
+  });
+
+  it('a Member cannot change roles at all', async () => {
+    const s = await setupOrg();
+    const response = await changeRole(s.member.token, s.orgId, s.viewerMem, 'owner');
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('FORBIDDEN');
+  });
+
+  it('a Viewer cannot change roles at all', async () => {
+    const s = await setupOrg();
+    const response = await changeRole(s.viewer.token, s.orgId, s.memberMem, 'owner');
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('FORBIDDEN');
+  });
+
+  it('a removed membership cannot act (uniform 404)', async () => {
+    const s = await setupOrg();
+    const removed = ctx.orgStore.memberships.find((m) => m.id === s.adminMem)!;
+    removed.status = 'removed';
+    removed.removedAt = new Date();
+    const response = await changeRole(s.admin.token, s.orgId, s.memberMem, 'viewer');
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('a disabled user cannot bypass the policy (401 at the auth boundary)', async () => {
+    const s = await setupOrg();
+    // Disable the OWNER account: even the highest-authority credential stops
+    // authenticating, so a disabled user can never reach the policy at all.
+    const user = ctx.orgStore.users.find((u) => u.id === s.owner.userId)!;
+    user.status = 'disabled';
+    const response = await changeRole(s.owner.token, s.orgId, s.memberMem, 'owner');
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('a cross-tenant Owner grant keeps the uniform not-found (no target disclosure)', async () => {
+    const s = await setupOrg();
+    const otherOwner = await registerUser('Other Owner');
+    const otherOrg = await createTeamOrg(otherOwner.token, 'Other Co');
+    const foreignMem = ownerMembershipId(otherOrg, otherOwner.userId);
+    // An Admin of org A targeting a membership of org B gets the same 404 a
+    // nonexistent id gets — target resolution precedes the DG-2 authority check.
+    const response = await changeRole(s.admin.token, s.orgId, foreignMem, 'owner');
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('MEMBER_NOT_FOUND');
+  });
+});

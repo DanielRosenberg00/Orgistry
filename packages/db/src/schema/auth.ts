@@ -293,8 +293,9 @@ export const securityEvents = pgTable(
     // Nullable: a failed login for an unknown email has no user to attribute to.
     userId: text('user_id').references(() => users.id),
     sessionId: text('session_id').references(() => sessions.id),
-    // No organizations exist yet; this column is reserved for future
-    // compatibility and intentionally carries no foreign key.
+    // Tenant scope for organization-scoped events (the audit read path filters
+    // on it). Intentionally carries no foreign key — auth-module events predate
+    // organizations and anonymous events have no tenant.
     organizationId: text('organization_id'),
     actorType: text('actor_type').$type<SecurityActorType>().notNull(),
     // Dotted event name, e.g. `auth.login_succeeded`.
@@ -310,6 +311,14 @@ export const securityEvents = pgTable(
     index('ix_security_events_user_id').on(table.userId),
     index('ix_security_events_event_type').on(table.eventType),
     index('ix_security_events_created_at').on(table.createdAt),
+    // Backs the organization-scoped audit read path (Sprint 20, ORG-PR-014):
+    // `WHERE organization_id = ? … ORDER BY created_at DESC, id DESC` with
+    // keyset pagination scans this index directly.
+    index('ix_security_events_org_created_id').on(
+      table.organizationId,
+      table.createdAt,
+      table.id,
+    ),
   ],
 );
 

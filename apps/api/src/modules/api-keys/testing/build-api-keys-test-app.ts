@@ -102,7 +102,6 @@ export async function buildApiKeysTestApp(
   const projectService = createProjectService({
     accessControl: orgRepo,
     projects: projectRepo,
-    entitlements: entitlementService,
   });
 
   const apiKeyService = createApiKeyService({

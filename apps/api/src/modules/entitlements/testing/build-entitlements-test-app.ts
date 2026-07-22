@@ -92,7 +92,6 @@ export async function buildEntitlementsTestApp(
   const projectService = createProjectService({
     accessControl: orgRepo,
     projects: projectRepo,
-    entitlements: entitlementService,
   });
 
   const app = buildApp({

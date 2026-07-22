@@ -48,12 +48,6 @@ export function createInMemoryEntitlementRepository(
       return row ? toPlanState(row) : null;
     },
 
-    async countActiveProjects(organizationId) {
-      return store.projects.filter(
-        (p) => p.organizationId === organizationId && p.deletedAt === null,
-      ).length;
-    },
-
     async countActiveMembers(organizationId) {
       return store.memberships.filter(
         (m) => m.organizationId === organizationId && m.status === 'active',

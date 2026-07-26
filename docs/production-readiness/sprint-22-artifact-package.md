@@ -309,12 +309,40 @@ Summary of what it commits to:
 | Enforcement mechanism | Repository ruleset on `main` |
 | Where GitHub cannot enforce | Documented as a manual control, not claimed as enforced |
 
-**Enforcement implemented.** A repository ruleset targeting `main` requires a
-pull request and makes the CI, Security, and CodeQL checks required, with
-code-scanning merge protection at the Critical/High threshold. Direct pushes to
-`main` are refused. This is a deliberate change to the repository's working
-model — every sprint through 21 pushed directly to `main`; from now on changes
-go through a pull request. Verify the live configuration with
+**Enforcement implemented and demonstrated.** Repository ruleset `19769611`
+("main branch protection"), target `branch`, condition `~DEFAULT_BRANCH`,
+enforcement `active`, **no bypass actors**. Rules: `deletion`,
+`non_fast_forward`, `pull_request`, `required_status_checks` (all five checks —
+`Validate (offline)`, `Integration (PostgreSQL + Redis)`,
+`Dependency audit (pnpm)`, `Secret scan (Gitleaks)`,
+`Analyze (javascript-typescript)`), and `code_scanning` with CodeQL at
+`security_alerts_threshold: high_or_higher` / `alerts_threshold: errors`.
+
+Enforcement was verified empirically, not assumed. A direct push to `main` was
+attempted and **refused**:
+
+```
+GH013: Repository rule violations found for refs/heads/main.
+ - Changes must be made through a pull request.
+ - 5 of 5 required status checks are expected.
+ - Code scanning is waiting for results from CodeQL for the commit cd9dccc.
+```
+
+The same commit then landed through pull request
+[#9](https://github.com/DanielRosenberg00/Orgistry/pull/9), which reported
+`mergeable=MERGEABLE`, `mergeStateStatus=CLEAN`, and all five required checks
+`SUCCESS` before merging. That PR is the first exercise of the new gate.
+
+`required_approving_review_count` is **0**. On a single-maintainer repository a
+non-zero count would block every change, since an author cannot approve their
+own pull request. Zero still forces the pull-request path, which is what makes
+the status checks and code-scanning merge protection apply at all — the review
+requirement is the part that is deliberately not enforced, and should be raised
+if a second maintainer joins.
+
+This is a deliberate change to the repository's working model: every sprint
+through 21 pushed directly to `main`; from now on changes go through a pull
+request. Verify the live configuration with
 `gh api /repos/DanielRosenberg00/Orgistry/rulesets`.
 
 **Honest limits.** Code-scanning merge protection blocks on alert *severity* and
@@ -537,11 +565,11 @@ ORG-PR-001.
 | Password hashing is Argon2id-only | High | All seven call sites enumerated; behavior test proves no fast-hash fallback |
 | Both modulo sites are unbiased | High | Arithmetic proof plus an assertion that now enforces the precondition |
 | The secret-scan gate fails on a real finding | High | Remote run 30207672121, job-level and rule-level detail |
-| The ruleset enforces the documented policy | Medium | Verified present via the API; not yet exercised by a real pull request, since Sprint 22 itself predates it |
+| The ruleset enforces the documented policy | High | A direct push to `main` was refused by GH013 naming all three rules, and PR #9 then merged only after all five required checks reported SUCCESS |
 | No further true positives hide in the dismissed set | Medium | Every alert was individually traced, but 33 share one reasoning pattern; the audit-read case shows that pattern can be wrong |
 
-The Medium ratings are the honest ones. The second in particular is why the gate
-policy forbids dismissing rate-limiting alerts by pattern.
+The one remaining Medium rating is the honest one, and it is why the gate policy
+forbids dismissing rate-limiting alerts by pattern.
 
 ## 22. Final readiness classification
 
@@ -588,5 +616,6 @@ Carry into Sprint 23 or the sprint that follows:
   expensive.
 - **ORG-PR-042** — image digest pinning, explicitly deferred to the artifact
   track.
-- **First real pull request through the new ruleset**, to convert the Medium
-  confidence in §21 into High.
+- **Raise `required_approving_review_count` above 0** if a second maintainer
+  joins; today it is 0 so that a single maintainer is not locked out, which
+  means human review is the one part of the gate that is not enforced.

@@ -214,26 +214,39 @@ Phase 6: End-to-End Verification & Security Review
 > production-target.md (DG-5 note); executed-sprint artifacts (14–20) are
 > historical records and retain their original text.
 
+> **Numbering correction (Sprint 22 closure, 2026-07-26 — corrective
+> maintenance, not a roadmap redesign).** Sprint 22 was executed as CodeQL
+> alert triage and CI gate closure rather than the deployable artifact this
+> phase had reserved the number for, which left two "Sprint 22" entries: one
+> COMPLETE in Phase 3 and one "(next)" here. Resolution follows the Sprint 21
+> precedent — the executed sprint keeps the number it ran under, and the
+> not-yet-started Phase 4–6 sprints shift by one (deployable artifact 22→23,
+> backups/DR 23→24, observability 24→25, verification/review 25→26). Sprint
+> scopes, content, ordering, dependencies, and phase structure are unchanged.
+> Cross-references updated in this document and the launch checklist (Sprint
+> column); executed-sprint artifacts (14–22) are historical records and retain
+> their original text.
+
 ### Phase 4 — Production infrastructure & deployment
-- **Sprint 22 (next) — Deployable artifact & pipeline.** Per-app non-root Dockerfiles,
+- **Sprint 23 (next) — Deployable artifact & pipeline.** Per-app non-root Dockerfiles,
   minimal IaC for the target profile, build→migrate→deploy pipeline with rollback,
   secrets manager + rotation, least-privilege DB roles, pool/statement/lock
   timeouts. Closes ORG-PR-001, 006, 021, 022, 042. Deps: Phase 1–3. Exit: a
   tagged build deploys reproducibly to staging; secret rotation rehearsed.
 
 ### Phase 5 — Reliability, recovery & operations
-- **Sprint 23 — Backups, DR & background jobs.** Automated encrypted backups +
+- **Sprint 24 — Backups, DR & background jobs.** Automated encrypted backups +
   PITR, **tested restore drill**, migration-recovery rehearsal, scheduler/worker,
   retention/expiry jobs, retention enforcement, account deletion/export.
   Closes ORG-PR-005, 015, 016, 025, 028, 043. Exit: restore drill reconstructs DB
   to a timestamp and passes checks; jobs observable & idempotent.
-- **Sprint 24 — Observability & incident readiness.** Metrics + tracing +
+- **Sprint 25 — Observability & incident readiness.** Metrics + tracing +
   dashboards + alerts, production runbooks, incident process, ops documentation.
   Closes ORG-PR-007, 008, 027; supports ORG-PR-009 alerting. Exit: dashboard +
   synthetic-failure alert; tabletop against one runbook.
 
 ### Phase 6 — End-to-end verification & security review
-- **Sprint 25 — Verification & external review.** Failure-injection integration
+- **Sprint 26 — Verification & external review.** Failure-injection integration
   tests, browser E2E, live SMTP CI assertion, external pentest + DAST, standards
   re-map. Closes ORG-PR-026, 041; verifies 044; addresses external-verification
   items. Exit: E2E + failure-injection green; pentest findings triaged.
@@ -245,9 +258,9 @@ Phase 6: End-to-End Verification & Security Review
 
 ## Critical path
 
-`Sprint 15 → Sprint 16 → Sprint 22 → Sprint 23 → Sprint 25 → Launch`, with
+`Sprint 15 → Sprint 16 → Sprint 23 → Sprint 24 → Sprint 26 → Launch`, with
 Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restore
-(Sprint 23) is the longest-pole reliability item and must precede production data.
+(Sprint 24) is the longest-pole reliability item and must precede production data.
 
 ## Parallelizable work
 
@@ -255,8 +268,8 @@ Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restor
   (frontend) run independent of the critical path.
 - **Sprint 18** and **Sprint 19** (both Phase 3) can run concurrently by different
   owners.
-- **Sprint 24** (observability) can begin once infra (Sprint 22) exists, in
-  parallel with Sprint 23.
+- **Sprint 25** (observability) can begin once infra (Sprint 23) exists, in
+  parallel with Sprint 24.
 
 ## Decision gates
 

@@ -10,7 +10,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@fastify/cors": "^10.0.2",
+    "@fastify/cors": "^11.3.0",
     "@orgistry/auth-core": "workspace:*",
     "@orgistry/config": "workspace:*",
     "@orgistry/contracts": "workspace:*",

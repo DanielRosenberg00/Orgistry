@@ -59,17 +59,26 @@ login-first re-run. It creates:
   unlocked);
 - three projects;
 - a pending invitation to `demo.invitee@orgistry.local` (email delivered to
-  Mailpit);
-- an API key whose **one-time secret** is printed, with a ready-to-run `curl` for
-  the external API.
+  Mailpit).
 
-Then log in to the web demo at <http://localhost:5173> with the printed
-credentials and explore. The audit log will already show the seeded actions.
+Then log in to the web demo at <http://localhost:5173> and explore. The audit
+log will already show the seeded actions.
 
-> The seed prints an API key secret and the owner password. These are
-> intentionally non-secret local demo values. Never reuse them outside a
-> throwaway local database. To mint a fresh API key secret, revoke the existing
-> key in the web demo and re-run `pnpm demo:seed`.
+> **The seed prints no credentials** (Sprint 22, ORG-PR-056). It emits only
+> identifiers and locations — organization id, sign-in address, Mailpit URL —
+> and points at this document for the owner password rather than reprinting
+> it. A terminal is a logging sink: scrollback, screen shares, terminal
+> recordings, and redirected stdout all retain whatever is written there.
+>
+> **It also creates no API key.** The create endpoint returns the raw secret
+> exactly once, and the only thing a CLI could do with it is write it somewhere
+> that outlives the need. Mint keys interactively instead — steps 12–13 below —
+> where the backend hands the secret straight to your browser and no tool-side
+> copy exists.
+>
+> The demo identities are intentionally non-secret local values. Never reuse
+> them outside a throwaway local database; the seed refuses any non-loopback
+> target for that reason.
 
 ## Manual flow
 

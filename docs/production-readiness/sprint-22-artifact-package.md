@@ -20,22 +20,34 @@ correctly left open. Sprint 22 closed that gap in four parts:
 1. **Triaged all 41 alerts individually**, tracing each to its source and sink,
    grouping them into ten root causes, and giving every one an evidence-bearing
    GitHub disposition. No bulk dismissal; no alert left ambiguous.
-2. **Fixed the two real defects the triage found.** The audit-log read scanned
-   an entire tenant's event history on an un-indexed filter with no per-actor
-   ceiling (ORG-PR-055). The demo bootstrap printed a one-time API key secret
-   twice, once inside a copy-pasteable `curl` command.
+2. **Fixed the three real defects the triage found.** The audit-log read
+   scanned an entire tenant's event history on an un-indexed filter with no
+   per-actor ceiling (ORG-PR-055). The demo bootstrap emitted a one-time API
+   key secret to stdout — twice, once inside a copy-pasteable `curl` command
+   (ORG-PR-056).
 3. **Wrote the gate policy** — who triages, when, what evidence a dismissal
    requires, what blocks a merge — into `docs/validation.md`, and made it
    enforceable with a repository ruleset rather than leaving it as prose.
 4. **Proved the gate fails**, remotely, on a seeded finding, on a temporary
    branch that was deleted and never merged.
 
-The most important result is not the count. It is that the 34
-`js/missing-rate-limiting` alerts all shared one architectural cause — limiters
-live in the service layer, one module from the handler CodeQL analyses — and
-that reasoning is correct for 33 of them and **wrong for one**. Dismissing that
-cluster by pattern, which the shared explanation invites, would have buried a
-genuine defect.
+Two results are worth more than the count.
+
+First, the 34 `js/missing-rate-limiting` alerts all shared one architectural
+cause — limiters live in the service layer, one module from the handler CodeQL
+analyses — and that reasoning is correct for 33 of them and **wrong for one**.
+Dismissing the cluster by pattern, which the shared explanation invites, would
+have buried a genuine defect.
+
+Second, this sprint's own first pass got a call wrong and had to reverse it.
+The demo bootstrap's credential print was initially classified as an accepted
+residual risk with a compensating control. That contradicted a mandatory
+Definition of Done condition — *no raw secrets, tokens, passwords,
+Authorization headers, cookies, or SMTP credentials are logged* — which admits
+no accepted-risk exception. The completion iteration removed the output
+instead of defending it. **The sprint now carries zero accepted clear-text
+logging risks**; §7 records both the original decision and why it did not
+stand.
 
 ## 2. Repository and baseline state
 
@@ -101,7 +113,7 @@ separately here and in the inventory.
 | `S22-RC-006` | **Confirmed defect** — unbounded-cost audit read | 12 | 1 |
 | `S22-RC-007` | SHA-256 over a 32-byte CSPRNG token read as password hashing | 3, 4 | 2 |
 | `S22-RC-008` | Modulo over a 32-char alphabet that divides 256 exactly | 1, 2 | 2 |
-| `S22-RC-009` | Demo bootstrap prints the one-time API key secret | 6, 7 | 2 |
+| `S22-RC-009` | **Confirmed defect** — demo bootstrap emitted the one-time API key secret | 6, 7 | 2 |
 | `S22-RC-010` | Demo log helper flagged on a non-secret field | 5 | 1 |
 | | | **Total** | **41** |
 
@@ -109,12 +121,12 @@ separately here and in the inventory.
 
 | Final classification | Count |
 | --- | --- |
-| Fixed defect | 2 |
+| Fixed defect | 3 |
 | Covered by endpoint-specific control but invisible to CodeQL | 13 |
 | Covered by global control but invisible to CodeQL | 19 |
 | Framework/model false positive | 4 |
 | High-entropy-token false positive | 2 |
-| Accepted residual risk | 1 |
+| Accepted residual risk | 0 |
 | Duplicate of another alert | 0 |
 | Confirmed defect (unresolved) | 0 |
 | Needs follow-up | 0 |
@@ -160,14 +172,64 @@ pays a full-slice scan for a non-matching `targetId`. The durable fix is an
 index over the target-id metadata keys or retention under ORG-PR-015. Neither is
 in Sprint 22 scope.
 
-### ORG-PR-056 (partial) — Duplicate secret print removed
+### ORG-PR-056 — Demo bootstrap emitted a one-time API key secret
 
-**Alert 7.** `demo-seed.mjs` printed the API key secret a second time inside a
-ready-to-run `curl` example, two lines below the labelled one-time print. The
-duplicate carried no information while doubling the number of places the
-credential could be captured from — scrollback, screen shares, terminal
-recordings, CI transcripts. Replaced with an `<api-key-secret>` placeholder.
-Alert 7 is `fixed` on GitHub.
+**Alerts 6, 7 (successor 45).** Recorded here in full because the sprint
+reversed itself, and the reversal is the useful part of the record.
+
+**The defect.** `tooling/demo-seed.mjs` created an API key during bootstrap and
+printed the returned raw secret to stdout — originally twice, once labelled and
+once interpolated into a ready-to-run `curl` example. The API's Pino redaction
+backstop (ORG-PR-033) does not cover it: a separate process using `console.log`
+with string interpolation bypasses path-based redaction entirely.
+
+**First pass — partial, and wrongly closed out as accepted.** The duplicate
+`curl` print was deleted (alert 7, genuinely fixed), and `assertLocalTarget`
+was added to refuse any non-loopback target before the first request. The
+remaining print was then accepted as residual risk, reasoning that the API
+returns a key secret exactly once so printing it *was* the delivery channel.
+
+**Why that reasoning did not stand.** It treated the delivery channel as fixed
+and protected it, rather than questioning it. Three things make it
+indefensible:
+
+1. The Definition of Done condition — *no raw secrets, tokens, passwords,
+   Authorization headers, cookies, or SMTP credentials are logged* — admits no
+   accepted-risk exception. A finding that contradicts a mandatory condition is
+   not a candidate for acceptance.
+2. A terminal is a logging sink like any other. Scrollback, screen shares,
+   terminal recordings, tmux and CI capture, and `> out.txt` all retain it.
+   "Interactive terminal, not an aggregated log pipeline" understated that.
+3. The loopback guard bounds *where* a credential is emitted. It never stopped
+   it being emitted. A compensating control that does not remove the exposure
+   cannot discharge a condition that forbids the exposure.
+
+**Full remediation — the delivery channel was changed instead.**
+
+- `ensureApiKey` **removed** from `tooling/demo-seed.mjs`. The bootstrap creates
+  no API key and touches no `/api-keys` endpoint, so no secret exists for it to
+  print.
+- The summary block emits identifiers and locations only. The owner password —
+  a published local-only literal — is **pointed at** (`see
+  docs/demo-walkthrough.md`) rather than reprinted, so no output path in the
+  tool carries a credential of any kind.
+- Key creation moved to the **existing** authenticated web-demo surface
+  (`/app/api-keys`, `ApiKeysPage`), where the backend returns the raw secret
+  exactly once to the requesting browser and no tool-side copy exists. No new
+  product feature, API route, or contract was added — walkthrough steps 12–13
+  already documented that path.
+- The loopback guard was **kept**, with its documentation corrected. It no
+  longer stands between a secret and a terminal; it prevents seeding published
+  demo credentials into a shared environment and mutating organization, plan,
+  project, and invitation state somewhere real.
+
+**Substitutions explicitly rejected**, because each defeats the scanner without
+changing the exposure: `process.stdout.write`, base64-encoding, printing via an
+error, embedding in a command example, printing the whole HTTP response,
+writing to a file, or suppressing the query.
+
+**Result:** ORG-PR-056 is **Closed — fully remediated**, and the repository
+carries **no accepted clear-text logging risk**.
 
 ### Flaky test fixed (found by the remote gate, not by CodeQL)
 
@@ -222,25 +284,10 @@ Highlights of the reasoning, in full in the inventory:
 
 ## 9. Accepted residual risks
 
-### ORG-PR-056 — Demo bootstrap prints a one-time API key secret
+**No accepted clear-text credential-logging risk remains.** ORG-PR-056 was
+initially recorded here and has been fully remediated — see §7. One deliberate
+architectural tradeoff remains, carried forward from Sprint 19.
 
-**Alert 45** (supersedes alert 6). Dismissed *won't fix*, deliberately **not**
-*false positive* — the dataflow is real.
-
-- **Why it stays:** the API returns an API key secret exactly once, at creation.
-  Printing it to the operator's terminal *is* the delivery channel, and
-  `docs/demo-walkthrough.md` depends on it. Removing it leaves an unusable key.
-- **Why the redaction backstop does not apply:** `lib/logging.ts` redacts
-  `apiKeySecret` on the API's Pino logger. `demo-seed.mjs` is a separate process
-  using `console.log` with string interpolation, which bypasses path-based
-  redaction entirely. Claiming coverage here would be false.
-- **Compensating control added:** `assertLocalTarget`
-  (`tooling/lib/demo-target-guard.mjs`) refuses any non-loopback target before
-  the first request, so a misdirected run creates no account and prints no
-  secret. Hostname equality, not a prefix check — `localhost.evil.example.com`
-  is refused.
-- **Owner:** repository maintainer. **Follow-up:** ORG-PR-056; re-review
-  whenever `demo-seed.mjs` changes or the demo gains a non-local mode.
 
 ### Global limiter fails open during a Redis outage
 
@@ -360,6 +407,7 @@ and in `validation.md`, and is not claimed as technically enforced.
 | `packages/auth-core/src/hashing-invariants.test.ts` (new) | 8 | Password hashes carry the `$argon2id$` prefix and never equal or contain `sha256(password)`; `verifyPassword` rejects a SHA-256 digest presented as a stored hash (no fast-hash fallback exists); password hashes are salted and so unusable as lookup keys; opaque tokens decode to exactly 32 bytes and match the 43-char base64url shape; token digests match `^[0-9a-f]{64}$` and never carry the Argon2 prefix |
 | `packages/shared/src/random-alphabet.test.ts` (new) | 8 | The Crockford alphabet is 32 chars and `256 % 32 === 0`; every divisor length is accepted; lengths 3, 30, 31, 33, 62 and the empty alphabet are rejected with an actionable message; output length is exact; output draws only from the supplied alphabet. Deterministic — no statistical assertions, so nothing here can flake |
 | `tooling/demo-target-guard.test.ts` (new) | 5 | Loopback forms accepted (`localhost`, `127.0.0.1`, `[::1]`, with/without port, http/https); hosted and private-network targets refused; `localhost.evil.example.com` and `127.0.0.1.evil.example.com` refused (a prefix check would pass them); the rejected host is named; malformed URLs refused rather than passed through |
+| `tooling/demo-seed.output.test.ts` (new) | 7 | Runs the REAL bootstrap as a child process against a stub API on loopback and inspects captured stdout/stderr: exits 0 with empty stderr; issues **no** request to any `/api-keys` path; emits no owner password, access token, or key secret — asserted by literal value AND by shape (`/orgistry_[A-Z0-9]{6,}_/`, `/Bearer\s+\S+/`, `/[A-Za-z0-9_-]{40,}/`) so a *different* credential also fails; still prints org id, sign-in address, and web-demo URL; directs the operator to the API Keys page; leaves login/org/plan/projects/invitation flow intact; refuses a non-loopback target before any request |
 | `apps/api/src/modules/audit/audit.routes.test.ts` (updated) | 1 | De-flaked: sentinels lengthened so random ids cannot collide with them; two previously-unasserted sentinels added |
 | `apps/api/src/modules/audit/testing/build-audit-test-app.ts` (updated) | — | Optional limiter/ceiling overrides; throttling stays OFF unless a test wires both, so existing route tests are unaffected |
 
@@ -526,7 +574,7 @@ Two changes deserve explicit justification as in-scope rather than drift:
 | --- | --- |
 | ORG-PR-020 | **Open → Closed.** Remote green runs, remote negative-path failure proof, full SAST triage, ruleset enforcement |
 | ORG-PR-055 | **New — Mitigated.** Audit-read cost bound; residual scan cost open |
-| ORG-PR-056 | **New — Accepted risk.** Demo one-time secret print, with a loopback guard |
+| ORG-PR-056 | **New — Closed (fully remediated).** Demo bootstrap credential output; accepted with a loopback guard in the first pass, then removed outright in the completion iteration |
 | ORG-PR-032 | Unchanged (Closed). Its revoke analysis was re-verified against the code and holds |
 | ORG-PR-015 | Unchanged (Open). Now additionally referenced as the reason ORG-PR-055's residual matters |
 | ORG-PR-042 | Unchanged (Open). Explicitly out of scope |
@@ -567,6 +615,7 @@ ORG-PR-001.
 | The secret-scan gate fails on a real finding | High | Remote run 30207672121, job-level and rule-level detail |
 | The ruleset enforces the documented policy | High | A direct push to `main` was refused by GH013 naming all three rules, and PR #9 then merged only after all five required checks reported SUCCESS |
 | No further true positives hide in the dismissed set | Medium | Every alert was individually traced, but 33 share one reasoning pattern; the audit-read case shows that pattern can be wrong |
+| The demo bootstrap emits no credential | High | The real script is executed in test and its captured stdout/stderr asserted against literal AND shape patterns; a negative control proved the test fails when key creation is reinstated |
 
 The one remaining Medium rating is the honest one, and it is why the gate policy
 forbids dismissing rate-limiting alerts by pattern.

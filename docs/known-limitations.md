@@ -131,13 +131,14 @@ These are intentional non-goals, not bugs:
   audit and secret scan do have local equivalents (`pnpm scan:deps` /
   `pnpm scan:deps:local`, `pnpm scan:secrets` — the latter being a
   full-history scan, i.e. stricter than the per-range CI runs).
-- **CodeQL's 40 remaining alerts are dismissed, not absent** (Sprint 22). All
-  41 baseline High alerts were individually triaged with recorded evidence;
-  one true positive was fixed (ORG-PR-055), one sink was removed, one is an
-  owned accepted risk (ORG-PR-056), and the rest are false positives the
-  query cannot avoid — Orgistry's rate limiters live in the service layer and
-  in the API-key authenticator, which `js/missing-rate-limiting` does not
-  model. A reader looking at the Code scanning tab will see dismissals rather
+- **Most remaining CodeQL alerts are dismissed, not absent** (Sprint 22). All
+  41 baseline High alerts were individually triaged with recorded evidence.
+  Two true positives were fixed — the audit-read cost (ORG-PR-055) and the
+  demo bootstrap's credential output (ORG-PR-056, remediated by removing the
+  output entirely, not accepted) — and the rest are false positives the query
+  cannot avoid: Orgistry's rate limiters live in the service layer and in the
+  API-key authenticator, which `js/missing-rate-limiting` does not model.
+  **No accepted clear-text logging risk remains.** A reader looking at the Code scanning tab will see dismissals rather
   than a clean slate; the reasoning for each is in
   [sprint-22-codeql-alert-inventory.md](production-readiness/sprint-22-codeql-alert-inventory.md).
   The practical consequence: this repository cannot use "zero open alerts" as

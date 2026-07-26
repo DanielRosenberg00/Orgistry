@@ -181,11 +181,14 @@ Phase 6: End-to-End Verification & Security Review
   control. All 41 High alerts from CodeQL's first operational run triaged
   individually with source/sink evidence, grouped into ten root causes, and
   given individual GitHub dispositions (no bulk dismissal, no unresolved true
-  positive). Found and fixed one genuine defect — the audit-log read scanned
+  positive). Found and fixed two genuine defects: the audit-log read scanned
   a tenant's entire event history on an un-indexed `targetId` filter
-  (ORG-PR-055) — removed one duplicate secret print and guarded the demo
-  bootstrap to loopback targets (ORG-PR-056), and extracted the byte→alphabet
-  mapping behind an enforced uniformity assertion. Documented the CodeQL gate
+  (ORG-PR-055), and the demo bootstrap emitted a one-time API key secret to
+  stdout (ORG-PR-056 — first mitigated with a loopback-target guard, then
+  fully remediated by removing key creation from the bootstrap so no
+  credential is printed at all; key minting moved to the existing web-demo
+  API Keys page). Also extracted the byte→alphabet mapping behind an enforced
+  uniformity assertion. Documented the CodeQL gate
   policy in `docs/validation.md` and made it enforceable with a `main`
   ruleset (required PR + required CI/Security/CodeQL checks + code-scanning
   merge protection). **Closed ORG-PR-020.** Exit evidence: all three

@@ -78,28 +78,20 @@ GitHub state agreed exactly — 34 / 3 / 2 / 2, alert numbers 1–41, all
 
 ## 4. Alert counts before and after
 
-| Query | Baseline | After remediation | Δ |
+| Query | Baseline | Present in the final analysis | Δ |
 | --- | --- | --- | --- |
 | `js/missing-rate-limiting` | 34 | 34 | — |
-| `js/clear-text-logging` | 3 | 2 | −1 (sink deleted) |
-| `js/insufficient-password-hash` | 2 | 4 | +2 (new test file's negative controls) |
+| `js/clear-text-logging` | 3 | **0** | −3 (every sink removed from the code) |
+| `js/insufficient-password-hash` | 2 | 4 | +2 (invariant test's negative controls) |
 | `js/biased-cryptographic-random` | 2 | 1 | −1 (two sites merged into one helper) |
-| **Total** | **41** | **41** | 45 alerts created in total |
+| **Total** | **41** | **39** | 45 alerts created in total |
 
-Post-remediation analysis: `1528767654` (`9733b880`, `refs/heads/main`,
-2026-07-26 15:25:25Z), 41 results.
+- Baseline analysis: `1528655701` (`c33a150f`), 41 results.
+- Final analysis: `1528856173` (`688f78b8`, `refs/heads/main`), **39 results**.
 
-Four baseline alerts closed as *fixed*, but only **one** is a defect fix:
-
-- **7** — genuinely fixed; the duplicate secret print was deleted.
-- **1, 2** — closed because the duplicated modulo moved into a shared helper.
-  Superseded by alert **42**. No defect existed; the arithmetic was already
-  uniform.
-- **6** — closed because its line moved 256 → 261. Superseded by alert **45**.
-  Same sink, same accepted risk.
-
-Recording all four as "fixed" would overstate the result, so they are recorded
-separately here and in the inventory.
+The full state-by-state reconciliation — and the distinction between GitHub
+state and security classification — is in §11. That is the single authoritative
+set of numbers for this sprint.
 
 ## 5. Root-cause groups
 
@@ -274,8 +266,11 @@ Highlights of the reasoning, in full in the inventory:
   use Argon2id and that no password reaches `createHash` on any path.
 - **1 biased-random alert** (`S22-RC-008`) — 256 = 32 × 8, so the mapping is
   exactly uniform.
-- **1 logging alert** (`S22-RC-010`) — the value at the sink is
+- **1 logging alert** (`S22-RC-010`) — the value at the sink was
   `created.apiKey.name`, a display label, not the sibling `created.secret`.
+  The completion iteration removed that call site entirely along with API-key
+  creation, so the alert now also carries `fixed_at`; the false-positive
+  classification was left in place because it was and remains accurate.
 - **2 test-only alerts** (43, 44) — the new invariant test computes
   `sha256(password)` precisely so it can assert the stored Argon2id hash is
   *not* that value. The scanner cannot distinguish a negative control from a
@@ -301,41 +296,79 @@ Tracked under ORG-PR-009.
 
 ## 10. Remaining open alerts
 
-**Zero.** 0 open, 4 fixed, 41 dismissed — read back from the API after the
-dispositions were applied.
+**Zero.** Read back from the API after the final analysis: 0 open, 5 `fixed`,
+40 dismissed, 45 created in total.
 
-Reaching zero was an outcome, not a target: 34 of 41 belonged to one
-architectural pattern the query cannot model. The honest consequence is recorded
-in [known-limitations.md](../known-limitations.md) — this repository cannot use
-"zero open alerts" as a health signal, and relies instead on the
+Reaching zero was an outcome, not a target: 34 of the 41 belonged to one
+architectural pattern the query cannot model. The honest consequence is
+recorded in [known-limitations.md](../known-limitations.md) — this repository
+cannot use "zero open alerts" as a health signal, and relies instead on the
 dismissal-evidence rule in the
 [CodeQL alert policy](../validation.md#codeql-alert-policy).
 
 ## 11. GitHub alert disposition evidence
 
-| State | Count | Alerts |
+The authoritative reconciliation. Every figure was read from the GitHub API
+after the final analysis of the merged `main` commit `688f78b8`; any number
+elsewhere in this repository that disagrees is stale.
+
+GitHub's `?state=fixed` *filter* and the `state` *field* disagree — the filter
+returns any alert absent from the latest analysis, while the field reports a
+dismissal in preference to a fix. The field is used throughout.
+
+| Dimension | Count | Detail |
 | --- | --- | --- |
-| Open | 0 | — |
-| Fixed | 4 | 1, 2, 6, 7 |
-| Dismissed — false positive | 38 | 3, 4, 5, 8–42 (excluding 43, 44, 45) |
-| Dismissed — used in tests | 2 | 43, 44 |
-| Dismissed — won't fix (accepted risk) | 1 | 45 |
-| **Total ever created** | **45** | |
+| Original baseline alerts | 41 | numbers 1–41, analysis `1528655701` on `c33a150f` |
+| Successor alerts created during remediation | 4 | 42, 43, 44, 45 |
+| **Total alerts ever created** | **45** | |
+| Final open | **0** | |
+| Final `state: fixed` | 5 | 1, 2, 6, 7, 45 |
+| Final `state: dismissed` | 40 | 38 *false positive* + 2 *used in tests* |
+| — dismissed *false positive* | 38 | |
+| — dismissed *used in tests* | 2 | 43, 44 |
+| — dismissed *won't fix* (accepted risk) | **0** | none remain |
+| Present in the final analysis | 39 | 34 rate-limiting + 4 password-hash + 1 random |
 
-Verification commands and their results:
+**GitHub state is not security classification.** A dismissed alert can be a
+remediated defect (the fix is real but invisible to the query); a `fixed` alert
+can be no defect at all (the code merely moved). Both occur here:
 
-```
-gh api ".../code-scanning/alerts?state=open"      | jq length   -> 0
-gh api ".../code-scanning/alerts?state=fixed"     | jq length   -> 4
-gh api ".../code-scanning/alerts?state=dismissed" | jq length   -> 41
-gh api ".../code-scanning/alerts"                 | jq length   -> 45
-# dismissals with a comment shorter than 50 chars                -> 0
-```
+| Security classification | Count | Alerts | GitHub state |
+| --- | --- | --- | --- |
+| Confirmed defect — remediated, removal **visible** to CodeQL | 3 | 6, 7, 45 (ORG-PR-056) | `fixed` |
+| Confirmed defect — remediated, remediation **invisible** to CodeQL | 1 | 12 (ORG-PR-055) | dismissed *false positive* |
+| Not a defect — alert closed by code relocation | 2 | 1, 2 | `fixed` |
+| False positive — control exists but is invisible to CodeQL | 33 | 8–11, 13–41 | dismissed *false positive* |
+| False positive — high-entropy token modelled as a password | 2 | 3, 4 | dismissed *false positive* |
+| False positive — arithmetic proof (uniform modulo) | 1 | 42 | dismissed *false positive* |
+| False positive — non-secret field; call site since removed | 1 | 5 | dismissed *false positive* (+ `fixed_at`) |
+| False positive — test-only negative control | 2 | 43, 44 | dismissed *used in tests* |
+| **Accepted residual risk** | **0** | — | — |
+| **Total** | **45** | | |
 
+**Confirmed security defects remediated: 2 findings** — ORG-PR-055 (audit-read
+cost) and ORG-PR-056 (credential output), carried by four alerts.
+
+**Platform behaviour worth recording.** When the demo-seed sink was removed,
+GitHub set `fixed_at` on alert 45 but left `state: dismissed` with
+`dismissed_reason: won't fix` — a dismissal takes precedence over a fix in the
+`state` field, so the alert kept asserting a decision *not* to fix something
+that had in fact been fixed. Clearing the dismissal (`PATCH state=open`) made
+GitHub immediately reclassify it `state: fixed`, `dismissed_reason: null`,
+retaining `fixed_at` of 2026-07-26T16:28:31Z. Removing a sink does not on its
+own correct a stale dismissal; the dismissal must be withdrawn explicitly.
+
+Alert 5 was deliberately left dismissed as *false positive* although the same
+change removed its call site: the classification was and remains accurate (the
+value was `created.apiKey.name`, a display label), and `fixed_at` already
+records the removal. Reopening it would discard a correct analysis to gain
+nothing. No other disposition was touched.
+
+Every dismissal carries an individual comment naming its own route, control, or
+arithmetic; dismissals with a comment shorter than 50 characters number zero.
 GitHub caps `dismissed_comment` at 280 characters (an initial attempt with
-longer comments was rejected `HTTP 422: Only 280 characters are allowed`). Each
-comment therefore states its specific evidence and cites its root-cause group
-in the inventory rather than reproducing the analysis.
+longer comments was rejected `HTTP 422`), so each cites its root-cause group in
+the inventory rather than reproducing the analysis.
 
 ## 12. CodeQL gate policy
 
@@ -427,12 +460,12 @@ All mandatory commands executed in the final repository state.
 
 | Command | Exit | Result |
 | --- | --- | --- |
-| `pnpm validate` | 0 | typecheck, ESLint, 860 unit tests in 80 files, 78 web tests in 10 files, web build, schema drift, whitespace — all pass |
+| `pnpm validate` | 0 | typecheck, ESLint, 867 unit tests in 81 files, 78 web tests in 10 files, web build, schema drift, whitespace — all pass |
 | `pnpm validate:integration` | 0 | 15 integration files, 82 tests, against live PostgreSQL + Redis |
 | `git diff --check` | 0 | no whitespace errors |
 | `pnpm scan:deps` | 0 | prod and dev gates pass; exactly the two documented GHSA ignores reported |
 | `pnpm scan:deps:local` | 0 | osv-scanner 2.4.0, 446 packages, no issues; the two documented filters applied |
-| `pnpm scan:secrets` | 0 | gitleaks 8.30.1, full git history (24 commits), no leaks |
+| `pnpm scan:secrets` | 0 | gitleaks 8.30.1, full git history, no leaks |
 | `actionlint` | 0 | actionlint 1.7.12, all three workflows clean |
 
 **Deviation, recorded honestly.** `pnpm validate:integration` was run with
@@ -489,9 +522,31 @@ CodeQL analyses on `refs/heads/main`:
 | 1528767654 | `9733b880` | 2026-07-26T15:25:25Z | 41 |
 | 1528799472 | `fa40790e` | 2026-07-26 | 41 |
 
-Alert state re-verified after the final analysis: still 0 open, 4 fixed, 41
-dismissed. The dispositions survived a fresh scan of the final tree — they were
-not silently reopened.
+**Completion iteration — final merged `main` commit
+`688f78b8ea41454d3dfa8b57bfba77a9fd54b3e3`** (event `push`, `refs/heads/main`),
+landed through pull request
+[#11](https://github.com/DanielRosenberg00/Orgistry/pull/11) with all five
+required checks `SUCCESS`:
+
+| Workflow | Run ID | Conclusion | URL |
+| --- | --- | --- | --- |
+| CI | 30210460708 | success | https://github.com/DanielRosenberg00/Orgistry/actions/runs/30210460708 |
+| Security scans | 30210460682 | success | https://github.com/DanielRosenberg00/Orgistry/actions/runs/30210460682 |
+| CodeQL | 30210460680 | success | https://github.com/DanielRosenberg00/Orgistry/actions/runs/30210460680 |
+
+CodeQL analyses on `refs/heads/main`, in order:
+
+| Analysis | Commit | Results |
+| --- | --- | --- |
+| 1528655701 | `c33a150f` | 41 |
+| 1528767654 | `9733b880` | 41 |
+| 1528799472 | `fa40790e` | 41 |
+| 1528813898 | `eb37b05d` | 41 |
+| **1528856173** | **`688f78b8`** | **39** |
+
+The drop from 41 to 39 is the demo-seed remediation: every
+`js/clear-text-logging` sink is gone from the code. Final alert state is
+reconciled in §11.
 
 ## 16. Negative-path proof evidence
 
@@ -523,7 +578,8 @@ protection would block. Push protection was not weakened or bypassed.
 | Document | Change |
 | --- | --- |
 | [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) | **New.** Per-alert triage: evidence, root-cause groups, classifications, dispositions, triage log |
-| [sprint-22-artifact-package.md](sprint-22-artifact-package.md) | **New.** This document |
+| [sprint-22-artifact-package.md](sprint-22-artifact-package.md) | **New.** This document. §11 holds the single authoritative reconciliation |
+| [../demo-walkthrough.md](../demo-walkthrough.md) | Bootstrap section rewritten: the seed prints no credentials and creates no API key; keys are minted interactively at steps 12–13 |
 | [findings-register.md](findings-register.md) | ORG-PR-020 closed with evidence; ORG-PR-055 and ORG-PR-056 added; Sprint 22 status update |
 | [../validation.md](../validation.md) | **New sections:** CodeQL alert policy; Branch protection |
 | [../security-model.md](../security-model.md) | Audit-read buckets documented; the rule they encode ("a read needs its own bucket when its cost is not bounded by its page size"); failure-mode list updated |
@@ -574,7 +630,7 @@ Two changes deserve explicit justification as in-scope rather than drift:
 | --- | --- |
 | ORG-PR-020 | **Open → Closed.** Remote green runs, remote negative-path failure proof, full SAST triage, ruleset enforcement |
 | ORG-PR-055 | **New — Mitigated.** Audit-read cost bound; residual scan cost open |
-| ORG-PR-056 | **New — Closed (fully remediated).** Demo bootstrap credential output; accepted with a loopback guard in the first pass, then removed outright in the completion iteration |
+| ORG-PR-056 | **New — Closed (fully remediated).** Demo bootstrap credential output; accepted with a loopback guard in the first pass, then removed outright in the completion iteration. **Zero accepted clear-text logging risks remain** |
 | ORG-PR-032 | Unchanged (Closed). Its revoke analysis was re-verified against the code and holds |
 | ORG-PR-015 | Unchanged (Open). Now additionally referenced as the reason ORG-PR-055's residual matters |
 | ORG-PR-042 | Unchanged (Open). Explicitly out of scope |
@@ -606,7 +662,7 @@ ORG-PR-001.
 
 | Claim | Confidence | Basis |
 | --- | --- | --- |
-| All 41 baseline alerts triaged and dispositioned | High | GitHub API read-back: 0 open, 4 fixed, 41 dismissed, 45 total |
+| All 41 baseline alerts triaged and dispositioned | High | GitHub API read-back: 0 open, 5 `fixed`, 40 dismissed, 45 total (§11) |
 | The audit-read defect is real | High | Query source read, index list read, no covering index exists, retention finding open |
 | The audit-read fix works | High | 8 behavior-level tests including gate-ordering and both isolation dimensions |
 | The 33 other rate-limit dismissals are correct | High | Each traced to a specific limiter line and key; existing tests cited per bucket |
@@ -615,7 +671,7 @@ ORG-PR-001.
 | The secret-scan gate fails on a real finding | High | Remote run 30207672121, job-level and rule-level detail |
 | The ruleset enforces the documented policy | High | A direct push to `main` was refused by GH013 naming all three rules, and PR #9 then merged only after all five required checks reported SUCCESS |
 | No further true positives hide in the dismissed set | Medium | Every alert was individually traced, but 33 share one reasoning pattern; the audit-read case shows that pattern can be wrong |
-| The demo bootstrap emits no credential | High | The real script is executed in test and its captured stdout/stderr asserted against literal AND shape patterns; a negative control proved the test fails when key creation is reinstated |
+| The demo bootstrap emits no credential | High | The real script is executed in test and its captured stdout/stderr asserted against literal AND shape patterns; a negative control proved the test fails when key creation is reinstated; the final CodeQL analysis reports **zero** `js/clear-text-logging` results |
 
 The one remaining Medium rating is the honest one, and it is why the gate policy
 forbids dismissing rate-limiting alerts by pattern.
@@ -668,3 +724,8 @@ Carry into Sprint 23 or the sprint that follows:
 - **Raise `required_approving_review_count` above 0** if a second maintainer
   joins; today it is 0 so that a single maintainer is not locked out, which
   means human review is the one part of the gate that is not enforced.
+- **Historical sprint artifacts (9, 12, 21) are left unedited by design.** Each
+  is a dated closing record of what was true when it closed, and two of them
+  mention the demo seed printing an API key secret. That statement was accurate
+  then and is preserved rather than rewritten, matching how Sprint 21's
+  ORG-PR-020 judgement was handled. All *current* documentation is correct.

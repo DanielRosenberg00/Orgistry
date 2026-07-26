@@ -21,15 +21,15 @@ The baseline count in the sprint specification and the observed GitHub state agr
 
 ## Query distribution
 
-| Query | Baseline | Observed after remediation | Notes |
+| Query | Baseline | Present in the final analysis | Notes |
 | --- | --- | --- | --- |
-| `js/missing-rate-limiting` | 34 | 34 | 1 defect fixed (alert 12); the limiter stays invisible to the query (service layer), so the alert persists and is dismissed with evidence |
-| `js/clear-text-logging` | 3 | 2 | alert 7's sink removed outright; alert 6 relocated by the edit and re-registered as alert 45 |
-| `js/insufficient-password-hash` | 2 | 4 | +2 in the NEW test file, which computes SHA-256 of a password deliberately, to assert the stored hash is *not* that value |
+| `js/missing-rate-limiting` | 34 | 34 | 1 defect fixed (alert 12), but the fix is a service-layer limiter the query cannot model, so the alerts persist and are dismissed with per-route evidence |
+| `js/clear-text-logging` | 3 | **0** | every sink removed from the code — alerts 6, 7, 45 `fixed`; alert 5's call site removed with them |
+| `js/insufficient-password-hash` | 2 | 4 | +2 in the invariant test, which computes SHA-256 of a password deliberately, to assert the stored hash is *not* that value |
 | `js/biased-cryptographic-random` | 2 | 1 | the two duplicated sites collapsed into one shared helper — alert 42 supersedes 1 and 2 |
-| **Total** | **41** | **41** | 45 alerts have existed in total |
+| **Total** | **41** | **39** | 45 alerts created in total |
 
-Counts verified against GitHub after analysis `1528767654` (commit `9733b880`, `refs/heads/main`), not inferred from code inspection.
+Final analysis: `1528856173` (commit `688f78b8`, `refs/heads/main`), 39 results. Counts read back from the GitHub API, not inferred from code inspection.
 
 ### Alerts created by the remediation itself
 
@@ -40,7 +40,7 @@ Four baseline alerts closed as *fixed* and four new alerts appeared. Only one of
 | 42 | biased-cryptographic-random | `packages/shared/src/random-alphabet.ts:53` | **Supersedes alerts 1 and 2.** Both closed because the duplicated mapping moved into one shared helper. Net effect: two alerts became one. No defect was fixed — the arithmetic was already uniform. |
 | 43 | insufficient-password-hash | `packages/auth-core/src/hashing-invariants.test.ts:38` | **New, test-only.** The test computes `sha256(password)` so the next lines can assert the stored Argon2id hash is not it. Dismissed *used in tests*. |
 | 44 | insufficient-password-hash | `packages/auth-core/src/hashing-invariants.test.ts:48` | **New, test-only.** Same pattern, asserting `verifyPassword(sha256, password)` is false. Dismissed *used in tests*. |
-| 45 | clear-text-logging | `tooling/demo-seed.mjs:261` | **Supersedes alert 6.** Initially the same sink at a shifted line (256 → 261). **Remediated in the completion iteration** — API-key creation was removed from the bootstrap, so the sink no longer exists. |
+| 45 | clear-text-logging | `tooling/demo-seed.mjs:261` | **Supersedes alert 6.** Initially the same sink at a shifted line (256 → 261). **Remediated in the completion iteration** — API-key creation was removed from the bootstrap, so the sink no longer exists. Final GitHub state: `fixed`. |
 
 Genuinely fixed by a code change: **alert 7 only** (the duplicate secret print inside the `curl` example was deleted). Alerts 1, 2, and 6 are bookkeeping closures caused by code motion, and their substance lives on in alerts 42 and 45.
 
@@ -82,18 +82,49 @@ Four classifications carry zero members, and that is a finding in itself: no ale
 
 Alert 6 moved from *Accepted residual risk* to *Fixed defect* during the sprint. The first pass accepted the credential print with a loopback-target compensating control; the completion iteration rejected that reasoning and removed the output entirely. See [S22-RC-009](#s22-rc-009--demo-bootstrap-emitted-the-one-time-api-key-secret) for why the original acceptance was indefensible.
 
-### Verified final GitHub state
+### Authoritative final reconciliation
 
-Read back from the API after all dispositions were applied, not asserted from intent:
+Every count below was read back from the GitHub API after the final analysis of the merged `main` commit `688f78b8`. This is the single authoritative set; any other number in this repository that disagrees is stale.
 
-| State | Count | Detail |
+**GitHub alert states.** Note that GitHub's `?state=fixed` *filter* and the `state` *field* disagree: the filter returns any alert absent from the latest analysis, while the field reports a dismissal in preference to a fix. The field is used here.
+
+| Dimension | Count | Detail |
 | --- | --- | --- |
-| Open | 0 | — |
-| Fixed | 4 | alerts 1, 2, 6, 7 |
-| Dismissed | 41 | 38 *false positive*, 2 *used in tests*, 1 *won't fix* |
-| **Total alerts ever created** | **45** | 41 baseline + 4 successors |
+| Original baseline alerts | 41 | numbers 1–41, analysis `1528655701` on `c33a150f` |
+| Successor alerts created during remediation | 4 | 42, 43, 44, 45 |
+| **Total alerts ever created** | **45** | |
+| Final open | **0** | |
+| Final `state: fixed` | 5 | 1, 2, 6, 7, 45 |
+| Final `state: dismissed` | 40 | 38 *false positive* + 2 *used in tests* |
+| — dismissed *false positive* | 38 | |
+| — dismissed *used in tests* | 2 | 43, 44 |
+| — dismissed *won't fix* (accepted risk) | **0** | none remain |
+| Present in the final analysis | 39 | 34 rate-limiting + 4 password-hash + 1 random |
 
-Every dismissal carries an individual comment naming its own route, control, or arithmetic; a check for dismissals with a comment shorter than 50 characters returns zero. GitHub caps `dismissed_comment` at 280 characters, so each comment states the specific evidence and cites its root-cause group in this document rather than reproducing the full analysis.
+**GitHub state is not the same thing as security classification.** A dismissed alert can be a remediated defect (the fix is real but invisible to the query), and a `fixed` alert can be no defect at all (the code merely moved). Both cases occur here:
+
+| Security classification | Count | Alerts | GitHub state |
+| --- | --- | --- | --- |
+| Confirmed defect — remediated, removal **visible** to CodeQL | 3 | 6, 7, 45 (ORG-PR-056) | `fixed` |
+| Confirmed defect — remediated, remediation **invisible** to CodeQL | 1 | 12 (ORG-PR-055) | dismissed *false positive* |
+| Not a defect — alert closed by code relocation | 2 | 1, 2 | `fixed` |
+| False positive — control exists but is invisible to CodeQL | 33 | 8–11, 13–41 | dismissed *false positive* |
+| False positive — high-entropy token modelled as a password | 2 | 3, 4 | dismissed *false positive* |
+| False positive — arithmetic proof (uniform modulo) | 1 | 42 | dismissed *false positive* |
+| False positive — non-secret field; call site since removed | 1 | 5 | dismissed *false positive* (+ `fixed_at`) |
+| False positive — test-only negative control | 2 | 43, 44 | dismissed *used in tests* |
+| **Accepted residual risk** | **0** | — | — |
+| **Total** | **45** | | |
+
+**Confirmed security defects remediated: 2 findings** — ORG-PR-055 (audit-read cost, alert 12) and ORG-PR-056 (credential output, alerts 6/7/45). Four alerts carry those two findings.
+
+### Platform behaviour worth recording
+
+When the demo-seed sink was removed, GitHub set `fixed_at` on alert 45 but left its `state` at `dismissed` with `dismissed_reason: won't fix` — a dismissal takes precedence over a fix in the `state` field, so the alert would have kept asserting a decision *not* to fix something that had in fact been fixed. Clearing the dismissal (`PATCH state=open`) made GitHub immediately reclassify it as `state: fixed`, `dismissed_reason: null`, retaining the original `fixed_at` of 2026-07-26T16:28:31Z. Removing a sink is therefore not sufficient on its own to correct a stale dismissal; the dismissal has to be withdrawn explicitly.
+
+Alert 5 was deliberately left dismissed as *false positive* even though its call site was removed by the same change. Its classification was and remains accurate — the value at that sink was `created.apiKey.name`, a display label — and `fixed_at` already records the removal. Reopening it would discard a correct analysis to gain nothing.
+
+**Every dismissal carries an individual comment** naming its own route, control, or arithmetic; a check for dismissals with a comment shorter than 50 characters returns zero. GitHub caps `dismissed_comment` at 280 characters, so each cites its root-cause group here rather than reproducing the analysis.
 
 **Reaching zero open alerts was an outcome, not a target.** It follows from 34 of the 41 belonging to one architectural pattern the query cannot model. The honest consequence is recorded in [known-limitations.md](../known-limitations.md): this repository cannot use "zero open alerts" as a health signal, and depends instead on the dismissal-evidence rule in the [CodeQL alert policy](../validation.md#codeql-alert-policy).
 
@@ -107,8 +138,8 @@ Every one of the 41 baseline alerts, with its final state. `RC` links to the gro
 | 2 | biased-cryptographic-random | `packages/shared/src/ids.ts:53` | `randomBase32` (public ids) | 008 | Framework/model false positive | Auto-closed (code moved); superseded by alert 42, dismissed FP |
 | 3 | insufficient-password-hash | `apps/api/src/modules/api-keys/api-key-secret.ts:56` | `hashApiKeySecret` | 007 | High-entropy-token false positive | Dismissed — false positive |
 | 4 | insufficient-password-hash | `packages/auth-core/src/opaque-token.ts:32` | `hashOpaqueToken` | 007 | High-entropy-token false positive | Dismissed — false positive |
-| 5 | clear-text-logging | `tooling/demo-seed.mjs:75` | `log()` helper | 010 | Framework/model false positive | Dismissed — false positive |
-| 6 | clear-text-logging | `tooling/demo-seed.mjs:256` | one-time secret print | 009 | **Fixed defect** | Auto-closed (line moved); successor alert 45 remediated in the completion iteration (ORG-PR-056 closed) |
+| 5 | clear-text-logging | `tooling/demo-seed.mjs:75` | `log()` helper | 010 | Framework/model false positive | Dismissed — false positive; call site later removed (`fixed_at` set) |
+| 6 | clear-text-logging | `tooling/demo-seed.mjs:256` | one-time secret print | 009 | **Fixed defect** | `fixed`; successor alert 45 also `fixed` after the completion iteration removed the sink (ORG-PR-056 closed) |
 | 7 | clear-text-logging | `tooling/demo-seed.mjs:258` | `curl` example | 009 | Fixed defect | **Closed by fix** (verified: state `fixed` on GitHub) |
 | 8 | missing-rate-limiting | `api-key.routes.ts:50-79` | `POST …/api-keys` | 001 | Covered by endpoint-specific control | Dismissed — false positive |
 | 9 | missing-rate-limiting | `api-key.routes.ts:85-97` | `GET …/api-keys` | 003 | Covered by global control | Dismissed — false positive |

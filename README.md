@@ -134,8 +134,10 @@ database and runs migration-from-scratch plus live API readiness/route tests.
 security scanners — dependency audit + secret scan
 ([security.yml](.github/workflows/security.yml)) and CodeQL
 ([codeql.yml](.github/workflows/codeql.yml)) — with local equivalents
-`pnpm scan:deps` / `pnpm scan:secrets`. Full detail, the CI security policy
-(SHA-pinned actions, least-privilege permissions), and failure
+`pnpm scan:deps` / `pnpm scan:secrets`. All three are **required checks** on
+`main` via a repository ruleset, so a scanner failure blocks the merge rather
+than merely showing up red. Full detail, the CI security policy (SHA-pinned
+actions, least-privilege permissions), the CodeQL alert policy, and failure
 interpretation: [docs/validation.md](docs/validation.md).
 
 | Command | Purpose |

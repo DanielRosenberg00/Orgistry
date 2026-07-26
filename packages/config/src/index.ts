@@ -207,6 +207,18 @@ export interface Config {
       readonly planChangePerOrgMax: number;
       readonly memberMutationPerUserMax: number;
     };
+    /**
+     * Audit-log READ buckets (Sprint 22, ORG-PR-055). The only read surface
+     * with its own ceilings: its `targetId` filter scans un-indexed JSONB
+     * metadata over an unbounded table, so page size does not bound its cost.
+     * Keyed by acting user and by organization — the per-org bucket bounds a
+     * set of member accounts coordinating against one tenant's event history.
+     */
+    readonly auditRead: {
+      readonly windowSeconds: number;
+      readonly perUserMax: number;
+      readonly perOrgMax: number;
+    };
     /** External API rate limits (per key, per organization). */
     readonly external: {
       readonly windowSeconds: number;
@@ -371,6 +383,11 @@ function toConfig(env: Env): Config {
         apiKeyCreatePerUserMax: env.RATE_LIMIT_API_KEY_CREATE_PER_USER_MAX,
         planChangePerOrgMax: env.RATE_LIMIT_PLAN_CHANGE_PER_ORG_MAX,
         memberMutationPerUserMax: env.RATE_LIMIT_MEMBER_MUTATION_PER_USER_MAX,
+      },
+      auditRead: {
+        windowSeconds: env.RATE_LIMIT_AUDIT_READ_WINDOW_SECONDS,
+        perUserMax: env.RATE_LIMIT_AUDIT_READ_PER_USER_MAX,
+        perOrgMax: env.RATE_LIMIT_AUDIT_READ_PER_ORG_MAX,
       },
       external: {
         windowSeconds: env.RATE_LIMIT_EXTERNAL_WINDOW_SECONDS,

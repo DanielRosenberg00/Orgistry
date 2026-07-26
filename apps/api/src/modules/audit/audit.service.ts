@@ -8,7 +8,13 @@ import {
 } from '@orgistry/contracts';
 import type { SecurityActorType } from '@orgistry/db';
 import { decodeCursor, encodeCursor } from '@orgistry/shared';
-import { AppError } from '../../lib/errors';
+import { AppError, rateLimitedError } from '../../lib/errors';
+import {
+  createNoopRateLimiter,
+  enforceStoreAvailability,
+  type RateLimiter,
+  type RateLimitFailureMode,
+} from '../../lib/rate-limit';
 import type { EntitlementService } from '../entitlements/entitlement.service';
 import {
   requireMembership,
@@ -26,10 +32,11 @@ import type { AuditCursor, AuditRepository } from './audit.types';
  *   1. requireMembership            (active member of THIS org? -> actor)
  *   2. requirePermission(audit_events.read)
  *   3. requireEntitlement(audit_log_access)
- *   4. resolve audit_retention_days (for response metadata)
- *   5. query organization-scoped events through the repository
- *   6. sanitize metadata + shape public DTOs (the mapper)
- *   7. return a cursor-paginated response (standard success envelope, added by
+ *   4. rate limit (per acting user, then per organization)
+ *   5. resolve audit_retention_days (for response metadata)
+ *   6. query organization-scoped events through the repository
+ *   7. sanitize metadata + shape public DTOs (the mapper)
+ *   8. return a cursor-paginated response (standard success envelope, added by
  *      the route)
  *
  * Authorization is ALWAYS by permission key, never role name. The entitlement
@@ -37,6 +44,17 @@ import type { AuditCursor, AuditRepository } from './audit.types';
  * while the organization's plan lacks `audit_log_access`, and vice versa — both
  * must pass. The organization id is the actor's (resolved from the route), never
  * a request body value.
+ *
+ * Why this read is throttled when the other reads are not (Sprint 22,
+ * ORG-PR-055): every other list endpoint costs at most one indexed page. This
+ * one does not. The `targetId` filter compares against five JSONB metadata
+ * keys that carry no index, so PostgreSQL walks the organization's slice of
+ * `security_events` in keyset order and filters row by row — a `targetId` that
+ * matches nothing reads the entire slice, and that table has no retention
+ * policy yet (ORG-PR-015). The permission and entitlement gates bound WHO may
+ * ask; only a limiter bounds HOW OFTEN. The bucket sits AFTER both gates so
+ * throttling can never mask an authorization decision, and immediately before
+ * the query it exists to protect.
  */
 
 export interface AuditServiceOptions {
@@ -46,6 +64,22 @@ export interface AuditServiceOptions {
   audit: AuditRepository;
   /** Resolves the `audit_log_access` gate and `audit_retention_days` metadata. */
   entitlements: EntitlementService;
+  /** Redis-backed in production; a no-op limiter when omitted. */
+  rateLimiter?: RateLimiter;
+  /** Audit-read buckets (Sprint 22; from `config.rateLimit.auditRead`). */
+  rateLimits?: AuditReadRateLimits;
+  /**
+   * Limiter-store outage behavior (Sprint 19, ORG-PR-009). Wired from
+   * `config.rateLimit.failureMode`; defaults open for test usability.
+   */
+  rateLimitFailureMode?: RateLimitFailureMode;
+}
+
+/** Fixed-window ceilings for the audit read surface. */
+export interface AuditReadRateLimits {
+  windowSeconds: number;
+  perUserMax: number;
+  perOrgMax: number;
 }
 
 export interface ListAuditEventsInput {
@@ -109,7 +143,35 @@ function parseBound(value: string | null): Date | null {
 export function createAuditService(
   options: AuditServiceOptions,
 ): AuditService {
-  const { accessControl, audit, entitlements } = options;
+  const {
+    accessControl,
+    audit,
+    entitlements,
+    rateLimiter = createNoopRateLimiter(),
+    rateLimitFailureMode = 'open',
+  } = options;
+
+  // Permissive default when no limits are wired (unit tests not exercising
+  // rate limiting). `server.ts` always passes the configured values.
+  const limits: AuditReadRateLimits = options.rateLimits ?? {
+    windowSeconds: 60,
+    perUserMax: Number.MAX_SAFE_INTEGER,
+    perOrgMax: Number.MAX_SAFE_INTEGER,
+  };
+
+  /**
+   * Consume one audit-read allowance for `key`, rejecting with the standard
+   * RATE_LIMITED envelope when the bucket is exhausted. A limiter-store outage
+   * follows the configured failure mode (production: fail closed with a
+   * generic 503 — an abuse control on an unbounded-cost query must not
+   * silently disappear).
+   */
+  async function enforceReadRateLimit(key: string, limit: number): Promise<void> {
+    const decision = await rateLimiter.consume(key, limit, limits.windowSeconds);
+    if (!enforceStoreAvailability(decision, rateLimitFailureMode)) {
+      throw rateLimitedError();
+    }
+  }
 
   return {
     async listAuditEvents(input) {
@@ -126,7 +188,19 @@ export function createAuditService(
       // 3. Entitlement gate — INDEPENDENT of the permission above.
       await entitlements.requireAuditLogAccess(actor.organizationId);
 
-      // 4. Retention policy for the response metadata (display-only).
+      // 4. Bound how often this actor — and this tenant — may run the query.
+      // Per-user first so one runaway client is attributed to itself before it
+      // consumes the shared organization allowance.
+      await enforceReadRateLimit(
+        `rl:audit:read:user:${actor.userId}`,
+        limits.perUserMax,
+      );
+      await enforceReadRateLimit(
+        `rl:audit:read:org:${actor.organizationId}`,
+        limits.perOrgMax,
+      );
+
+      // 5. Retention policy for the response metadata (display-only).
       const auditEntitlements = await entitlements.resolveAuditEntitlements(
         actor.organizationId,
       );
@@ -145,7 +219,7 @@ export function createAuditService(
         return { items: [], nextCursor: null, hasMore: false, meta };
       }
 
-      // 5. Tenant-scoped query (org id applied inside the repository).
+      // 6. Tenant-scoped query (org id applied inside the repository).
       const records = await audit.listAuditEvents({
         organizationId: actor.organizationId,
         limit: input.limit,
@@ -169,7 +243,7 @@ export function createAuditService(
             } satisfies RawAuditCursor)
           : null;
 
-      // 6. Sanitize + shape (the mapper). The org id is the authoritative actor
+      // 7. Sanitize + shape (the mapper). The org id is the authoritative actor
       // boundary, so a record can never present another tenant's id.
       return {
         items: page.map((record) => toAuditEvent(record, actor.organizationId)),

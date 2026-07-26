@@ -158,8 +158,8 @@ Phase 6: End-to-End Verification & Security Review
   `pnpm validate:integration` exit 0 (2026-07-21). Artifact:
   [sprint-20-artifact-package.md](sprint-20-artifact-package.md).
 - **Sprint 21 — Supply-chain & CI hardening. Repository implementation
-  COMPLETE (2026-07-26); ORG-PR-020 remains open pending first remote CI
-  execution and negative-path enforcement evidence.** Actions SHA-pinned + explicit least-privilege `permissions`
+  COMPLETE (2026-07-26); ORG-PR-020 subsequently CLOSED in Sprint 22 once
+  remote execution and negative-path enforcement evidence existed.** Actions SHA-pinned + explicit least-privilege `permissions`
   + concurrency on every workflow; `security.yml` (pnpm audit high/critical
   gates, prod/dev separated; Gitleaks secret scan with rewritten fixtures and
   a narrow annotated allowlist) + `codeql.yml` (JS/TS, source-only) +
@@ -169,13 +169,30 @@ Phase 6: End-to-End Verification & Security Review
   eliminated (drizzle-kit 0.31.10 + scoped override); in-range vulnerable
   transitives updated; images pinned to exact patch tags;
   `noUncheckedIndexedAccess` ON repo-wide (297 errors fixed, zero
-  suppressions). **Closed ORG-PR-018, 019, 040, 054. Open, materially
+  suppressions). **Closed ORG-PR-018, 019, 040, 054. Left open, materially
   advanced: ORG-PR-020 (first remote scanner run + seeded-finding proof
-  outstanding), ORG-PR-042 (digest pinning deferred to the ORG-PR-001
-  artifact track).** Exit evidence: `pnpm validate` +
+  outstanding — both delivered in Sprint 22, which closed it), ORG-PR-042
+  (digest pinning deferred to the ORG-PR-001 artifact track).** Exit evidence: `pnpm validate` +
   `pnpm validate:integration` exit 0; actionlint, osv-scanner, and gitleaks
   history scan exit 0 locally; two accepted advisories documented. Artifact:
   [sprint-21-artifact-package.md](sprint-21-artifact-package.md).
+- **Sprint 22 — CodeQL alert triage & CI gate closure. COMPLETE
+  (2026-07-26).** Sprint 21 shipped scanners; Sprint 22 turned them into a
+  control. All 41 High alerts from CodeQL's first operational run triaged
+  individually with source/sink evidence, grouped into ten root causes, and
+  given individual GitHub dispositions (no bulk dismissal, no unresolved true
+  positive). Found and fixed one genuine defect — the audit-log read scanned
+  a tenant's entire event history on an un-indexed `targetId` filter
+  (ORG-PR-055) — removed one duplicate secret print and guarded the demo
+  bootstrap to loopback targets (ORG-PR-056), and extracted the byte→alphabet
+  mapping behind an enforced uniformity assertion. Documented the CodeQL gate
+  policy in `docs/validation.md` and made it enforceable with a `main`
+  ruleset (required PR + required CI/Security/CodeQL checks + code-scanning
+  merge protection). **Closed ORG-PR-020.** Exit evidence: all three
+  workflows green remotely; the Gitleaks job proved to FAIL on a seeded
+  synthetic secret (run 30207672121, temporary branch deleted and never
+  merged); `pnpm validate` + `pnpm validate:integration` exit 0. Artifact:
+  [sprint-22-artifact-package.md](sprint-22-artifact-package.md).
 
 > **Numbering correction (Sprint 21 closure, 2026-07-26 — corrective
 > maintenance, not a roadmap redesign).** Before this closure the roadmap

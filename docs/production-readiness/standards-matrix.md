@@ -43,9 +43,9 @@ not at the individual task identifier level.
 | Practice group | Class | Evidence | Gap | Findings |
 | --- | --- | --- | --- | --- |
 | Prepare the Organization | Partially satisfied | strong docs/DX; validation matrix | no ops/incident process | ORG-PR-008, 027 |
-| Protect the Software | Partially satisfied | lockfile, `onlyBuiltDependencies` | no secrets manager; no SBOM/signing | ORG-PR-006, 020 |
-| Produce Well-Secured Software | Partially satisfied | strict TS incl. `noUncheckedIndexedAccess` (Sprint 21), ESLint, broad tests, code review culture; CodeQL configured (first remote run outstanding) | no failure-injection; SAST unexecuted remotely | ORG-PR-020, 026 |
-| Respond to Vulnerabilities | Partially satisfied (Sprint 21) | audit gates + Gitleaks + Dependabot + CodeQL configured; SHA-pinned workflows; advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25) with two documented acceptances | first remote scanner run outstanding; no VDP | ORG-PR-020 |
+| Protect the Software | Partially satisfied | lockfile, `onlyBuiltDependencies`, SHA-pinned actions, secret scanning enforced as a required check (S22) | no secrets manager; no SBOM/signing | ORG-PR-006, 001 |
+| Produce Well-Secured Software | Partially satisfied | strict TS incl. `noUncheckedIndexedAccess` (Sprint 21), ESLint, broad tests, code review culture; CodeQL executing remotely with all 41 baseline alerts triaged and dispositioned (Sprint 22) | no failure-injection; no DAST | ORG-PR-026 |
+| Respond to Vulnerabilities | Largely satisfied (Sprint 22) | audit gates + Gitleaks + Dependabot + CodeQL running remotely and enforced as required checks; secret gate proved to fail on a seeded finding; documented CodeQL alert policy with evidence-bearing dispositions; advisories remediated with two documented acceptances | no VDP / security.txt; no coordinated-disclosure process | ORG-PR-008 |
 
 ## OWASP SAMM (governance→operations)
 
@@ -56,7 +56,7 @@ not at the individual task identifier level.
 | Design — Security Architecture | ~2 | permission/entitlement/quota separation, tenant model | RLS absent (defense-in-depth, deferred) |
 | Implementation — Secure Build | ~1 | reproducible via lockfile | no pipeline/artifacts — ORG-PR-001 |
 | Implementation — Secure Deployment | ~0→1 | none | no deploy/secrets automation — ORG-PR-001/006 |
-| Verification — Security Testing | ~1 | strong functional/negative tests | no SAST/DAST/E2E/pentest — ORG-PR-020/026 |
+| Verification — Security Testing | ~2 | strong functional/negative tests; SAST (CodeQL) running remotely with triaged findings (S22) | no DAST/E2E/pentest — ORG-PR-026 |
 | Operations — Incident Mgmt | ~0 | none | no incident process — ORG-PR-008 |
 | Operations — Environment Mgmt | ~1 | local runbook | no prod runbook/backup — ORG-PR-005/027 |
 
@@ -65,10 +65,10 @@ not at the individual task identifier level.
 | Requirement (practice-level) | Class | Evidence | Gap | Findings |
 | --- | --- | --- | --- | --- |
 | Scripted/consistent build | Partially | `pnpm build:web`; reproducible via lockfile | no server build/artifact | ORG-PR-001 |
-| Version-controlled source | Satisfied | git; PR-triggered CI | no branch-protection evidence in repo | ORG-PR-019 |
+| Version-controlled source | Satisfied | git; PR-triggered CI; `main` ruleset requires a PR and the CI/Security/CodeQL checks (Sprint 22) | ruleset lives in GitHub config, not in the repository tree | — |
 | Build service (not local) | Not satisfied | build runs in CI but produces no release artifact | no release pipeline | ORG-PR-001 |
-| Provenance generated | Not satisfied | none | no provenance/attestation | ORG-PR-020 |
-| Provenance/dependencies signed | Not satisfied | none | no signing/SBOM; floating image tags | ORG-PR-042, 020 |
+| Provenance generated | Not satisfied | none | no provenance/attestation | ORG-PR-001 |
+| Provenance/dependencies signed | Not satisfied | none | no signing/SBOM; images patch-tag- not digest-pinned | ORG-PR-042, 001 |
 
 Indicative build-integrity maturity: a scripted, version-controlled build with **no
 provenance or signing** (roughly the lowest SLSA tier). Higher tiers require a
@@ -82,7 +82,8 @@ SLSA text.
    verified identifiers (network/document access needed).
 2. **Independent security review / penetration test** (ties to the T-DEP/T-CI/
    T-PRIV threats and ORG-PR-018 triage).
-3. **DAST** against a running staging instance (no DAST exists — ORG-PR-020).
+3. **DAST** against a running staging instance (no DAST exists; SAST is now
+   covered by CodeQL — Sprint 22).
 4. **Legal/privacy review** for the data-protection & privacy classifications
    (ORG-PR-025/043).
 

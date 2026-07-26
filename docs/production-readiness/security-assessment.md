@@ -70,6 +70,29 @@ equivalent exists, but the CI security boundary is not yet proven enforced.
 deferred to the ORG-PR-001 artifact track. Full detail:
 [sprint-21-artifact-package.md](sprint-21-artifact-package.md).
 
+**Sprint 22 update (2026-07-26) — CodeQL alert triage & CI gate closure.**
+**ORG-PR-020 is Closed.** The CI security boundary is now proven enforced,
+not merely configured: all three workflows ran green remotely on `c33a150f`,
+a temporary branch demonstrated that the Gitleaks job actually FAILS on a
+seeded synthetic secret (run 30207672121 — `generic-api-key`, output
+redacted, branch deleted and never merged), and a `main` ruleset makes the
+CI, Security, and CodeQL checks required so a scanner failure blocks the
+merge. All 41 High alerts from CodeQL's first run were individually triaged
+with source/sink evidence and individually dispositioned — no bulk dismissal,
+no unresolved true positive
+([sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md)).
+The triage found one genuine security defect, **ORG-PR-055**: the audit-log
+read filtered on five un-indexed JSONB metadata keys over a table with no
+retention policy, so a `targetId` matching nothing scanned the organization's
+entire event slice with only a coarse per-IP ceiling in front of it; per-user
+and per-organization buckets now bound it (the scan cost itself remains
+open). **ORG-PR-056** records the demo bootstrap's one-time secret print as
+an owned accepted risk, with the duplicate print removed and a new
+loopback-target guard. Two claims were re-verified rather than inherited: the
+password/token hashing boundary is Argon2id-only across all seven password
+paths, and both flagged modulo operations are exactly uniform (256 = 32 x 8).
+Full detail: [sprint-22-artifact-package.md](sprint-22-artifact-package.md).
+
 ## Authentication & account lifecycle
 
 **Strengths (verified):** Argon2id at OWASP-minimum parameters (`password.ts`
@@ -205,10 +228,11 @@ restricts postinstall scripts to esbuild; well-chosen primitives (`@node-rs/argo
 are remediated (Sprint 21: 0.45.2 / no copy < 0.25), in-range vulnerable
 transitives updated, and Dependabot (npm / github-actions / docker-compose) +
 audit gates + Gitleaks + `osv-scanner` are configured with two narrowly
-documented advisory acceptances. **Gaps:** the scanners have not yet executed
-on GitHub-hosted CI (ORG-PR-020 open); Docker images are exact-patch-tag
-pinned but not digest-pinned (ORG-PR-042 open, deferred to the ORG-PR-001
-artifact track); no SBOM/provenance/signing.
+documented advisory acceptances; as of Sprint 22 the scanners execute on
+GitHub-hosted CI and are enforced as required checks (ORG-PR-020 closed).
+**Gaps:** Docker images are exact-patch-tag pinned but not digest-pinned
+(ORG-PR-042 open, deferred to the ORG-PR-001 artifact track); no
+SBOM/provenance/signing.
 
 ## CI/CD & release readiness
 
@@ -216,10 +240,11 @@ Three workflows: `ci.yml` mirrors local validation across two jobs with
 PG+Redis service containers; `security.yml` runs the pnpm dependency-audit
 gates and the Gitleaks secret scan; `codeql.yml` runs JS/TS SAST. All actions
 are pinned to verified full commit SHAs with explicit least-privilege
-permissions (ORG-PR-019 closed, Sprint 21). **Gaps:** ORG-PR-020 (first
-remote scanner execution and negative-path enforcement evidence outstanding),
-ORG-PR-041 (SMTP untested), ORG-PR-001 (no release/deploy pipeline, no
-artifacts, no tags, no versioning). The minimum release pipeline for the
+permissions (ORG-PR-019 closed, Sprint 21); all three run remotely and are
+required checks on `main` via a repository ruleset, with the secret gate
+proved to fail on a seeded finding (ORG-PR-020 closed, Sprint 22).
+**Gaps:** ORG-PR-041 (SMTP untested), ORG-PR-001 (no release/deploy pipeline,
+no artifacts, no tags, no versioning). The minimum release pipeline for the
 target is defined in [production-roadmap.md](production-roadmap.md).
 
 ## Infrastructure & deployment

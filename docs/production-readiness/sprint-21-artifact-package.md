@@ -8,6 +8,22 @@ Authoritative finding statuses live in
 [findings-register.md](findings-register.md); this artifact records the
 implementation, evidence, and decisions.
 
+> **Follow-up cross-reference (added 2026-07-26, after Sprint 22 — not known
+> at Sprint 21 closure).** This artifact records Sprint 21 as it stood when it
+> closed: ORG-PR-020 left open because the workflows had never executed on
+> GitHub-hosted CI, and "configuration is not enforcement until it has run".
+> That judgement was correct and is preserved above unchanged. Sprint 22
+> supplied the missing evidence — first green remote runs of all three
+> workflows on this sprint's commit `c33a150f`, a remote negative-path proof
+> that the Gitleaks job FAILS on a seeded synthetic secret (run 30207672121),
+> full triage of the 41 CodeQL alerts this configuration produced, and a
+> `main` ruleset making the checks required — and **ORG-PR-020 is now
+> Closed**. See
+> [sprint-22-artifact-package.md](sprint-22-artifact-package.md) and
+> [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md).
+> Nothing in the Sprint 21 record below has been rewritten to appear as
+> though it were known earlier.
+
 ## 1. Sprint objective
 
 Establish a trustworthy CI/supply-chain baseline: immutable action pins,

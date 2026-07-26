@@ -138,6 +138,35 @@ blockers: ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged**
 or production. See
 [sprint-21-artifact-package.md](sprint-21-artifact-package.md).
 
+**Status update (Sprint 22, 2026-07-26):** CodeQL alert triage and CI gate
+closure. All 41 High alerts from CodeQL's first operational run were
+individually triaged with source/sink evidence, grouped into ten root causes,
+and given individual GitHub dispositions — see
+[sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md).
+[ORG-PR-020](#org-pr-020) (P2) **Closed**: all three workflows ran green
+remotely on `c33a150f`; a temporary branch proved the Gitleaks job actually
+FAILS on a seeded synthetic secret (run 30207672121, `generic-api-key`,
+redacted output, branch deleted and never merged); CodeQL findings are fully
+triaged; and a `main` ruleset now makes the CI, Security, and CodeQL checks
+required, so a scanner failure blocks the merge rather than merely being
+visible. Two findings were opened by the triage itself.
+[ORG-PR-055](#org-pr-055) (P3) **Mitigated** — the audit-log read was the one
+true positive in the 34 `js/missing-rate-limiting` alerts: its `targetId`
+filter compares against five un-indexed JSONB metadata keys over a table with
+no retention policy, so a filter matching nothing scanned the organization's
+entire event slice, bounded only by a coarse per-IP ceiling. Per-user and
+per-organization buckets now bound it; the underlying scan cost remains open.
+[ORG-PR-056](#org-pr-056) (P4) **Accepted risk** — the demo bootstrap prints a
+one-time API key secret (its only delivery channel); the duplicate print in
+the `curl` example was removed and a loopback-target guard now prevents the
+tool from ever running against a non-local API. Everything else was proved a
+false positive with recorded evidence: the password/token hashing boundary is
+Argon2id-only for all seven password paths, and both flagged modulo operations
+are exactly uniform (256 = 32 x 8). **Open P1 production blockers: ORG-PR-001,
+ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged.** The repository remains not
+ready for staging or production. See
+[sprint-22-artifact-package.md](sprint-22-artifact-package.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
@@ -161,7 +190,7 @@ or production. See
 | [ORG-PR-017](#org-pr-017) | Admin can escalate self/others to Owner (no role-transition guard) — **Closed (Sprint 20)** | Authorization | Security risk | P2 | Medium |
 | [ORG-PR-018](#org-pr-018) | `drizzle-orm` high-severity advisory (installed `<0.45.2`) — **Closed (Sprint 21)** | Supply chain | Security risk | P2 | Medium |
 | [ORG-PR-019](#org-pr-019) | CI actions pinned to mutable tags; no workflow `permissions` block — **Closed (Sprint 21)** | CI/CD | Security risk | P2 | High |
-| [ORG-PR-020](#org-pr-020) | No dependency/vuln/secret/SAST scanning in CI — **Open; materially advanced (Sprint 21): scanners + Dependabot configured and locally validated; first remote CI run outstanding** | Supply chain | Operational gap | P2 | High |
+| [ORG-PR-020](#org-pr-020) | No dependency/vuln/secret/SAST scanning in CI — **Closed (Sprint 22): scanners run remotely, the secret gate demonstrably fails on a seeded finding, CodeQL findings are fully triaged, and a `main` ruleset makes the checks required** | Supply chain | Operational gap | P2 | High |
 | [ORG-PR-021](#org-pr-021) | No DB pool / statement / lock timeouts | Reliability | Reliability risk | P2 | Medium |
 | [ORG-PR-022](#org-pr-022) | App and migrations share a single Postgres superuser | Infra/Security | Security risk | P2 | High |
 | [ORG-PR-023](#org-pr-023) | No React error boundary; a render throw blanks the SPA | Frontend | Reliability risk | P2 | High |
@@ -196,6 +225,8 @@ or production. See
 | [ORG-PR-052](#org-pr-052) | Minor API disclosures (`/ready` deps, inbound `x-request-id`, no shutdown timeout) — **Closed (Sprint 19)** | API | Maintainability issue | P4 | Medium |
 | [ORG-PR-053](#org-pr-053) | Two read paths skip the permission gate (divergence, no current gap) — **Closed (Sprint 20)** | Authorization | Maintainability issue | P4 | High |
 | [ORG-PR-054](#org-pr-054) | `esbuild` moderate dev-only advisory (via `drizzle-kit`) — **Closed (Sprint 21)** | Supply chain | Optional enhancement | P4 | High |
+| [ORG-PR-055](#org-pr-055) | Audit-log read has unbounded query cost and no per-actor ceiling — **Found and mitigated (Sprint 22); underlying scan cost open** | API | Security risk | P3 | High |
+| [ORG-PR-056](#org-pr-056) | Demo bootstrap prints a one-time API key secret to stdout — **Accepted risk with a loopback-target guard (Sprint 22)** | Tooling | Accepted risk | P4 | High |
 
 ---
 
@@ -574,6 +605,12 @@ Standards · Threats.
 - **Remediation:** Add Dependabot/Renovate, an `audit`/OSV gate, secret scanning, and CodeQL.
 - **Dependencies:** none. **Effort:** M. **Validation:** CI runs the scanners and fails on a seeded finding. **Roadmap:** Phase 3 / Phase 6. **Standards:** SSDF PW.4/RV.1; SLSA. **Threats:** T-DEP, T-SECRET, T-CI.
 - **Progress (Sprint 21, 2026-07-26): Open — materially advanced.** Implemented and configured: **(1) dependency vulnerability gate** — `security.yml` runs `pnpm audit --prod --audit-level high` and `pnpm audit --dev --audit-level high` (high/critical fail; production and development risk separated; no `|| true` or `continue-on-error` anywhere) on push/PR/weekly schedule/manual dispatch; exceptions live ONLY in `pnpm.auditConfig.ignoreGhsas` (currently two, each with a reachability analysis — react-router GHSA-qwww-vcr4-c8h2: CSRF in unstable RSC APIs, fix is a major upgrade, the web demo is a client-only SPA with zero RSC usage; brace-expansion GHSA-mh99-v99m-4gvg: DoS in a dev-only eslint transitive with no compatible fixed release). In-range vulnerable transitives were remediated outright instead of accepted (find-my-way 9.7.0, fast-uri 3.1.4, postcss 8.5.18, shell-quote 1.9.0, brace-expansion 1.1.16). Local equivalents: `pnpm scan:deps` (audit) and `pnpm scan:deps:local` (osv-scanner with the mirrored `osv-scanner.toml` ignore file). The exact CI audit commands were executed locally in the closing pass: prod and dev gates exit 0 with exactly the two documented ignores reported, and a negative test (ignore entry temporarily removed, `package.json` restored byte-identical afterwards) made the prod gate exit 1 — the gate demonstrably fails on an unaccepted high. **(2) Secret scanning** — Gitleaks (SHA-pinned action) fails on suspected live secrets; realistic-looking committed fixtures were REWRITTEN to unmistakable fakes; `.gitleaks.toml` allowlists only the committed fake SMTP TLS fixture (one path) and five exact historical fake values / one prose false-positive (regexes), each annotated in-file; local `pnpm scan:secrets` (full git-history scan) exits clean, the pre-rewrite run detected all 8 fixture hits, and a disposable-repository negative test proved the final config fails (exit 1) on a synthetic secret with redacted output while accepting the allowlisted historical value ONLY verbatim (a one-character mutation fails) — see artifact §17. CI scan semantics verified against the pinned action source: push/PR scan the event's commit range, schedule/dispatch scan full history (checkout `fetch-depth: 0`), PR comments disabled so the job needs no write permission and is fork-PR-safe. **(3) SAST** — CodeQL v4, `javascript-typescript`, build-mode `none` (no install/build, no secrets), push/PR/weekly, `security-events: write` scoped to the one analyze job. **(4) Dependency-update automation** — `dependabot.yml` covering npm (workspace root), github-actions (SHA pins), and docker-compose (`infra/` — the ecosystem that actually discovers `docker-compose.yml`), weekly, minor/patch grouped, majors individual; no auto-merge exists. Local validation: osv-scanner exit 0, gitleaks history scan exit 0, actionlint exit 0. **Why still open:** none of the new workflows has executed on GitHub-hosted CI. Closure requires the first green remote run of `security.yml` and `codeql.yml` plus a verified failure on a seeded finding (and, for CodeQL on a private repository, code-scanning availability). Configuration is not enforcement until it has run.
+- **Resolution (Sprint 22, 2026-07-26): CLOSED.** The three conditions Sprint 21 named as outstanding are now met with remote evidence.
+  **(1) First green remote runs.** All three workflows executed on GitHub-hosted CI on the Sprint 21 commit `c33a150f` (event `push`, branch `main`): CI run [30205303375](https://github.com/DanielRosenberg00/Orgistry/actions/runs/30205303375) success; Security scans run [30205303370](https://github.com/DanielRosenberg00/Orgistry/actions/runs/30205303370) success; CodeQL run [30205303373](https://github.com/DanielRosenberg00/Orgistry/actions/runs/30205303373) success.
+  **(2) Verified failure on a seeded finding — remote, not local.** A temporary branch `chore/sprint-22-scanner-negative-path` (commit `75daffcdfd7e52969a1e97a52e15af751ccbb662`, based on `origin/main`) carried one synthetic, non-provider-format, never-valid high-entropy assignment in `SPRINT-22-SCANNER-NEGATIVE-PATH.txt`. `security.yml` was dispatched against that ref: run [30207672121](https://github.com/DanielRosenberg00/Orgistry/actions/runs/30207672121) concluded **failure**. Job-level detail proves the failure was specific rather than a broken workflow: *Dependency audit (pnpm)* → success; *Secret scan (Gitleaks)* → **failure** at the gitleaks step, reporting `RuleID: generic-api-key`, `File: SPRINT-22-SCANNER-NEGATIVE-PATH.txt`, `Line: 13`, `Commit: 75daffcd`, `leaks found: 1`, with `Secret: REDACTED` — confirming the redaction guarantee holds on a real failure. The branch was deleted from the remote and locally immediately afterwards; `gh api /repos/DanielRosenberg00/Orgistry/branches` lists only `main` and Dependabot branches. Nothing from that branch was merged or cherry-picked into `main`. The GitHub run record persists as durable evidence.
+  **(3) SAST is operational AND triaged.** CodeQL is not merely running: its first analysis produced 41 High alerts, every one of which was individually triaged in Sprint 22 with source/sink evidence, root-cause grouping, and an individual GitHub disposition — see [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) and [sprint-22-artifact-package.md](sprint-22-artifact-package.md). The triage found and fixed one true positive (ORG-PR-055) and recorded one owned accepted risk (ORG-PR-056). Code scanning is available (public repository); the analysis uploads SARIF under the single `security-events: write` job.
+  **(4) Enforcement, which is what "gate" required.** Sprint 21 correctly noted that configuration is not enforcement. Sprint 22 added the missing half: a repository ruleset targeting `main` requires a pull request and makes the CI, Security, and CodeQL checks required status checks, so a scanner failure now blocks the merge instead of merely being visible. Direct pushes to `main` are refused. The gate policy that governs dispositions is documented in [validation.md](../validation.md#codeql-alert-policy).
+  **Residual (does NOT reopen this finding, tracked elsewhere):** code-scanning merge protection blocks on alert *severity* and cannot express a per-query allow-list, so the "no new High alerts" rule is enforced at that granularity only; the remainder of the alert policy (evidence-bearing individual dismissals, no bulk dismissal) is a documented manual control, stated as such rather than claimed as enforced. Container image digest pinning remains under ORG-PR-042; artifact signing and SLSA provenance remain out of scope under ORG-PR-001.
 
 <a id="org-pr-021"></a>
 ### ORG-PR-021 — No DB pool / statement / lock timeouts
@@ -1069,3 +1106,35 @@ Standards · Threats.
 - **Remediation:** Address on the dependency-update track (ORG-PR-020). **Not upgraded here** per scope.
 - **Dependencies:** ORG-PR-020. **Effort:** S. **Validation:** `pnpm audit` clean or documented acceptance. **Roadmap:** Phase 3. **Standards:** SSDF PW.4. **Threats:** T-DEP.
 - **Resolution (Sprint 21, 2026-07-26): CLOSED.** Every vulnerable `esbuild` copy (0.18.20 and 0.19.12; GHSA-67mh-4wv8-2f99 — dev-server CORS exposure, fixed in 0.25.0) is GONE from the lockfile: `drizzle-kit` 0.31.10 depends on esbuild ^0.25 and dropped `esbuild-register`, and the deprecated `@esbuild-kit/core-utils` chain it still carries is forced to esbuild ^0.25 by a scoped pnpm override (`"@esbuild-kit/core-utils>esbuild": "^0.25.0"` — path-scoped, not global). Remaining copies are 0.25.12 (vite) and 0.28.1 (tsx), both ≥ the fix. Dependency-path evidence: `pnpm why -r esbuild` shows no copy below 0.25; `osv-scanner` reports no esbuild finding. The advisory was dev-only (drizzle-kit is a devDependency and no repository path ever starts the affected esbuild dev server — vite's own dev server carries the fixed 0.25.12) — but it is now absent rather than risk-accepted. Validation: drizzle-kit codegen under the override is exercised by the schema-drift check (clean), migrations by `pnpm db:migrate` + the integration suite (green), full `pnpm validate` exit 0.
+
+<a id="org-pr-055"></a>
+### ORG-PR-055 — Audit-log read has unbounded query cost and no per-actor ceiling
+
+> **Status: MITIGATED (Sprint 22, 2026-07-26).** Discovered during CodeQL alert
+> triage (alert 12, `js/missing-rate-limiting`). The exploitation path is
+> closed; the underlying query cost is not — see *Residual*.
+
+- **Class / Sev / Conf:** Security risk · P3 · High · Verified fact.
+- **Evidence:** `GET /v1/organizations/:organizationId/audit-events` reaches `audit.repo.ts:39 listAuditEvents`, whose `targetId` filter is an OR across five JSONB expressions (`metadata ->> 'targetProjectId'`, `targetKeyId`, `targetInvitationId`, `targetMembershipId`, `membershipId`). No index covers those expressions: `packages/db/src/schema/auth.ts:311-317` declares indexes on `user_id`, `event_type`, `created_at`, and the composite `(organization_id, created_at, id)`. The composite orders the keyset scan but cannot satisfy the predicate.
+- **Current behavior (pre-fix):** PostgreSQL walks the organization's slice of `security_events` in keyset order and filters row by row. A `targetId` matching nothing reads the entire slice before returning an empty page. `security_events` has no retention or cleanup policy (ORG-PR-015), so the scanned range grows without bound. The permission gate (`audit_events.read`) and the independent entitlement gate (`audit_log_access`) bound WHO may ask; nothing bounded HOW OFTEN. The only ceiling was the global per-IP bucket — 300/60s, shared with all other traffic from that IP, and keyed on IP rather than on the actor or tenant whose history is being scanned, so a distributed client evaded it entirely.
+- **Expected production behavior:** A read whose cost is not bounded by its page size carries a per-actor and per-tenant ceiling, like the mutation surfaces do.
+- **Risk:** An authenticated member of an entitled organization can force repeated full scans of that tenant's event history — a self-inflicted database load amplifier that grows with the table and is invisible to per-IP limiting when distributed.
+- **Remediation (applied):** Per-actor and per-tenant fixed-window buckets in `audit.service.ts`, placed AFTER the membership, permission, and entitlement gates (so throttling never masks or precedes an authorization decision) and immediately before the query they protect: `rl:audit:read:user:<userId>` (`RATE_LIMIT_AUDIT_READ_PER_USER_MAX`, default 60/60s) then `rl:audit:read:org:<organizationId>` (`RATE_LIMIT_AUDIT_READ_PER_ORG_MAX`, default 240/60s). Per-user is consumed first so a runaway client is attributed to itself before consuming the shared tenant allowance. Reuses the existing `RateLimiter` interface, the `enforceStoreAvailability` failure-mode policy (production: fail closed), and the standard `RATE_LIMITED` envelope — no parallel throttling mechanism was introduced. Files: `packages/config/src/schema.ts`, `packages/config/src/index.ts`, `apps/api/src/modules/audit/audit.service.ts`, `apps/api/src/server.ts`, `apps/api/src/modules/audit/testing/build-audit-test-app.ts`, `.env.example`.
+- **Dependencies:** ORG-PR-012 (global limiter), ORG-PR-032 (mutation buckets). **Effort:** S. **Validation:** `apps/api/src/modules/audit/audit-read-throttle.test.ts` — 8 cases: per-user ceiling with the standard envelope; the expensive `targetId` path specifically bounded; per-user isolation between members of one org; the per-org ceiling firing across distinct members each under their own limit; cross-organization isolation; legitimate traffic below the ceiling succeeding; non-member still 404 not 429; non-entitled member still 403 not 429 and never consuming the allowance. **Roadmap:** Phase 3. **Standards:** ASVS V11.1. **Threats:** T-DOS.
+- **Residual (OPEN):** The limiter bounds exploitation; it does not make the query cheap. A legitimate operator on a large tenant still pays a full-slice scan for a non-matching `targetId`. A durable fix is either (a) an index covering the target-id metadata keys — a GIN index on `metadata`, or expression indexes per key — or (b) retention/cleanup on `security_events` under ORG-PR-015, or both. Neither is in Sprint 22 scope. Owner: repository maintainer. Re-review when ORG-PR-015 is scheduled.
+
+<a id="org-pr-056"></a>
+### ORG-PR-056 — Demo bootstrap prints a one-time API key secret to stdout
+
+> **Status: ACCEPTED RISK with a compensating control (Sprint 22, 2026-07-26).**
+> Surfaced by CodeQL alerts 5, 6, 7 (`js/clear-text-logging`).
+
+- **Class / Sev / Conf:** Accepted risk · P4 · High · Verified fact.
+- **Evidence:** `tooling/demo-seed.mjs` printed the created API key secret twice — once as the labelled one-time value, and once interpolated into a ready-to-run `curl` example. A third alert on the `log()` helper resolved to `created.apiKey.name` (a display label, not the secret) and is a false positive.
+- **Current behavior:** The secret is written to stdout by a local developer CLI. It is not part of the deployed API, ships no runtime code, and its output goes to an interactive terminal rather than an aggregated log pipeline. The API's Pino redaction backstop (ORG-PR-033) does NOT cover it: this is a separate process using `console.log` with string interpolation, which bypasses path-based redaction entirely.
+- **Expected production behavior:** Credential-issuing tooling prints a secret only where the operator is the intended recipient, and cannot be aimed at a shared environment.
+- **Risk:** Terminal scrollback, screen shares, and terminal-recording tools capture the secret. Before this sprint, `DEMO_API_BASE_URL` could point the tool at any host, so the secret printed could have been a real one against a shared environment.
+- **Remediation (partial, applied):** (1) The duplicate print inside the `curl` example was **removed** and replaced with a `<api-key-secret>` placeholder — it carried no information the labelled line above did not, while doubling the capture surface. (2) `assertLocalTarget` (`tooling/lib/demo-target-guard.mjs`, called from `demo-seed.mjs` before any request) refuses any non-loopback target, so a misdirected run creates no account and prints no secret. Hostname equality is used rather than a prefix check, so `localhost.evil.example.com` is refused.
+- **Why the remaining print is accepted:** The API returns an API key secret exactly once, at creation. Printing it to the operator's terminal IS the delivery channel, and `docs/demo-walkthrough.md` depends on it. Removing the print leaves an unusable key and a broken demo. This is the standard pattern for credential-issuing CLIs.
+- **Dependencies:** none. **Effort:** S. **Validation:** `tooling/demo-target-guard.test.ts` — 5 cases: loopback forms accepted (`localhost`, `127.0.0.1`, `[::1]`, with/without port, http/https); hosted and private-network targets refused; `localhost.evil.example.com` and `127.0.0.1.evil.example.com` refused; the rejected host is named in the message; malformed URLs refused rather than passed through. **Roadmap:** n/a. **Standards:** ASVS V7.1 (log content). **Threats:** T-SECRET.
+- **Owner / follow-up:** Repository maintainer. Re-review whenever `demo-seed.mjs` changes or the demo gains a non-local mode. Recorded as accepted risk — deliberately NOT dismissed as a false positive, because the dataflow is real.

@@ -265,6 +265,9 @@ async function main(): Promise<void> {
     accessControl: organizationRepo,
     audit: createDbAuditRepository(dbClient.db),
     entitlements: entitlementService,
+    rateLimiter,
+    rateLimits: config.rateLimit.auditRead,
+    rateLimitFailureMode: config.rateLimit.failureMode,
   });
 
   const app = buildApp({

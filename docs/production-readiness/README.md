@@ -149,6 +149,32 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > repository is still **not ready for staging or production** — the state
 > remains **C — Ready to continue production implementation**. Recommended
 > next: **Sprint 22 — Deployable artifact & pipeline** (Phase 4).
+>
+> **Post-audit status (Sprint 22, 2026-07-26): CodeQL alert triage and CI gate
+> closure — complete.** Sprint 21 shipped scanners; Sprint 22 turned them into
+> a control. All **41** High alerts from CodeQL's first operational run were
+> individually triaged with source/sink evidence and given individual GitHub
+> dispositions: **2 fixed defects**, 13 covered by endpoint-specific controls
+> the query cannot model, 19 covered by the global limiter, 6 false positives
+> (framework-model + high-entropy-token), 1 owned accepted risk. Zero alerts
+> were bulk-dismissed and zero true positives were left unresolved — see
+> [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md).
+> **ORG-PR-020 is CLOSED**: all three workflows ran green remotely on
+> `c33a150f`; a temporary branch proved the Gitleaks job actually *fails* on a
+> seeded synthetic secret (run 30207672121 — branch deleted, never merged);
+> and a `main` ruleset now makes the CI, Security, and CodeQL checks required,
+> so a scanner failure blocks the merge instead of merely being visible. The
+> triage opened two findings of its own: **ORG-PR-055** (the audit-log read
+> scanned an entire tenant's event history on an un-indexed `targetId` filter
+> — now bounded by per-user and per-organization buckets; the scan cost itself
+> stays open) and **ORG-PR-056** (the demo bootstrap's one-time secret print,
+> accepted with a new loopback-target guard). `pnpm validate` and
+> `pnpm validate:integration` exit 0 (2026-07-26). See
+> [sprint-22-artifact-package.md](sprint-22-artifact-package.md). Four P1
+> blockers remain open (ORG-PR-001/002/005/006); the repository is still
+> **not ready for staging or production** — the state remains
+> **C — Ready to continue production implementation**. Recommended next:
+> **Sprint 23 — Deployable artifact & pipeline** (Phase 4).
 
 ## Audit context
 
@@ -184,6 +210,8 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-20-artifact-package.md](sprint-20-artifact-package.md) | The Sprint 20 closing artifact (authorization and concurrency correctness). |
 | [sprint-20-quota-race-audit.md](sprint-20-quota-race-audit.md) | The Sprint 20 quota-race map: per-path pre-change state, serialization primitive, lock order. |
 | [sprint-21-artifact-package.md](sprint-21-artifact-package.md) | The Sprint 21 closing artifact (supply-chain & CI hardening: pinning, scanners, advisory remediation, `noUncheckedIndexedAccess`). |
+| [sprint-22-artifact-package.md](sprint-22-artifact-package.md) | The Sprint 22 closing artifact (CodeQL alert triage, gate policy + ruleset enforcement, ORG-PR-020 closure). |
+| [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) | Per-alert triage of all 41 baseline CodeQL High alerts: evidence, root-cause groups, classifications, dispositions. |
 
 ## Source-of-truth hierarchy
 

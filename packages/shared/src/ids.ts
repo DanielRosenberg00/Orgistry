@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { assertUniformAlphabet, randomAlphabetString } from './random-alphabet';
 
 /**
  * Prefixed public identifiers.
@@ -42,17 +42,17 @@ export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
 const PREFIX_SET = new Set<string>(Object.values(ID_PREFIXES));
 
-// Crockford base32 alphabet: no I, L, O, U to avoid ambiguity.
+// Crockford base32 alphabet: no I, L, O, U to avoid ambiguity. Its length (32)
+// divides 256, so byte-modulo sampling is EXACTLY uniform — see
+// `random-alphabet.ts`. The assertion makes that a checked invariant: editing
+// this string to a length that does not divide 256 fails at import.
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+assertUniformAlphabet(ALPHABET, 'ids: public identifier alphabet');
+
 const DEFAULT_RANDOM_LENGTH = 26;
 
 function randomBase32(length: number): string {
-  let out = '';
-  for (const byte of randomBytes(length)) {
-    // Map each byte into the 32-char alphabet. Uniform enough for opaque IDs.
-    out += ALPHABET.charAt(byte % ALPHABET.length);
-  }
-  return out;
+  return randomAlphabetString(ALPHABET, length);
 }
 
 /** True when `prefix` is part of the supported v1 registry. */

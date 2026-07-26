@@ -230,10 +230,103 @@ schedule, manual dispatch) runs the scanners:
 static analysis for `javascript-typescript` in source-only mode
 (`build-mode: none` — no install, no build, no secrets). Findings appear
 under the repository's **Security → Code scanning** tab; there is no local
-equivalent. Alerts are triaged there: dismiss with a stated reason
-(false positive / accepted risk referencing a finding ID) or fix; a
-high-confidence high-severity alert must never be dismissed without a
-findings-register entry.
+equivalent. The triage rules are in
+[CodeQL alert policy](#codeql-alert-policy) below.
+
+### CodeQL alert policy
+
+The single authoritative statement of how CodeQL findings are handled
+(Sprint 22). Written to be enforceable and to be honest about where
+enforcement stops.
+
+**Scanner execution.** A CodeQL *workflow failure* is a hard failure. The
+analyze job is a required status check on `main`, so a run that errors,
+times out, or is cancelled blocks the merge exactly like a failing test — a
+scanner that did not run is never treated as a scanner that found nothing.
+No step may use `continue-on-error` or `|| true`.
+
+**Merge blocking.** New **Critical** or **High** alerts introduced by a pull
+request block that pull request, via the code-scanning merge-protection rule
+in the `main` ruleset. Medium and Low alerts do not block; they are triaged
+on the schedule below.
+
+**Baseline.** The 41 High alerts present at commit `c33a150f` are
+grandfathered — but only because every one of them was individually reviewed
+in Sprint 22 with recorded evidence, and each carries an explicit GitHub
+disposition. See
+[sprint-22-codeql-alert-inventory.md](production-readiness/sprint-22-codeql-alert-inventory.md).
+Grandfathering is a statement about *reviewed* alerts, never about *unread*
+ones. There is no mechanism for an alert to age out of triage.
+
+**Ownership and cadence.**
+
+- Initial triage of a new alert belongs to the author of the pull request
+  that introduced it, during review. A PR is not approvable with an
+  untriaged Critical/High alert.
+- Alerts from the weekly scheduled run (new queries applied to unchanged
+  code) belong to the repository maintainer and are triaged within one week.
+- Both paths produce the same artifact: a disposition on the alert, plus a
+  findings-register entry when the outcome is anything other than a fix or a
+  demonstrated false positive.
+
+**Remediation urgency.** Critical and High: fix, or record an owned accepted
+risk, before merge. Medium: within the current sprint. Low: recorded and
+scheduled, no deadline.
+
+**Evidence required to dismiss.** Every dismissal is individual and carries a
+comment that a later reader can verify without re-deriving the analysis:
+
+- *False positive* — the exact reason the dataflow does not hold: the real
+  value reaching the sink, the control the query cannot model (with file and
+  line), or the arithmetic that makes the operation safe. "Framework false
+  positive" alone is not sufficient.
+- *Won't fix / accepted risk* — rationale, compensating control, named owner,
+  and a findings-register ID. Never label an accepted risk a false positive.
+- *Used in tests* — only for genuine test-fixture code.
+
+Bulk dismissal is prohibited. Reusing one generic comment across unrelated
+alerts is prohibited. Dismissing to reach zero is prohibited.
+
+**Duplicates and grouping.** Alerts sharing a cause are assigned a root-cause
+group ID (`S22-RC-001`, …) in the inventory. Grouping organizes the analysis;
+it does not reduce the work — every alert still gets its own row, its own
+final classification, and its own dismissal comment naming its own route or
+symbol.
+
+**Framework-model false positives.** Orgistry's route handlers delegate to
+services, and its limiters live in the service layer and in the API-key
+authenticator, so `js/missing-rate-limiting` cannot see them. These are
+dismissed individually with the limiter key and enforcing line. Note the
+trap: this reasoning is only valid when a limiter genuinely exists. Sprint 22
+found one route (`GET …/audit-events`) where the same argument would have
+been wrong, and fixed it (ORG-PR-055). Verify per route; never dismiss a
+rate-limiting alert by pattern.
+
+**When GitHub cannot enforce the threshold.** Code-scanning merge protection
+blocks on alert severity, not on a per-query allow-list, and it cannot
+express "block new alerts but permit the reviewed baseline" beyond its own
+new-vs-existing distinction. Where the desired policy exceeds what the
+ruleset can express, the remainder is a documented manual control — stated
+as such in the sprint artifact package, never described as enforced.
+
+**Enforcement mechanism.** A repository ruleset targeting `main` (see
+[Branch protection](#branch-protection)). If the ruleset is absent, this
+policy is documentation only and the CodeQL gate is advisory — check
+`gh api /repos/DanielRosenberg00/Orgistry/rulesets` before relying on it.
+
+### Branch protection
+
+`main` is governed by a repository ruleset rather than legacy branch
+protection. It requires a pull request, requires the CI, security, and CodeQL
+checks to pass, and enables code-scanning merge protection at the
+Critical/High threshold. Direct pushes to `main` are refused.
+
+Verify the live configuration — documentation can drift, the API cannot:
+
+```bash
+gh api /repos/DanielRosenberg00/Orgistry/rulesets
+gh api /repos/DanielRosenberg00/Orgistry/rulesets/<id>
+```
 
 ### CI security policy
 

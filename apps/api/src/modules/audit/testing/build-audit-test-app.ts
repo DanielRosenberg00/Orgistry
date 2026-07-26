@@ -18,7 +18,11 @@ import { createInMemoryEntitlementRepository } from '../../entitlements/testing/
 import { createPlanService } from '../../entitlements/plan.service';
 import { createProjectService } from '../../projects/project.service';
 import { createInMemoryProjectRepository } from '../../projects/testing/in-memory-project-repo';
-import { createAuditService } from '../audit.service';
+import {
+  createAuditService,
+  type AuditReadRateLimits,
+} from '../audit.service';
+import type { RateLimiter } from '../../../lib/rate-limit';
 import { createInMemoryAuditRepository } from './in-memory-audit-repo';
 import {
   createInMemoryAccountMailer,
@@ -49,7 +53,18 @@ export interface AuditTestContext {
   config: Config;
 }
 
-export async function buildAuditTestApp(): Promise<AuditTestContext> {
+/**
+ * Optional overrides. Audit-read throttling is OFF unless a test wires both a
+ * limiter and explicit ceilings, so existing route tests keep their behavior.
+ */
+export interface BuildAuditTestAppOptions {
+  rateLimiter?: RateLimiter;
+  auditReadRateLimits?: AuditReadRateLimits;
+}
+
+export async function buildAuditTestApp(
+  options: BuildAuditTestAppOptions = {},
+): Promise<AuditTestContext> {
   const config = testConfig();
   const orgStore = createInMemoryOrgStore();
   const authRepo = createInMemoryAuthRepository({ orgStore });
@@ -85,6 +100,10 @@ export async function buildAuditTestApp(): Promise<AuditTestContext> {
     accessControl: orgRepo,
     audit: createInMemoryAuditRepository(orgStore),
     entitlements: entitlementService,
+    ...(options.rateLimiter ? { rateLimiter: options.rateLimiter } : {}),
+    ...(options.auditReadRateLimits
+      ? { rateLimits: options.auditReadRateLimits }
+      : {}),
   });
 
   const app = buildApp({

@@ -13,7 +13,11 @@
 // duplicated.
 //
 // The credentials below are LOCAL-ONLY demo values. They are not secrets and
-// must never be used outside a throwaway local database.
+// must never be used outside a throwaway local database. `assertLocalTarget`
+// enforces that: the tool refuses any non-loopback API target before it makes
+// a single request (Sprint 22, ORG-PR-056).
+
+import { assertLocalTarget } from './lib/demo-target-guard.mjs';
 
 const API_BASE_URL =
   process.env.DEMO_API_BASE_URL ??
@@ -235,6 +239,7 @@ async function ensureApiKey(orgId) {
 }
 
 async function main() {
+  assertLocalTarget(API_BASE_URL);
   console.log(`Orgistry demo bootstrap → ${API_BASE_URL}\n`);
 
   await ensureOwnerSession();
@@ -254,8 +259,12 @@ async function main() {
   if (apiKeySecret) {
     console.log(`\n  API key secret (shown ONCE — copy it now):`);
     console.log(`    ${apiKeySecret}`);
-    console.log(`\n  Try the external API:`);
-    console.log(`    curl -H "Authorization: Bearer ${apiKeySecret}" ${API_BASE_URL}/v1/external/projects`);
+    // The secret is printed exactly once, above. The example below carries a
+    // placeholder rather than a second copy: repeating a credential adds no
+    // information and doubles the number of places it can be captured from
+    // (scrollback, screen shares, terminal-recording tools, CI transcripts).
+    console.log(`\n  Try the external API (paste the secret above):`);
+    console.log(`    curl -H "Authorization: Bearer <api-key-secret>" ${API_BASE_URL}/v1/external/projects`);
   }
   console.log('──────────────────────────────────────────────────────');
 }

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { assertUniformAlphabet, randomAlphabetString } from '@orgistry/shared';
 
 /**
  * API key secret format & hashing.
@@ -28,17 +29,20 @@ const SCHEME = 'orgistry';
 const SEPARATOR = '_';
 
 // Crockford base32 (no I, L, O, U) for the display id — unambiguous, no
-// separator character, safe to print.
+// separator character, safe to print. Its length (32) divides 256, so
+// byte-modulo sampling is EXACTLY uniform; the assertion makes that a checked
+// invariant rather than a comment. See `@orgistry/shared/random-alphabet`.
 const DISPLAY_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+assertUniformAlphabet(DISPLAY_ALPHABET, 'api-key: display id alphabet');
+
 const DISPLAY_ID_LENGTH = 8;
+
+// The SECRET component never touches the alphabet mapping: it is raw CSPRNG
+// bytes rendered as base64url, so its entropy is the full 32 bytes (256 bits).
 const SECRET_BYTES = 32;
 
 function randomBase32(length: number): string {
-  let out = '';
-  for (const byte of randomBytes(length)) {
-    out += DISPLAY_ALPHABET.charAt(byte % DISPLAY_ALPHABET.length);
-  }
-  return out;
+  return randomAlphabetString(DISPLAY_ALPHABET, length);
 }
 
 /** The result of generating a new key: the parts a caller needs, no more. */

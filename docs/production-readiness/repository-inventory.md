@@ -155,6 +155,17 @@ block (ORG-PR-019); no dependency/secret/SAST scanning, no Dependabot/Renovate
 > open, materially advanced). ORG-PR-041 and ORG-PR-001 unchanged. See
 > [sprint-21-artifact-package.md](sprint-21-artifact-package.md).
 
+> **Update (Sprint 22, 2026-07-26):** the workflow files are unchanged, but
+> the CI surface gained the piece that made it a gate rather than a report: a
+> repository **ruleset** on `main` requiring a pull request and the CI,
+> Security, and CodeQL checks, plus code-scanning merge protection. The
+> ruleset lives in GitHub configuration, not in the repository tree — verify
+> it with `gh api /repos/DanielRosenberg00/Orgistry/rulesets` rather than by
+> reading files. All three workflows have now executed green remotely, and the
+> Gitleaks job was proved to FAIL on a seeded synthetic secret
+> (ORG-PR-020 closed). ORG-PR-041 and ORG-PR-001 unchanged. See
+> [sprint-22-artifact-package.md](sprint-22-artifact-package.md).
+
 ## Docker inventory
 
 `infra/docker-compose.yml` — local Postgres 16 / Redis 7 / Mailpit (`latest`),

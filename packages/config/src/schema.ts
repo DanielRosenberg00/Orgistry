@@ -388,6 +388,30 @@ const rawEnvSchema = z.object({
     .positive()
     .default(60),
 
+  // Audit-log READ buckets (Sprint 22, ORG-PR-055). The audit list is the one
+  // read whose cost is not bounded by its page size: the `targetId` filter
+  // matches against JSONB metadata keys that carry no index, so a filter that
+  // selects nothing scans the organization's whole slice of `security_events`
+  // — a table with no retention policy yet (ORG-PR-015). Permission +
+  // entitlement gates bound WHO may ask, not HOW OFTEN, so this surface gets
+  // its own per-actor and per-organization ceilings. Generous for humans and
+  // dashboards; a scripted scan loop hits them immediately.
+  RATE_LIMIT_AUDIT_READ_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+  RATE_LIMIT_AUDIT_READ_PER_USER_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+  RATE_LIMIT_AUDIT_READ_PER_ORG_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(240),
+
   // Auth rate-limit buckets (Sprint 3, Redis-backed, fixed-window). One shared
   // window length; per-bucket maximums tuned to each surface's abuse profile.
   RATE_LIMIT_AUTH_WINDOW_SECONDS: z.coerce

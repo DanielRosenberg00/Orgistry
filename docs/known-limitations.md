@@ -126,15 +126,23 @@ These are intentional non-goals, not bugs:
   integration suites skip (with a warning), so a fully offline run validates
   types, lint, unit tests, the web build, and schema drift — but not the live DB
   paths. See the [validation matrix](./validation.md).
-- **The Sprint 21 security workflows have not yet run remotely.** The
-  dependency-audit, secret-scan (Gitleaks), and CodeQL workflows are
-  configured, SHA-pinned, actionlint-clean, and locally validated where a
-  local equivalent exists (`pnpm scan:deps:local`, `pnpm scan:secrets`) — but
-  their first execution on GitHub-hosted CI is outstanding evidence, and
-  CodeQL has **no** local equivalent at all (it runs only on GitHub CI; on a
-  private repository it additionally requires code scanning to be available).
-  ORG-PR-020 therefore remains open until the first green remote run plus a
-  verified failure on a seeded finding.
+- **CodeQL has no local equivalent.** It runs only on GitHub-hosted CI, so a
+  fully offline validation run cannot reproduce its findings. The dependency
+  audit and secret scan do have local equivalents (`pnpm scan:deps` /
+  `pnpm scan:deps:local`, `pnpm scan:secrets` — the latter being a
+  full-history scan, i.e. stricter than the per-range CI runs).
+- **CodeQL's 40 remaining alerts are dismissed, not absent** (Sprint 22). All
+  41 baseline High alerts were individually triaged with recorded evidence;
+  one true positive was fixed (ORG-PR-055), one sink was removed, one is an
+  owned accepted risk (ORG-PR-056), and the rest are false positives the
+  query cannot avoid — Orgistry's rate limiters live in the service layer and
+  in the API-key authenticator, which `js/missing-rate-limiting` does not
+  model. A reader looking at the Code scanning tab will see dismissals rather
+  than a clean slate; the reasoning for each is in
+  [sprint-22-codeql-alert-inventory.md](production-readiness/sprint-22-codeql-alert-inventory.md).
+  The practical consequence: this repository cannot use "zero open alerts" as
+  a health signal, and relies on the documented dismissal-evidence rule
+  instead.
 - **Two dependency advisories are accepted, not fixed** (documented
   reachability analyses in the
   [findings register](production-readiness/findings-register.md), pinned in

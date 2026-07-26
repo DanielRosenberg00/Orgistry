@@ -49,10 +49,11 @@ authenticate (Bearer)                         ← route (auth boundary)
   → requireMembership(org)                     → OrganizationActor
     → requirePermission(audit_events.read)     → 403 FORBIDDEN if missing
       → requireEntitlement(audit_log_access)   → 403 ENTITLEMENT_REQUIRED if missing
-        → resolve audit_retention_days         → response metadata (display-only)
-          → repository.listAuditEvents(org, …)  → tenant-scoped keyset query
-            → sanitize metadata + shape DTOs    → mapper (never a raw row)
-              → cursor-paginated success envelope
+        → rate limit (per user, then per org)  → 429 RATE_LIMITED if exceeded
+          → resolve audit_retention_days       → response metadata (display-only)
+            → repository.listAuditEvents(org, …) → tenant-scoped keyset query
+              → sanitize metadata + shape DTOs   → mapper (never a raw row)
+                → cursor-paginated success envelope
 ```
 
 The **repository** is a pure query boundary: it requires an organization id,
@@ -259,6 +260,37 @@ Errors use the standard error envelope and include the request id (echoed on the
   the default Free plan does not grant it → `403 ENTITLEMENT_REQUIRED`).
 - The two are enforced independently; both must pass.
 
+### Rate limiting (Sprint 22, ORG-PR-055)
+
+This is the only READ surface in the API with its own buckets. Every other list
+endpoint costs at most one indexed page, so the global per-IP limiter suffices.
+This one is different: the `targetId` filter compares against five JSONB
+metadata keys that carry no index (`audit.repo.ts`), so PostgreSQL walks the
+organization's slice of `security_events` in keyset order and filters row by
+row. A `targetId` that matches nothing reads the **entire** slice — and that
+table has no retention policy yet (ORG-PR-015), so the slice grows without
+bound.
+
+| Bucket | Key | Env var | Default |
+| --- | --- | --- | --- |
+| Per acting user | `rl:audit:read:user:<userId>` | `RATE_LIMIT_AUDIT_READ_PER_USER_MAX` | 60 / 60s |
+| Per organization | `rl:audit:read:org:<organizationId>` | `RATE_LIMIT_AUDIT_READ_PER_ORG_MAX` | 240 / 60s |
+
+Window: `RATE_LIMIT_AUDIT_READ_WINDOW_SECONDS` (default 60).
+
+- Both buckets are consumed **after** the membership, permission, and
+  entitlement gates, so a caller who is not allowed to read still receives 404
+  or 403 — never 429, and never a signal that the endpoint exists.
+- Per-user is consumed before per-org, so one runaway client exhausts its own
+  allowance before eating the tenant's.
+- Exceeding either returns the standard `429 RATE_LIMITED` envelope.
+- A limiter-store outage follows `RATE_LIMIT_FAILURE_MODE`: production fails
+  **closed** (generic 503), development/test fail open.
+
+The limiter bounds exploitation; it does not make the query cheap. The durable
+fix — an index over the target-id metadata keys, or retention on
+`security_events` — is tracked as residual under ORG-PR-055.
+
 ### Retention metadata behavior
 
 `meta.auditRetentionDays` is the organization plan's modeled retention window
@@ -293,6 +325,9 @@ surfacing of it. Tests assert the actual public field name (`meta.auditRetention
 - The persisted→public mapping in `audit.catalog.ts` (must track producer names).
 - The `created_at DESC, id DESC` ordering and the cursor payload shape.
 - The action/security boundary (the catalog allowlist).
+- The gate-before-limiter ordering: membership → permission → entitlement →
+  rate limit. Moving the limiter earlier would let an unauthorized caller
+  distinguish "exists but throttled" from "not found".
 
 ---
 
@@ -349,6 +384,13 @@ Also explicitly:
   is never fabricated.
 - **Metadata is sanitized defensively** at read time (see below), in addition to
   the write-time sanitization producers already apply.
+- **The `targetId` filter is not index-backed** (ORG-PR-055). It compares
+  against five JSONB metadata keys with no covering index, so a value matching
+  nothing scans the organization's whole slice of `security_events`. Sprint 22
+  added per-user and per-organization rate limits so this cannot be looped, but
+  a single legitimate call on a large tenant is still expensive. Fixing the
+  cost itself needs an index over those keys or retention under ORG-PR-015 —
+  neither is implemented.
 
 ### Metadata sanitization
 

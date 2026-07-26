@@ -290,12 +290,25 @@ The full design and evidence live in
   session) stay deliberately unthrottled: a revoked resource cannot be
   revoked twice, so their durable writes are capped by creation — which is
   itself throttled.
+- **Read buckets: one exception, deliberately (Sprint 22, ORG-PR-055).** Reads
+  are otherwise covered by the global bucket alone, because each costs at most
+  one indexed page with a capped page size. `GET
+  /v1/organizations/:id/audit-events` is the exception: its `targetId` filter
+  compares against JSONB metadata keys that carry no index, so a filter
+  matching nothing scans the organization's whole slice of `security_events`
+  — a table with no retention policy yet (ORG-PR-015). It therefore carries
+  its own ceilings, `rl:audit:read:user:<userId>`
+  (`RATE_LIMIT_AUDIT_READ_PER_USER_MAX`, default 60/60s) and
+  `rl:audit:read:org:<organizationId>`
+  (`RATE_LIMIT_AUDIT_READ_PER_ORG_MAX`, default 240/60s), enforced after the
+  membership, permission, AND entitlement gates. The rule this encodes: a
+  read needs its own bucket when its cost is not bounded by its page size.
 - **Redis failure policy.** `RATE_LIMIT_FAILURE_MODE` (`open`|`closed`; unset
   derives production→`closed`, development/test→`open`; production **refuses**
   an explicit `open` at boot). In `closed` mode a Redis outage makes sensitive
   rate-limited endpoints (login, refresh, registration, password recovery,
   email verification, invitation inspect/accept/create, the external API
-  buckets, the mutation buckets) reject with a generic
+  buckets, the mutation buckets, the audit-read buckets) reject with a generic
   `503 SERVICE_UNAVAILABLE` (request id included, no Redis details). Store
   failures are logged (sanitized). Alerting/monitoring on this state does not
   exist yet.

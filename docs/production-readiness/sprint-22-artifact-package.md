@@ -87,7 +87,11 @@ GitHub state agreed exactly — 34 / 3 / 2 / 2, alert numbers 1–41, all
 | **Total** | **41** | **39** | 45 alerts created in total |
 
 - Baseline analysis: `1528655701` (`c33a150f`), 41 results.
-- Final analysis: `1528856173` (`688f78b8`, `refs/heads/main`), **39 results**.
+- Post-remediation analysis: `1528856173` (`688f78b8`), **39 results** — the
+  analysis that established this state, `688f78b8` being the commit that
+  removed the sinks.
+- Latest analysis at closure: `1528869965` (`6eb12c0a`), **39 results**. The
+  commits between the two are documentation-only, so the count is unchanged.
 
 The full state-by-state reconciliation — and the distinction between GitHub
 state and security classification — is in §11. That is the single authoritative
@@ -308,9 +312,9 @@ dismissal-evidence rule in the
 
 ## 11. GitHub alert disposition evidence
 
-The authoritative reconciliation. Every figure was read from the GitHub API
-after the final analysis of the merged `main` commit `688f78b8`; any number
-elsewhere in this repository that disagrees is stale.
+The authoritative reconciliation. Every figure was read from the GitHub API and
+re-verified at closure against analysis `1528869965` on the final `main` commit
+`6eb12c0a`; any number elsewhere in this repository that disagrees is stale.
 
 GitHub's `?state=fixed` *filter* and the `state` *field* disagree — the filter
 returns any alert absent from the latest analysis, while the field reports a
@@ -542,7 +546,8 @@ CodeQL analyses on `refs/heads/main`, in order:
 | 1528767654 | `9733b880` | 41 |
 | 1528799472 | `fa40790e` | 41 |
 | 1528813898 | `eb37b05d` | 41 |
-| **1528856173** | **`688f78b8`** | **39** |
+| 1528856173 | `688f78b8` | 39 |
+| **1528869965** | **`6eb12c0a`** | **39** |
 
 The drop from 41 to 39 is the demo-seed remediation: every
 `js/clear-text-logging` sink is gone from the code. Final alert state is
@@ -709,6 +714,13 @@ was the precondition for building deployable artifacts.
 ## 25. Recommended next sprint
 
 **Sprint 23 — Deployable artifact and pipeline (Phase 4, ORG-PR-001).**
+
+The roadmap's Phase 4–6 numbering was shifted by one at this closure to match:
+Sprint 22 was spent on CodeQL triage rather than the deployable artifact the
+number had been reserved for, so deployable artifact moves 22→23, backups/DR
+23→24, observability 24→25, and verification/review 25→26. Scopes and ordering
+are unchanged; see the dated note in
+[production-roadmap.md](production-roadmap.md).
 
 Rationale: the CI gate is closed and enforced, so an artifact built by this
 pipeline can now be trusted to have passed dependency, secret, and SAST review.

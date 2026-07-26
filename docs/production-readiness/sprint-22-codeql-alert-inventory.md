@@ -29,7 +29,7 @@ The baseline count in the sprint specification and the observed GitHub state agr
 | `js/biased-cryptographic-random` | 2 | 1 | the two duplicated sites collapsed into one shared helper — alert 42 supersedes 1 and 2 |
 | **Total** | **41** | **39** | 45 alerts created in total |
 
-Final analysis: `1528856173` (commit `688f78b8`, `refs/heads/main`), 39 results. Counts read back from the GitHub API, not inferred from code inspection.
+Post-remediation analysis: `1528856173` (commit `688f78b8`, `refs/heads/main`), 39 results — the analysis that established this state, since `688f78b8` is the commit that removed the sinks. The latest analysis at closure is `1528869965` on `6eb12c0a`, reporting the identical 39; the commits between them are documentation-only and cannot change a result count. Counts read back from the GitHub API, not inferred from code inspection.
 
 ### Alerts created by the remediation itself
 
@@ -84,7 +84,7 @@ Alert 6 moved from *Accepted residual risk* to *Fixed defect* during the sprint.
 
 ### Authoritative final reconciliation
 
-Every count below was read back from the GitHub API after the final analysis of the merged `main` commit `688f78b8`. This is the single authoritative set; any other number in this repository that disagrees is stale.
+Every count below was read back from the GitHub API and re-verified at closure against analysis `1528869965` on the final `main` commit `6eb12c0a`. This is the single authoritative set; any other number in this repository that disagrees is stale.
 
 **GitHub alert states.** Note that GitHub's `?state=fixed` *filter* and the `state` *field* disagree: the filter returns any alert absent from the latest analysis, while the field reports a dismissal in preference to a fix. The field is used here.
 

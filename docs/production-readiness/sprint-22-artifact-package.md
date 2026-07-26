@@ -351,7 +351,7 @@ All mandatory commands executed in the final repository state.
 
 | Command | Exit | Result |
 | --- | --- | --- |
-| `pnpm validate` | 0 | typecheck, ESLint, 880 unit tests, 78 web tests, web build, schema drift, whitespace — all pass |
+| `pnpm validate` | 0 | typecheck, ESLint, 860 unit tests in 80 files, 78 web tests in 10 files, web build, schema drift, whitespace — all pass |
 | `pnpm validate:integration` | 0 | 15 integration files, 82 tests, against live PostgreSQL + Redis |
 | `git diff --check` | 0 | no whitespace errors |
 | `pnpm scan:deps` | 0 | prod and dev gates pass; exactly the two documented GHSA ignores reported |
@@ -393,7 +393,17 @@ and re-run remotely green.
 | CodeQL | 30208119054 | success | produced analysis `1528767654`, 41 results |
 | CI | 30208118988 | **failure** | Integration job success; Validate job failed on the pre-existing flaky test (§7) |
 
-**Final commit** (flaky-test fix + artifact package) — run IDs recorded in §21.
+**Final commit `fa40790e51dc78c258f42560fd588845ce64d975`** (flaky-test fix +
+artifact package; event `push`, `refs/heads/main`):
+
+| Workflow | Run ID | Conclusion | URL |
+| --- | --- | --- | --- |
+| CI | 30208939280 | success | https://github.com/DanielRosenberg00/Orgistry/actions/runs/30208939280 |
+| Security scans | 30208939287 | success | https://github.com/DanielRosenberg00/Orgistry/actions/runs/30208939287 |
+| CodeQL | 30208939261 | success | https://github.com/DanielRosenberg00/Orgistry/actions/runs/30208939261 |
+
+All three workflows are green on the final commit, including the CI job that
+had failed on the flaky assertion.
 
 CodeQL analyses on `refs/heads/main`:
 
@@ -401,6 +411,11 @@ CodeQL analyses on `refs/heads/main`:
 | --- | --- | --- | --- |
 | 1528655701 | `c33a150f` | 2026-07-26T14:04:51Z | 41 |
 | 1528767654 | `9733b880` | 2026-07-26T15:25:25Z | 41 |
+| 1528799472 | `fa40790e` | 2026-07-26 | 41 |
+
+Alert state re-verified after the final analysis: still 0 open, 4 fixed, 41
+dismissed. The dispositions survived a fresh scan of the final tree — they were
+not silently reopened.
 
 ## 16. Negative-path proof evidence
 

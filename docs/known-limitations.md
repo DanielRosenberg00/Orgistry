@@ -126,6 +126,28 @@ These are intentional non-goals, not bugs:
   integration suites skip (with a warning), so a fully offline run validates
   types, lint, unit tests, the web build, and schema drift — but not the live DB
   paths. See the [validation matrix](./validation.md).
+- **The Sprint 21 security workflows have not yet run remotely.** The
+  dependency-audit, secret-scan (Gitleaks), and CodeQL workflows are
+  configured, SHA-pinned, actionlint-clean, and locally validated where a
+  local equivalent exists (`pnpm scan:deps:local`, `pnpm scan:secrets`) — but
+  their first execution on GitHub-hosted CI is outstanding evidence, and
+  CodeQL has **no** local equivalent at all (it runs only on GitHub CI; on a
+  private repository it additionally requires code scanning to be available).
+  ORG-PR-020 therefore remains open until the first green remote run plus a
+  verified failure on a seeded finding.
+- **Two dependency advisories are accepted, not fixed** (documented
+  reachability analyses in the
+  [findings register](production-readiness/findings-register.md), pinned in
+  `pnpm.auditConfig.ignoreGhsas` + `osv-scanner.toml`): react-router
+  GHSA-qwww-vcr4-c8h2 (CSRF in unstable RSC APIs — the web demo is a
+  client-only SPA with no RSC usage; the fix is a major upgrade) and
+  brace-expansion GHSA-mh99-v99m-4gvg (DoS in a dev-only eslint transitive
+  with no compatible fixed release).
+- **Infrastructure images are patch-tag-pinned, not digest-pinned.** Local/CI
+  images (`postgres:16.14-alpine`, `redis:7.4.10-alpine`,
+  `axllent/mailpit:v1.30.5`) are exact tags, but a registry tag can in
+  principle be re-pushed. Digest pinning is deferred to the production
+  artifact track (ORG-PR-001/042).
 
 ## Accepted runtime compromises
 

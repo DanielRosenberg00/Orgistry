@@ -294,8 +294,8 @@ describe('PATCH /v1/organizations/:id/plan/demo', () => {
       (e) => e.eventType === 'plan.changed_demo',
     );
     expect(events).toHaveLength(1);
-    expect(events[0].organizationId).toBe(orgId);
-    expect(events[0].metadata).toMatchObject({
+    expect(events[0]?.organizationId).toBe(orgId);
+    expect(events[0]?.metadata).toMatchObject({
       previousPlanKey: 'free',
       newPlanKey: 'business',
     });

@@ -145,11 +145,27 @@ block (ORG-PR-019); no dependency/secret/SAST scanning, no Dependabot/Renovate
 (ORG-PR-020); Mailpit/SMTP not exercised (ORG-PR-041); no release/deploy job
 (ORG-PR-001).
 
+> **Update (Sprint 21, 2026-07-26):** the CI surface is now THREE workflows —
+> `ci.yml` (unchanged jobs, hardened), `security.yml` (pnpm dependency audit
+> gates + Gitleaks secret scan), `codeql.yml` (JS/TS SAST) — plus
+> `.github/dependabot.yml` (npm / github-actions / docker-compose, weekly) and the scanner
+> configs `.gitleaks.toml` / `osv-scanner.toml`. All actions are full-SHA
+> pinned with explicit least-privilege `permissions:` (ORG-PR-019 closed);
+> scanning is configured with its first remote run outstanding (ORG-PR-020
+> open, materially advanced). ORG-PR-041 and ORG-PR-001 unchanged. See
+> [sprint-21-artifact-package.md](sprint-21-artifact-package.md).
+
 ## Docker inventory
 
 `infra/docker-compose.yml` — local Postgres 16 / Redis 7 / Mailpit (`latest`),
 floating tags (ORG-PR-042). `infra/postgres-init/01-create-test-db.sql` creates
 `orgistry_test`. **No app Dockerfiles** (ORG-PR-001).
+
+> **Update (Sprint 21, 2026-07-26):** all image tags — compose AND the CI
+> service containers — are exact patch pins (`postgres:16.14-alpine`,
+> `redis:7.4.10-alpine`, `axllent/mailpit:v1.30.5`); `latest` is gone.
+> Digest pinning deferred with ORG-PR-001 (ORG-PR-042 open, materially
+> advanced). Still no app Dockerfiles (ORG-PR-001, unchanged).
 
 ## Test inventory (67 test files)
 

@@ -66,7 +66,7 @@ export function startFakeSmtp(options: FakeSmtpOptions = {}): Promise<FakeSmtp> 
       while (nl !== -1) {
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 2);
-        const cmd = line.split(' ')[0].toUpperCase();
+        const cmd = (line.split(' ')[0] ?? '').toUpperCase();
         if (cmd === 'EHLO' || cmd === 'HELO') {
           socket.write('250-fake\r\n250 AUTH PLAIN\r\n');
         } else if (cmd === 'AUTH') {

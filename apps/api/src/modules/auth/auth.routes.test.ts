@@ -1,6 +1,7 @@
 import { signAccessToken } from '@orgistry/auth-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
+import { requireDefined } from '../../lib/invariant';
 import {
   buildAuthTestApp,
   type AuthTestContext,
@@ -163,7 +164,7 @@ describe('GET /v1/auth/me', () => {
   it('rejects a token whose session is missing', async () => {
     await registerTestUser(ctx.app, ctx.mailer, VALID_ACCOUNT);
     const token = await signAccessToken({
-      userId: ctx.repo.users[0].id,
+      userId: requireDefined(ctx.repo.users[0], 'registered user').id,
       sessionId: 'sess_does_not_exist',
       secret: ctx.config.auth.jwtSecret,
       ttlSeconds: 900,
@@ -179,7 +180,8 @@ describe('GET /v1/auth/me', () => {
 
   it('rejects a token whose session was revoked', async () => {
     const token = await authedToken();
-    ctx.repo.sessions[0].revokedAt = new Date();
+    requireDefined(ctx.repo.sessions[0], 'active session').revokedAt =
+      new Date();
     const response = await ctx.app.inject({
       method: 'GET',
       url: '/v1/auth/me',
@@ -190,7 +192,9 @@ describe('GET /v1/auth/me', () => {
 
   it('rejects a token whose session has expired', async () => {
     const token = await authedToken();
-    ctx.repo.sessions[0].expiresAt = new Date(Date.now() - 1000);
+    requireDefined(ctx.repo.sessions[0], 'active session').expiresAt = new Date(
+      Date.now() - 1000,
+    );
     const response = await ctx.app.inject({
       method: 'GET',
       url: '/v1/auth/me',
@@ -208,8 +212,8 @@ describe('GET /v1/auth/me', () => {
 
     // Token for user A but pointing at user B's session.
     const crossToken = await signAccessToken({
-      userId: ctx.repo.users[0].id,
-      sessionId: ctx.repo.sessions[1].id,
+      userId: requireDefined(ctx.repo.users[0], 'user A').id,
+      sessionId: requireDefined(ctx.repo.sessions[1], "user B's session").id,
       secret: ctx.config.auth.jwtSecret,
       ttlSeconds: 900,
     });

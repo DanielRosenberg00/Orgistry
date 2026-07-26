@@ -44,8 +44,8 @@ not at the individual task identifier level.
 | --- | --- | --- | --- | --- |
 | Prepare the Organization | Partially satisfied | strong docs/DX; validation matrix | no ops/incident process | ORG-PR-008, 027 |
 | Protect the Software | Partially satisfied | lockfile, `onlyBuiltDependencies` | no secrets manager; no SBOM/signing | ORG-PR-006, 020 |
-| Produce Well-Secured Software | Partially satisfied | strict TS, ESLint, broad tests, code review culture | no SAST; `noUncheckedIndexedAccess` off; no failure-injection | ORG-PR-020, 040, 026 |
-| Respond to Vulnerabilities | Not satisfied | manual `pnpm audit` only | no scanning/Dependabot/CodeQL; no VDP | ORG-PR-020, 018 |
+| Produce Well-Secured Software | Partially satisfied | strict TS incl. `noUncheckedIndexedAccess` (Sprint 21), ESLint, broad tests, code review culture; CodeQL configured (first remote run outstanding) | no failure-injection; SAST unexecuted remotely | ORG-PR-020, 026 |
+| Respond to Vulnerabilities | Partially satisfied (Sprint 21) | audit gates + Gitleaks + Dependabot + CodeQL configured; SHA-pinned workflows; advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25) with two documented acceptances | first remote scanner run outstanding; no VDP | ORG-PR-020 |
 
 ## OWASP SAMM (governance→operations)
 

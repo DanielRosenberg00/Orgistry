@@ -4,6 +4,7 @@ import { createId } from '@orgistry/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import { createAuthService } from '../auth/auth.service';
 import { createDbAuthRepository } from '../auth/auth.repo';
@@ -100,7 +101,7 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
       SELECT id FROM memberships
       WHERE organization_id = ${organizationId} AND user_id = ${userId}
         AND status = 'active' LIMIT 1`;
-    return rows[0].id;
+    return requireRow(rows, 'owner membership').id;
   }
 
   beforeAll(async () => {
@@ -173,13 +174,13 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
 
     const rows = await db.sql<{ role_id: string }[]>`
       SELECT role_id FROM memberships WHERE id = ${targetMem}`;
-    expect(rows[0].role_id).toBe(ROLE_IDS.admin);
+    expect(rows[0]?.role_id).toBe(ROLE_IDS.admin);
 
     const events = await db.sql<{ event_type: string; organization_id: string }[]>`
       SELECT event_type, organization_id FROM security_events
       WHERE event_type = 'org.member_role_changed'`;
     expect(events).toHaveLength(1);
-    expect(events[0].organization_id).toBe(orgId);
+    expect(events[0]?.organization_id).toBe(orgId);
   });
 
   it('blocks demoting the last active Owner (transactional)', async () => {
@@ -200,7 +201,7 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
     const owners = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM memberships
       WHERE organization_id = ${orgId} AND status = 'active' AND role_id = ${ROLE_IDS.owner}`;
-    expect(owners[0].count).toBe('1');
+    expect(owners[0]?.count).toBe('1');
   });
 
   it('serializes concurrent owner demotions so exactly one Owner survives', async () => {
@@ -242,7 +243,7 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
     const owners = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM memberships
       WHERE organization_id = ${orgId} AND status = 'active' AND role_id = ${ROLE_IDS.owner}`;
-    expect(owners[0].count).toBe('1');
+    expect(owners[0]?.count).toBe('1');
   });
 
   it('soft-removes a member with lifecycle markers and keeps the row', async () => {
@@ -262,9 +263,10 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
       { status: string; removed_at: string | null; removed_by_user_id: string | null }[]
     >`SELECT status, removed_at, removed_by_user_id FROM memberships WHERE id = ${targetMem}`;
     expect(rows).toHaveLength(1); // not hard-deleted
-    expect(rows[0].status).toBe('removed');
-    expect(rows[0].removed_at).not.toBeNull();
-    expect(rows[0].removed_by_user_id).toBe(owner.userId);
+    const removed = requireRow(rows, 'removed membership');
+    expect(removed.status).toBe('removed');
+    expect(removed.removed_at).not.toBeNull();
+    expect(removed.removed_by_user_id).toBe(owner.userId);
 
     // Removed member no longer has access to ANY organization-scoped surface:
     // effective permissions, member listing, and the org-scoped RBAC reads.
@@ -369,7 +371,7 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
     const events = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events
       WHERE event_type = 'org.member_role_changed'`;
-    expect(events[0].count).toBe('0');
+    expect(events[0]?.count).toBe('0');
   });
 
   it('an Owner can promote a member to Owner and then hand off (demote self)', async () => {
@@ -400,6 +402,6 @@ describe.skipIf(!connectionString)('member management against live PostgreSQL', 
     const owners = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM memberships
       WHERE organization_id = ${orgId} AND status = 'active' AND role_id = ${ROLE_IDS.owner}`;
-    expect(owners[0].count).toBe('1');
+    expect(owners[0]?.count).toBe('1');
   });
 });

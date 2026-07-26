@@ -3,6 +3,7 @@ import { ROLE_IDS, ROLE_KEYS as DB_ROLE_KEYS } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AppError } from '../../lib/errors';
+import { requireDefined } from '../../lib/invariant';
 import {
   actorHasPermission,
   type OrganizationActor,
@@ -91,7 +92,8 @@ describe('requireMembership', () => {
   });
 
   it('rejects a removed membership (removed memberships never authorize)', async () => {
-    store.memberships[0].status = 'removed';
+    requireDefined(store.memberships[0], 'seeded owner membership').status =
+      'removed';
     await expect(
       requireMembership(repo, { userId: OWNER_USER, organizationId }),
     ).rejects.toMatchObject({ code: ERROR_CODES.ORGANIZATION_NOT_FOUND });

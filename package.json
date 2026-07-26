@@ -21,6 +21,9 @@
     "build:web": "pnpm --filter @orgistry/web-demo run build",
     "db:check": "node tooling/check-schema-drift.mjs",
     "check:whitespace": "git diff --check",
+    "scan:deps": "pnpm audit --prod --audit-level high && pnpm audit --dev --audit-level high",
+    "scan:deps:local": "osv-scanner scan source -L pnpm-lock.yaml",
+    "scan:secrets": "gitleaks git . --no-banner --redact",
     "validate": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run test:web && pnpm run build:web && pnpm run db:check && pnpm run check:whitespace",
     "validate:integration": "pnpm run db:reset:test && pnpm run test:integration",
     "demo:seed": "node tooling/demo-seed.mjs",
@@ -45,6 +48,15 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "@esbuild-kit/core-utils>esbuild": "^0.25.0"
+    },
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-qwww-vcr4-c8h2",
+        "GHSA-mh99-v99m-4gvg"
+      ]
+    }
   }
 }

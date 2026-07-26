@@ -31,8 +31,8 @@ average — do not read a high domain score as launch clearance.
 | Application security | 2 | Yes | Safe error handler, no DTO leaks, in-mem token | No headers/proxy/global limit | ORG-PR-010, 011, 012, 013 | High |
 | Frontend | 1 | No (target: demo) | Exemplary token/secret handling | No error boundary/CSP | ORG-PR-023, 035, 036 | High |
 | Testing | 2 | Partly | Strong negative/isolation coverage + real-DB quota/authz concurrency races (S20) | No failure-injection/E2E | ORG-PR-026 | High |
-| CI/CD | 2 | Yes | Two-job CI mirrors validation | No release pipeline; pinning/permissions | ORG-PR-001, 019 | High |
-| Supply chain | 2 | Yes | Lockfile, `onlyBuiltDependencies` | Unscanned; high advisory in range | ORG-PR-018, 020 | Medium |
+| CI/CD | 2 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21) | No release pipeline; scanners' first remote run outstanding | ORG-PR-001, 020 | High |
+| Supply chain | 2 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot configured; images patch-pinned; two documented advisory acceptances | Scanners unexecuted remotely; digest pinning deferred (ORG-PR-042→001 track) | ORG-PR-020 | High |
 | Infrastructure | 0 | Yes | (local Compose only) | No deploy artifact/IaC | ORG-PR-001, 022 | High |
 | Reliability | 1 | Yes | Graceful shutdown; readiness probes | No backups/DR; fail-open | ORG-PR-005, 009 | High |
 | Backup & recovery | 0 | Yes | (none) | No backup/PITR/restore drill | ORG-PR-005, 028 | High |

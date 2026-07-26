@@ -34,10 +34,9 @@ const DISPLAY_ID_LENGTH = 8;
 const SECRET_BYTES = 32;
 
 function randomBase32(length: number): string {
-  const bytes = randomBytes(length);
   let out = '';
-  for (let i = 0; i < length; i += 1) {
-    out += DISPLAY_ALPHABET[bytes[i] % DISPLAY_ALPHABET.length];
+  for (const byte of randomBytes(length)) {
+    out += DISPLAY_ALPHABET.charAt(byte % DISPLAY_ALPHABET.length);
   }
   return out;
 }

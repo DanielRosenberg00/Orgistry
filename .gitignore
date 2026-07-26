@@ -17,6 +17,11 @@ build/
 npm-debug.log*
 pnpm-debug.log*
 
+# Local assistant/tooling state (never commit: contains local caches and
+# scanner-sensitive blobs, e.g. the tokensave WAL)
+.claude/
+.tokensave/
+
 # Editor / OS
 .DS_Store
 .idea/

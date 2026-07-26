@@ -3,6 +3,8 @@ import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
+import { requireDefined } from '../../lib/invariant';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import {
   createInMemoryAccountMailer,
@@ -206,11 +208,12 @@ describe.skipIf(!connectionString)(
         FROM password_reset_tokens WHERE user_id = ${userId}
       `;
       expect(rows).toHaveLength(1);
-      expect(rows[0].token_hash).toBe(hashPasswordResetToken(rawToken!));
-      expect(rows[0].token_hash).not.toBe(rawToken);
-      expect(rows[0].used_at).toBeNull();
+      const tokenRow = requireRow(rows, 'password reset token row');
+      expect(tokenRow.token_hash).toBe(hashPasswordResetToken(rawToken!));
+      expect(tokenRow.token_hash).not.toBe(rawToken);
+      expect(tokenRow.used_at).toBeNull();
       // The raw SQL client may return timestamptz as a string; coerce.
-      expect(new Date(rows[0].expires_at).getTime()).toBeGreaterThan(Date.now());
+      expect(new Date(tokenRow.expires_at).getTime()).toBeGreaterThan(Date.now());
     });
 
     it('an unknown email produces the identical response and no row', async () => {
@@ -223,7 +226,7 @@ describe.skipIf(!connectionString)(
       const rows = await db.sql<{ count: string }[]>`
         SELECT count(*) FROM password_reset_tokens
       `;
-      expect(Number(rows[0].count)).toBe(1);
+      expect(Number(rows[0]?.count)).toBe(1);
     });
 
     it('two concurrent recovery requests leave exactly one usable generation (user-row lock)', async () => {
@@ -248,7 +251,9 @@ describe.skipIf(!connectionString)(
       const rawTokens = newMessages.map((message) => {
         const match = message.text.match(/#token=([^&\s]+)/);
         expect(match).toBeTruthy();
-        return decodeURIComponent(match![1]);
+        return decodeURIComponent(
+          requireDefined(match?.[1], 'reset token in email link'),
+        );
       });
       expect(rawTokens[0]).not.toBe(rawTokens[1]);
 
@@ -259,11 +264,12 @@ describe.skipIf(!connectionString)(
         WHERE user_id = ${userId} AND used_at IS NULL AND invalidated_at IS NULL
       `;
       expect(active).toHaveLength(1);
+      const activeRow = requireRow(active, 'usable reset token row');
       const winner = rawTokens.find(
-        (raw) => hashPasswordResetToken(raw) === active[0].token_hash,
+        (raw) => hashPasswordResetToken(raw) === activeRow.token_hash,
       );
       const loser = rawTokens.find(
-        (raw) => hashPasswordResetToken(raw) !== active[0].token_hash,
+        (raw) => hashPasswordResetToken(raw) !== activeRow.token_hash,
       );
       expect(winner).toBeTruthy();
       expect(loser).toBeTruthy();
@@ -273,7 +279,7 @@ describe.skipIf(!connectionString)(
           AND token_hash = ${hashPasswordResetToken(loser!)}
           AND invalidated_at IS NOT NULL AND used_at IS NULL
       `;
-      expect(Number(invalidated[0].count)).toBe(1);
+      expect(Number(invalidated[0]?.count)).toBe(1);
 
       // The losing token cannot reset the password.
       const losingAttempt = await completeReset(loser!, 'loser-password-000');
@@ -293,19 +299,19 @@ describe.skipIf(!connectionString)(
           WHERE metadata::text LIKE ${'%' + raw + '%'}
              OR metadata::text LIKE ${'%' + hash + '%'}
         `;
-        expect(Number(leaked[0].count)).toBe(0);
+        expect(Number(leaked[0]?.count)).toBe(0);
       }
 
       // The surviving token DOES reset the password — the generation
       // invariant closes inside this test; nothing is exported to others.
       const winningCompletion = await completeReset(
         winner!,
-        'generation-winner-pass-456',
+        'generation-winner-new-password',
       );
       expect(winningCompletion.statusCode).toBe(200);
-      expect((await login('generation-winner-pass-456')).statusCode).toBe(200);
+      expect((await login('generation-winner-new-password')).statusCode).toBe(200);
       expect((await login(user.password)).statusCode).toBe(401);
-      activePassword = 'generation-winner-pass-456';
+      activePassword = 'generation-winner-new-password';
     });
 
     it('two concurrent completions cannot both succeed (FOR UPDATE serialization)', async () => {
@@ -328,7 +334,7 @@ describe.skipIf(!connectionString)(
         WHERE token_hash = ${hashPasswordResetToken(rawToken)}
           AND used_at IS NOT NULL
       `;
-      expect(Number(used[0].count)).toBe(1);
+      expect(Number(used[0]?.count)).toBe(1);
 
       // Exactly one durable password result: one candidate authenticates,
       // the losing attempt created no second change.
@@ -346,13 +352,13 @@ describe.skipIf(!connectionString)(
         SELECT count(*) FROM sessions
         WHERE user_id = ${userId} AND revoked_reason = 'password_reset'
       `;
-      expect(Number(sessions[0].count)).toBeGreaterThanOrEqual(1);
+      expect(Number(sessions[0]?.count)).toBeGreaterThanOrEqual(1);
       const tokens = await db.sql<{ count: string }[]>`
         SELECT count(*) FROM refresh_tokens rt
         JOIN sessions s ON s.id = rt.session_id
         WHERE s.user_id = ${userId} AND rt.revoked_reason = 'password_reset'
       `;
-      expect(Number(tokens[0].count)).toBeGreaterThanOrEqual(1);
+      expect(Number(tokens[0]?.count)).toBeGreaterThanOrEqual(1);
 
       // Old access token fails at session revalidation; old cookie cannot mint.
       expect((await me(firstAccessToken)).statusCode).toBe(401);
@@ -390,7 +396,7 @@ describe.skipIf(!connectionString)(
         SELECT count(*) FROM sessions
         WHERE user_id = ${userId} AND revoked_reason = 'password_changed'
       `;
-      expect(Number(revoked[0].count)).toBeGreaterThanOrEqual(1);
+      expect(Number(revoked[0]?.count)).toBeGreaterThanOrEqual(1);
 
       // Old and new password behave as expected.
       expect((await login(activePassword)).statusCode).toBe(401);
@@ -420,9 +426,10 @@ describe.skipIf(!connectionString)(
         SELECT email, normalized_email, email_verified_at
         FROM users WHERE id = ${userId}
       `;
-      expect(rows[0].email).toBe('Recover.Renamed@Example.com');
-      expect(rows[0].normalized_email).toBe('recover.renamed@example.com');
-      expect(rows[0].email_verified_at).toBeNull();
+      const renamed = requireRow(rows, 'renamed user row');
+      expect(renamed.email).toBe('Recover.Renamed@Example.com');
+      expect(renamed.normalized_email).toBe('recover.renamed@example.com');
+      expect(renamed.email_verified_at).toBeNull();
 
       // A fresh verification generation exists and the email went to the new
       // address.
@@ -431,7 +438,7 @@ describe.skipIf(!connectionString)(
         SELECT count(*) FROM email_verification_tokens
         WHERE user_id = ${userId} AND used_at IS NULL AND invalidated_at IS NULL
       `;
-      expect(Number(usable[0].count)).toBe(1);
+      expect(Number(usable[0]?.count)).toBe(1);
 
       // Login follows the new address.
       expect(

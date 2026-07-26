@@ -3,6 +3,7 @@ import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import {
   createInMemoryAccountMailer,
@@ -130,14 +131,14 @@ describe.skipIf(!connectionString)(
       `;
       expect(rows).toHaveLength(1);
       // Born verified: mailbox control was proven by the completion token.
-      expect(rows[0].email_verified_at).not.toBeNull();
+      expect(requireRow(rows, 'user row').email_verified_at).not.toBeNull();
 
       // No verification token was minted and no verification email went out —
       // the only registration mail is the completion link itself.
       const tokens = await db.sql<{ count: string }[]>`
         SELECT count(*) FROM email_verification_tokens WHERE user_id = ${userId}
       `;
-      expect(Number(tokens[0].count)).toBe(0);
+      expect(Number(tokens[0]?.count)).toBe(0);
       expect(
         mailer.messages.every((m) => !m.text.includes('/auth/verify-email')),
       ).toBe(true);
@@ -168,10 +169,11 @@ describe.skipIf(!connectionString)(
         FROM email_verification_tokens WHERE user_id = ${userId}
       `;
       expect(rows).toHaveLength(1);
-      expect(rows[0].token_hash).toBe(hashEmailVerificationToken(rawToken!));
-      expect(rows[0].token_hash).not.toBe(rawToken);
-      expect(rows[0].used_at).toBeNull();
-      expect(rows[0].invalidated_at).toBeNull();
+      const tokenRow = requireRow(rows, 'verification token row');
+      expect(tokenRow.token_hash).toBe(hashEmailVerificationToken(rawToken!));
+      expect(tokenRow.token_hash).not.toBe(rawToken);
+      expect(tokenRow.used_at).toBeNull();
+      expect(tokenRow.invalidated_at).toBeNull();
     });
 
     it('resend durably invalidates the previous generation', async () => {
@@ -186,7 +188,7 @@ describe.skipIf(!connectionString)(
         SELECT count(*) FROM email_verification_tokens
         WHERE user_id = ${userId} AND used_at IS NULL AND invalidated_at IS NULL
       `;
-      expect(Number(usable[0].count)).toBe(1);
+      expect(Number(usable[0]?.count)).toBe(1);
     });
 
     it('two concurrent completions cannot both succeed (FOR UPDATE serialization)', async () => {
@@ -203,13 +205,13 @@ describe.skipIf(!connectionString)(
       const users = await db.sql<{ email_verified_at: Date | null }[]>`
         SELECT email_verified_at FROM users WHERE id = ${userId}
       `;
-      expect(users[0].email_verified_at).not.toBeNull();
+      expect(requireRow(users, 'user row').email_verified_at).not.toBeNull();
 
       const used = await db.sql<{ count: string }[]>`
         SELECT count(*) FROM email_verification_tokens
         WHERE user_id = ${userId} AND used_at IS NOT NULL
       `;
-      expect(Number(used[0].count)).toBe(1);
+      expect(Number(used[0]?.count)).toBe(1);
     });
 
     it('reuse after success is rejected and durable state is unchanged', async () => {
@@ -222,7 +224,7 @@ describe.skipIf(!connectionString)(
         SELECT count(*) FROM email_verification_tokens
         WHERE user_id = ${userId} AND used_at IS NULL AND invalidated_at IS NULL
       `;
-      expect(Number(usable[0].count)).toBe(0);
+      expect(Number(usable[0]?.count)).toBe(0);
     });
 
     it('wrote durable, sanitized verification security events', async () => {

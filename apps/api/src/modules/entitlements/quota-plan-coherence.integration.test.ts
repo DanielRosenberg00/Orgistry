@@ -3,6 +3,7 @@ import { sql as rawSql } from 'drizzle-orm';
 import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { createId } from '@orgistry/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireRow } from '../../lib/db-rows';
 import { createDbApiKeyRepository } from '../api-keys/api-key.repo';
 import { createDbInvitationRepository } from '../invitations/invitation.repo';
 import { hashInvitationToken } from '../invitations/invitation.token';
@@ -67,30 +68,36 @@ describe.skipIf(!connectionString)('quota decisions use the transaction-current 
   async function insertUser(label: string): Promise<{ id: string; email: string }> {
     seq += 1;
     const email = `coherence.${label}.${seq}@example.com`;
-    const [user] = await db.db
-      .insert(schema.users)
-      .values({
-        email,
-        normalizedEmail: email,
-        passwordHash: 'x-not-a-real-hash',
-        displayName: label,
-        emailVerifiedAt: new Date(),
-      })
-      .returning({ id: schema.users.id });
+    const user = requireRow(
+      await db.db
+        .insert(schema.users)
+        .values({
+          email,
+          normalizedEmail: email,
+          passwordHash: 'x-not-a-real-hash',
+          displayName: label,
+          emailVerifiedAt: new Date(),
+        })
+        .returning({ id: schema.users.id }),
+      'inserted user',
+    );
     return { id: user.id, email };
   }
 
   async function insertTeamOrg(ownerId: string, planKey: 'free' | 'pro' | 'business'): Promise<string> {
     seq += 1;
-    const [org] = await db.db
-      .insert(schema.organizations)
-      .values({
-        name: `Coherence Org ${seq}`,
-        slug: `coherence-org-${seq}`,
-        type: 'team',
-        createdByUserId: ownerId,
-      })
-      .returning({ id: schema.organizations.id });
+    const org = requireRow(
+      await db.db
+        .insert(schema.organizations)
+        .values({
+          name: `Coherence Org ${seq}`,
+          slug: `coherence-org-${seq}`,
+          type: 'team',
+          createdByUserId: ownerId,
+        })
+        .returning({ id: schema.organizations.id }),
+      'inserted organization',
+    );
     await db.db.insert(schema.memberships).values({
       userId: ownerId,
       organizationId: org.id,
@@ -149,7 +156,7 @@ describe.skipIf(!connectionString)('quota decisions use the transaction-current 
 
     const rows = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM projects WHERE organization_id = ${orgId}`;
-    expect(rows[0].count).toBe('5');
+    expect(rows[0]?.count).toBe('5');
   });
 
   it('a committed plan UPGRADE is authoritative for the very next create', async () => {
@@ -202,7 +209,7 @@ describe.skipIf(!connectionString)('quota decisions use the transaction-current 
     const rows = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM projects
       WHERE organization_id = ${orgId} AND deleted_at IS NULL`;
-    expect(rows[0].count).toBe('4'); // over free's 3, legal under pro's 20
+    expect(rows[0]?.count).toBe('4'); // over free's 3, legal under pro's 20
   });
 
   it('API key creation re-checks access AND ceiling from ONE transaction-current snapshot', async () => {
@@ -229,7 +236,7 @@ describe.skipIf(!connectionString)('quota decisions use the transaction-current 
 
     const rows = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM api_keys WHERE organization_id = ${orgId}`;
-    expect(rows[0].count).toBe('0');
+    expect(rows[0]?.count).toBe('0');
   });
 
   it('invitation acceptance resolves max_members inside its transaction', async () => {
@@ -291,6 +298,6 @@ describe.skipIf(!connectionString)('quota decisions use the transaction-current 
     });
     const rows = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM projects WHERE organization_id = ${orgId}`;
-    expect(rows[0].count).toBe('0');
+    expect(rows[0]?.count).toBe('0');
   });
 });

@@ -1,0 +1,50 @@
+name: CodeQL
+
+# Static application security analysis for the TypeScript/JavaScript codebase
+# (Sprint 21, ORG-PR-020). Source-only analysis (build-mode: none) — no
+# dependency install, no build, no production secrets. Findings land in the
+# repository's Code scanning tab; triage guidance lives in docs/validation.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 06:40 UTC — re-analysis picks up newly published CodeQL queries.
+    - cron: '40 6 * * 1'
+
+# Top-level default stays read-only; the analyze job alone widens to upload
+# SARIF results.
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    permissions:
+      # Read the source being analyzed.
+      contents: read
+      # Upload SARIF results to code scanning — the ONLY write scope in any
+      # workflow in this repository, and only on this job.
+      security-events: write
+      # Required by the CodeQL action to read the workflow run context on
+      # private repositories; harmless read scope on public ones.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          category: '/language:javascript-typescript'

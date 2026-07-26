@@ -3,6 +3,7 @@ import { schema } from '@orgistry/db';
 import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { and, count, desc, eq, isNull, lt, or } from 'drizzle-orm';
+import { requireRow } from '../../lib/db-rows';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
 import { evaluateCountQuota, requireQuota } from '../entitlements/quota';
 import { acquireOrganizationQuotaLock } from '../entitlements/quota-lock';
@@ -127,15 +128,18 @@ export function createDbProjectRepository(db: Database): ProjectRepository {
           evaluateCountQuota(row?.value ?? 0, values.max_projects),
         );
 
-        const [project] = await tx
-          .insert(schema.projects)
-          .values({
-            id: createId('prj'),
-            organizationId: params.organizationId,
-            name: params.name,
-            createdByUserId: params.createdByUserId,
-          })
-          .returning();
+        const project = requireRow(
+          await tx
+            .insert(schema.projects)
+            .values({
+              id: createId('prj'),
+              organizationId: params.organizationId,
+              name: params.name,
+              createdByUserId: params.createdByUserId,
+            })
+            .returning(),
+          'projects insert',
+        );
 
         await recordProjectEvent(tx, {
           organizationId: params.organizationId,
@@ -187,11 +191,14 @@ export function createDbProjectRepository(db: Database): ProjectRepository {
           throw projectNotFoundError();
         }
 
-        const [updated] = await tx
-          .update(schema.projects)
-          .set({ name: params.name, updatedAt: new Date() })
-          .where(eq(schema.projects.id, target.id))
-          .returning();
+        const updated = requireRow(
+          await tx
+            .update(schema.projects)
+            .set({ name: params.name, updatedAt: new Date() })
+            .where(eq(schema.projects.id, target.id))
+            .returning(),
+          'projects update',
+        );
 
         await recordProjectEvent(tx, {
           organizationId: params.organizationId,

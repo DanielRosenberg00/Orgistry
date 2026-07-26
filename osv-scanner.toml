@@ -1,0 +1,20 @@
+# Accepted-risk list for the local OSV dependency scan (`pnpm scan:deps:local`).
+#
+# Every entry here must also appear in `pnpm.auditConfig.ignoreGhsas`
+# (package.json) so the CI `pnpm audit` gate and this local scan agree, and
+# must be recorded in docs/production-readiness/findings-register.md with a
+# reachability analysis. Keep this list short; entries are per-advisory, never
+# per-package.
+
+[[IgnoredVulns]]
+id = "GHSA-qwww-vcr4-c8h2"
+reason = """react-router CSRF in unstable RSC APIs (fixed only in 8.3.0, a major upgrade). \
+The web demo is a client-only Vite SPA using BrowserRouter; no RSC/server APIs exist \
+in the repo (verified: no unstable_* usage). Not reachable. Revisit on the react-router 8 upgrade."""
+
+[[IgnoredVulns]]
+id = "GHSA-mh99-v99m-4gvg"
+reason = """brace-expansion DoS (unbounded expansion), fixed only in 5.0.8. The 1.x copy is a \
+dev-only transitive of eslint (minimatch 3 pins ^1.1.7 — no compatible fixed release). \
+Lint-time expansion of repo-authored globs only; no untrusted input. Revisit when the \
+eslint chain moves off minimatch 3."""

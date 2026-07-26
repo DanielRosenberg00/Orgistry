@@ -1,0 +1,39 @@
+# Dependency update automation (Sprint 21, ORG-PR-019/020/042).
+#
+# Policy: weekly routine update PRs, security advisories surface as promptly
+# as the platform allows, every PR requires human review, and nothing is
+# auto-merged (no auto-merge configuration exists in this repository).
+# Review procedure — including how to verify a pinned-Action SHA bump against
+# the upstream release — is documented in docs/validation.md.
+version: 2
+updates:
+  # npm/pnpm workspace (root pnpm-lock.yaml covers every workspace package).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Group routine minor+patch noise; majors stay individual PRs so breaking
+    # upgrades are reviewed on their own.
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions — proposes updates to the full-SHA pins in
+  # .github/workflows/*, keeping the version comment in sync.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+
+  # Local development / integration infrastructure images. `infra/` contains
+  # only docker-compose.yml (no Dockerfiles), so the `docker-compose`
+  # ecosystem is the one that actually discovers its image tags.
+  - package-ecosystem: docker-compose
+    directory: /infra
+    schedule:
+      interval: weekly
+      day: monday

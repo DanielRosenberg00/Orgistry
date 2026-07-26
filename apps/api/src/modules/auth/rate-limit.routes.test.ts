@@ -186,7 +186,7 @@ describe('refresh per session', () => {
     // The session (and its refresh cookie) comes from registration COMPLETION.
     const reg = await registerTestUser(ctx.app, ctx.mailer, CREDENTIALS);
     const cookieValue = (header: string | string[] | undefined) => {
-      const raw = Array.isArray(header) ? header[0] : (header ?? '');
+      const raw = Array.isArray(header) ? (header[0] ?? '') : (header ?? '');
       return new RegExp(`${name}=([^;]*)`).exec(raw)?.[1] ?? '';
     };
     const refresh = (token: string) =>

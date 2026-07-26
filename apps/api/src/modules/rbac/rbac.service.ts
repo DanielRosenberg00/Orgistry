@@ -10,6 +10,7 @@ import {
   type RoleKey,
   type RoleListResponse,
 } from '@orgistry/contracts';
+import { requireDefined } from '../../lib/invariant';
 import type { RbacRepository } from './rbac.types';
 
 /**
@@ -90,13 +91,23 @@ export function createRbacService(options: RbacServiceOptions): RbacService {
       for (const grant of grants) {
         const roleKey = roleKeyById.get(grant.roleId);
         const permissionKey = permissionKeyById.get(grant.permissionId);
-        if (roleKey && permissionKey) {
-          matrix[roleKey].push(permissionKey);
+        // A grant referencing a role or permission id absent from the loaded
+        // catalogs is skipped (pre-existing behavior for unknown ids). A
+        // RECOGNIZED role always has a matrix entry — it was seeded above
+        // from the same roles list — so a miss is an internal invariant
+        // violation that must fail loudly, never silently drop permissions
+        // from the reported matrix.
+        if (roleKey === undefined || permissionKey === undefined) {
+          continue;
         }
+        requireDefined(
+          matrix[roleKey],
+          `permission matrix entry for role '${roleKey}'`,
+        ).push(permissionKey);
       }
       // Order each role's permission list by catalog order for stable output.
-      for (const roleKey of Object.keys(matrix)) {
-        matrix[roleKey].sort(
+      for (const permissionKeys of Object.values(matrix)) {
+        permissionKeys.sort(
           (a, b) => (PERMISSION_RANK.get(a) ?? 0) - (PERMISSION_RANK.get(b) ?? 0),
         );
       }

@@ -2,6 +2,7 @@ import { ROLE_IDS } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { requireDefined } from '../../lib/invariant';
 import { PROJECT_EVENT_TYPES } from './project.events';
 import { registerTestUser } from '../auth/testing/register-test-user';
 import {
@@ -179,9 +180,10 @@ describe('POST /v1/organizations/:id/projects (create)', () => {
       (e) => e.eventType === PROJECT_EVENT_TYPES.created,
     );
     expect(events).toHaveLength(1);
-    expect(events[0].organizationId).toBe(orgId);
-    expect(events[0].userId).toBe(owner.userId);
-    expect(events[0].metadata.targetProjectId).toBe(project.id);
+    const createdEvent = requireDefined(events[0], 'created event');
+    expect(createdEvent.organizationId).toBe(orgId);
+    expect(createdEvent.userId).toBe(owner.userId);
+    expect(createdEvent.metadata.targetProjectId).toBe(project.id);
   });
 
   it('ignores an organizationId smuggled into the body (route is the authority)', async () => {

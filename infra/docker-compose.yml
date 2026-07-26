@@ -9,11 +9,16 @@
 # are defined here — those are intentionally out of scope (see
 # docs/known-limitations.md). Credentials below are local-only development
 # defaults and are NOT secrets.
+#
+# Image tags are pinned to exact patch versions (Sprint 21, ORG-PR-042) so
+# local/CI infrastructure is reproducible; Dependabot proposes tag bumps.
+# Digest pinning is deferred to the production artifact track — see
+# docs/production-readiness/findings-register.md (ORG-PR-042).
 name: orgistry
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.14-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-orgistry}
@@ -32,7 +37,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.10-alpine
     restart: unless-stopped
     ports:
       - '6379:6379'
@@ -45,7 +50,7 @@ services:
       retries: 5
 
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.30.5
     restart: unless-stopped
     ports:
       - '1025:1025' # SMTP

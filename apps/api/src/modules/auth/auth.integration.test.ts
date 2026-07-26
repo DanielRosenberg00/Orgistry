@@ -3,6 +3,7 @@ import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import {
   createInMemoryAccountMailer,
@@ -118,18 +119,19 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
       WHERE normalized_email = ${normalizedEmail}
     `;
     expect(pending).toHaveLength(1);
-    expect(pending[0].password_hash.startsWith('$argon2id$')).toBe(true);
-    expect(pending[0].password_hash).not.toContain(user.password);
+    const pendingRow = requireRow(pending, 'pending registration row');
+    expect(pendingRow.password_hash.startsWith('$argon2id$')).toBe(true);
+    expect(pendingRow.password_hash).not.toContain(user.password);
     // The stored token hash is derived from — never equal to — the raw token.
-    expect(pending[0].token_hash).not.toBe(rawToken);
-    expect(pending[0].token_hash).toBe(
+    expect(pendingRow.token_hash).not.toBe(rawToken);
+    expect(pendingRow.token_hash).toBe(
       hashRegistrationCompletionToken(rawToken as string),
     );
 
     const users = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM users WHERE normalized_email = ${normalizedEmail}
     `;
-    expect(users[0].count).toBe('0');
+    expect(users[0]?.count).toBe('0');
   });
 
   it('completing via the emailed token creates a verified user with only an Argon2id hash', async () => {
@@ -151,10 +153,11 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
       WHERE normalized_email = ${normalizedEmail}
     `;
     expect(rows).toHaveLength(1);
+    const userRow = requireRow(rows, 'created user row');
     // Verification-first accounts are born verified.
-    expect(rows[0].email_verified_at).not.toBeNull();
-    expect(rows[0].password_hash.startsWith('$argon2id$')).toBe(true);
-    expect(rows[0].password_hash).not.toContain(user.password);
+    expect(userRow.email_verified_at).not.toBeNull();
+    expect(userRow.password_hash.startsWith('$argon2id$')).toBe(true);
+    expect(userRow.password_hash).not.toContain(user.password);
   });
 
   it('writes durable, sanitized, ANONYMOUS registration-request events', async () => {
@@ -174,21 +177,21 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
       expect(event.user_id).toBeNull();
       expect(JSON.stringify(event.metadata)).not.toContain(user.password);
     }
-    expect(requested[0].request_id).toMatch(/^req_/);
+    expect(requested[0]?.request_id).toMatch(/^req_/);
 
     const completed = await db.sql<{ user_id: string | null }[]>`
       SELECT user_id FROM security_events
       WHERE event_type = 'auth.registration_completion_succeeded'
     `;
     expect(completed).toHaveLength(1);
-    expect(completed[0].user_id).toMatch(/^user_/);
+    expect(completed[0]?.user_id).toMatch(/^user_/);
 
     // The retired Sprint 17 event names are gone.
     const retired = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events
       WHERE event_type IN ('auth.registration_succeeded', 'auth.registration_duplicate_email')
     `;
-    expect(retired[0].count).toBe('0');
+    expect(retired[0]?.count).toBe('0');
   });
 
   it('a duplicate request returns the identical accepted body and stages nothing', async () => {
@@ -204,7 +207,7 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
     const users = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM users WHERE normalized_email = ${normalizedEmail}
     `;
-    expect(users[0].count).toBe('1');
+    expect(users[0]?.count).toBe('1');
 
     // No new usable pending registration was staged for the taken email.
     const pending = await db.sql<{ count: string }[]>`
@@ -212,7 +215,7 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
       WHERE normalized_email = ${normalizedEmail}
         AND used_at IS NULL AND invalidated_at IS NULL
     `;
-    expect(pending[0].count).toBe('0');
+    expect(pending[0]?.count).toBe('0');
   });
 
   it('logs in and resolves the current user, never exposing the hash', async () => {
@@ -246,7 +249,7 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
     const rows = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events WHERE event_type = 'auth.login_failed'
     `;
-    expect(Number(rows[0].count)).toBeGreaterThanOrEqual(1);
+    expect(Number(rows[0]?.count)).toBeGreaterThanOrEqual(1);
   });
 
   it('persists a durable, sanitized access_token_rejected event', async () => {
@@ -273,8 +276,9 @@ describe.skipIf(!connectionString)('auth endpoints against live PostgreSQL', () 
         AND request_id = 'req_integration_reject'
     `;
     expect(rows).toHaveLength(1);
-    expect(rows[0].user_id).toBeNull();
-    expect(rows[0].session_id).toBeNull();
-    expect(JSON.stringify(rows[0].metadata)).not.toContain('not.a.valid.jwt');
+    const eventRow = requireRow(rows, 'access_token_rejected event');
+    expect(eventRow.user_id).toBeNull();
+    expect(eventRow.session_id).toBeNull();
+    expect(JSON.stringify(eventRow.metadata)).not.toContain('not.a.valid.jwt');
   });
 });

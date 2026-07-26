@@ -191,8 +191,8 @@ describe.skipIf(!connectionString)('migration from scratch', () => {
     const rows = await sql<{ id: string; plan_key: string }[]>`
       SELECT id, plan_key FROM organization_plans WHERE organization_id = 'org_plan_backfill'`;
     expect(rows).toHaveLength(1);
-    expect(rows[0].id).toBe('oplan_org_plan_backfill');
-    expect(rows[0].plan_key).toBe('free');
+    expect(rows[0]?.id).toBe('oplan_org_plan_backfill');
+    expect(rows[0]?.plan_key).toBe('free');
 
     await sql`DELETE FROM organization_plans`;
     await sql`DELETE FROM organizations`;

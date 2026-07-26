@@ -4,6 +4,7 @@ import { createId } from '@orgistry/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import { createAuthService } from '../auth/auth.service';
 import { createDbAuthRepository } from '../auth/auth.repo';
@@ -140,16 +141,18 @@ describe.skipIf(!connectionString)('organization foundation against live Postgre
       { id: string; type: string; status: string; created_by_user_id: string }[]
     >`SELECT id, type, status, created_by_user_id FROM organizations WHERE created_by_user_id = ${userId}`;
     expect(orgs).toHaveLength(1);
-    expect(orgs[0].type).toBe('personal');
-    expect(orgs[0].status).toBe('active');
+    const org = requireRow(orgs, 'personal organization');
+    expect(org.type).toBe('personal');
+    expect(org.status).toBe('active');
 
     const memberships = await db.sql<
       { status: string; role_id: string; organization_id: string }[]
     >`SELECT status, role_id, organization_id FROM memberships WHERE user_id = ${userId}`;
     expect(memberships).toHaveLength(1);
-    expect(memberships[0].status).toBe('active');
-    expect(memberships[0].role_id).toBe('role_owner');
-    expect(memberships[0].organization_id).toBe(orgs[0].id);
+    const membership = requireRow(memberships, 'owner membership');
+    expect(membership.status).toBe('active');
+    expect(membership.role_id).toBe('role_owner');
+    expect(membership.organization_id).toBe(org.id);
   });
 
   it('rolls registration completion back atomically when a later step fails', async () => {
@@ -214,14 +217,14 @@ describe.skipIf(!connectionString)('organization foundation against live Postgre
     // Only the first account exists; the second left no partial state — its
     // user, organization, and membership inserts were all rolled back even
     // though they succeeded before the failing refresh-token insert.
-    expect(users[0].count).toBe('1');
-    expect(orgs[0].count).toBe('1');
-    expect(memberships[0].count).toBe('1');
+    expect(users[0]?.count).toBe('1');
+    expect(orgs[0]?.count).toBe('1');
+    expect(memberships[0]?.count).toBe('1');
 
     const rolledBack = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM users
       WHERE normalized_email = 'atomic.b@example.com'`;
-    expect(rolledBack[0].count).toBe('0');
+    expect(rolledBack[0]?.count).toBe('0');
   });
 
   it('creates a team organization with the creator as active Owner', async () => {
@@ -235,8 +238,8 @@ describe.skipIf(!connectionString)('organization foundation against live Postgre
       SELECT status, role_id FROM memberships
       WHERE user_id = ${userId} AND organization_id = ${orgId}`;
     expect(rows).toHaveLength(1);
-    expect(rows[0].status).toBe('active');
-    expect(rows[0].role_id).toBe('role_owner');
+    expect(rows[0]?.status).toBe('active');
+    expect(rows[0]?.role_id).toBe('role_owner');
   });
 
   it('enforces one active membership per (user, organization)', async () => {

@@ -47,11 +47,10 @@ const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const DEFAULT_RANDOM_LENGTH = 26;
 
 function randomBase32(length: number): string {
-  const bytes = randomBytes(length);
   let out = '';
-  for (let i = 0; i < length; i += 1) {
+  for (const byte of randomBytes(length)) {
     // Map each byte into the 32-char alphabet. Uniform enough for opaque IDs.
-    out += ALPHABET[bytes[i] % ALPHABET.length];
+    out += ALPHABET.charAt(byte % ALPHABET.length);
   }
   return out;
 }

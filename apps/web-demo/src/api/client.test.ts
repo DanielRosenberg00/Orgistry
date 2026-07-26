@@ -108,7 +108,7 @@ describe('api client', () => {
     setAccessToken('tok-123');
     const mock = stubFetch(() => ({ status: 200, body: { ok: true, data: {} } }));
     await api.get('/v1/thing');
-    const init = mock.mock.calls[0][1] as RequestInit;
+    const init = mock.mock.calls[0]?.[1] as RequestInit;
     expect((init.headers as Record<string, string>).Authorization).toBe(
       'Bearer tok-123',
     );

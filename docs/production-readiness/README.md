@@ -123,6 +123,32 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > **not ready for staging or production** — the state remains
 > **C — Ready to continue production implementation**. Recommended next:
 > **Sprint 21 — Supply Chain and CI Hardening**.
+>
+> **Post-audit status (Sprint 21, 2026-07-26): Sprint 21 repository
+> implementation is complete** — supply-chain and CI hardening. The
+> distinction matters: the code, workflows, and configuration are done and
+> locally validated, but the new scanners' *enforcement* is not yet proven,
+> because they have never executed on GitHub-hosted CI. Four findings closed:
+> ORG-PR-018 (`drizzle-orm` 0.45.2, the advisory fix release, validated
+> against live PostgreSQL incl. the ≥0.44 `DrizzleQueryError` guard
+> adaptation), ORG-PR-054 (all vulnerable `esbuild` copies eliminated),
+> ORG-PR-019 (every workflow action full-SHA pinned; explicit least-privilege
+> `permissions:` on all three workflows; `concurrency`; Dependabot pin
+> updates), and ORG-PR-040 (`noUncheckedIndexedAccess` ON for every project;
+> 297 errors fixed with zero suppressions). Two findings open, materially
+> advanced: **ORG-PR-020 remains open pending first remote CI execution and
+> negative-path enforcement evidence** (pnpm audit gates + Gitleaks + CodeQL
+> + Dependabot are configured and locally validated where a local equivalent
+> exists) and ORG-PR-042 (exact patch tags everywhere; digest pinning
+> deferred to the ORG-PR-001 artifact track). Two dependency advisories accepted with documented
+> reachability analyses (react-router RSC-only CSRF; brace-expansion
+> dev-only DoS). `pnpm validate` and `pnpm validate:integration` exit 0
+> (2026-07-26). See
+> [sprint-21-artifact-package.md](sprint-21-artifact-package.md). Four P1
+> blockers remain open (ORG-PR-001/002/005/006, plus ORG-PR-015); the
+> repository is still **not ready for staging or production** — the state
+> remains **C — Ready to continue production implementation**. Recommended
+> next: **Sprint 22 — Deployable artifact & pipeline** (Phase 4).
 
 ## Audit context
 
@@ -157,6 +183,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-19-artifact-package.md](sprint-19-artifact-package.md) | The Sprint 19 closing artifact (edge and application security hardening). |
 | [sprint-20-artifact-package.md](sprint-20-artifact-package.md) | The Sprint 20 closing artifact (authorization and concurrency correctness). |
 | [sprint-20-quota-race-audit.md](sprint-20-quota-race-audit.md) | The Sprint 20 quota-race map: per-path pre-change state, serialization primitive, lock order. |
+| [sprint-21-artifact-package.md](sprint-21-artifact-package.md) | The Sprint 21 closing artifact (supply-chain & CI hardening: pinning, scanners, advisory remediation, `noUncheckedIndexedAccess`). |
 
 ## Source-of-truth hierarchy
 

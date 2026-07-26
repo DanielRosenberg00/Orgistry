@@ -3,6 +3,7 @@ import { ROLE_IDS, schema } from '@orgistry/db';
 import type { PermissionKey } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { and, desc, eq, lt, or } from 'drizzle-orm';
+import { isUniqueViolation } from '../../lib/pg-errors';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
 import { memberNotFoundError, lastOwnerRequiredError } from './member.errors';
 import { MEMBER_EVENT_TYPES, type MemberEventType } from './member.events';
@@ -29,18 +30,6 @@ import type {
   OrganizationRepository,
   RemoveMemberParams,
 } from './organization.types';
-
-/** PostgreSQL unique-violation SQLSTATE. */
-const PG_UNIQUE_VIOLATION = '23505';
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION
-  );
-}
 
 /**
  * Drizzle-backed implementation of the organization persistence boundary. All

@@ -3,6 +3,8 @@ import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
+import { requireDefined } from '../../lib/invariant';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import {
   createInMemoryAccountMailer,
@@ -124,8 +126,9 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
       SELECT token_hash FROM refresh_tokens
     `;
     expect(rows).toHaveLength(1);
-    expect(rows[0].token_hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(rows[0].token_hash).not.toBe(raw);
+    const stored = requireRow(rows, 'refresh token row');
+    expect(stored.token_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(stored.token_hash).not.toBe(raw);
   });
 
   it('rotates transactionally: old token used, exactly one successor', async () => {
@@ -137,9 +140,11 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
       SELECT used_at, family_id FROM refresh_tokens ORDER BY created_at ASC
     `;
     expect(rows).toHaveLength(2);
-    expect(rows[0].used_at).not.toBeNull(); // original consumed
-    expect(rows[1].used_at).toBeNull(); // successor fresh
-    expect(rows[0].family_id).toBe(rows[1].family_id); // same family
+    const original = requireDefined(rows[0], 'original refresh token row');
+    const successor = requireDefined(rows[1], 'successor refresh token row');
+    expect(original.used_at).not.toBeNull(); // original consumed
+    expect(successor.used_at).toBeNull(); // successor fresh
+    expect(original.family_id).toBe(successor.family_id); // same family
   });
 
   it('detects reuse and revokes the family + session', async () => {
@@ -164,7 +169,7 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
       SELECT count(*)::text AS count FROM security_events
       WHERE event_type = 'auth.refresh_token_reuse_detected'
     `;
-    expect(Number(events[0].count)).toBeGreaterThanOrEqual(1);
+    expect(Number(events[0]?.count)).toBeGreaterThanOrEqual(1);
   });
 
   it('cannot mint two successors for concurrent refreshes of one token', async () => {
@@ -176,6 +181,6 @@ describe.skipIf(!connectionString)('session lifecycle against live PostgreSQL', 
     const rows = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM refresh_tokens
     `;
-    expect(Number(rows[0].count)).toBe(2);
+    expect(Number(rows[0]?.count)).toBe(2);
   });
 });

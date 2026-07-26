@@ -4,6 +4,7 @@ import { createId } from '@orgistry/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import { createAuthService } from '../auth/auth.service';
 import { createDbAuthRepository } from '../auth/auth.repo';
@@ -170,7 +171,7 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
   it('migrates the projects table from scratch with its indexes', async () => {
     const table = await db.sql<{ exists: boolean }[]>`
       SELECT to_regclass('public.projects') IS NOT NULL AS exists`;
-    expect(table[0].exists).toBe(true);
+    expect(table[0]?.exists).toBe(true);
 
     const rows = await db.sql<{ indexname: string }[]>`
       SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'projects'`;
@@ -185,11 +186,14 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
 
     const projectId = await createProject(owner.token, orgId, 'Launch');
 
-    const stored = await db.sql<
-      { organization_id: string; created_by_user_id: string; name: string }[]
-    >`SELECT organization_id, created_by_user_id, name FROM projects WHERE id = ${projectId}`;
-    expect(stored[0].organization_id).toBe(orgId);
-    expect(stored[0].created_by_user_id).toBe(owner.userId);
+    const stored = requireRow(
+      await db.sql<
+        { organization_id: string; created_by_user_id: string; name: string }[]
+      >`SELECT organization_id, created_by_user_id, name FROM projects WHERE id = ${projectId}`,
+      'stored project',
+    );
+    expect(stored.organization_id).toBe(orgId);
+    expect(stored.created_by_user_id).toBe(owner.userId);
 
     const read = await app.inject({
       method: 'GET',
@@ -243,8 +247,9 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
       { deleted_at: string | null; deleted_by_user_id: string | null }[]
     >`SELECT deleted_at, deleted_by_user_id FROM projects WHERE id = ${projectId}`;
     expect(rows).toHaveLength(1); // not hard-deleted
-    expect(rows[0].deleted_at).not.toBeNull();
-    expect(rows[0].deleted_by_user_id).toBe(owner.userId);
+    const deletedRow = requireRow(rows, 'soft-deleted project');
+    expect(deletedRow.deleted_at).not.toBeNull();
+    expect(deletedRow.deleted_by_user_id).toBe(owner.userId);
 
     // Hidden from active read & list.
     const read = await app.inject({
@@ -263,7 +268,7 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
 
     const events = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events WHERE event_type = 'project.deleted'`;
-    expect(events[0].count).toBe('1');
+    expect(events[0]?.count).toBe('1');
   });
 
   it('scopes every flow by organization id (cross-tenant is a safe 404)', async () => {
@@ -287,7 +292,7 @@ describe.skipIf(!connectionString)('projects against live PostgreSQL', () => {
     // The foreign project is untouched and still active in its own org.
     const rows = await db.sql<{ deleted_at: string | null }[]>`
       SELECT deleted_at FROM projects WHERE id = ${foreignId}`;
-    expect(rows[0].deleted_at).toBeNull();
+    expect(rows[0]?.deleted_at).toBeNull();
   });
 
   it('enforces project permissions by key, not role name', async () => {

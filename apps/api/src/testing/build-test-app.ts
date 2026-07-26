@@ -33,14 +33,14 @@ export function productionLikeTestConfig(
   return loadConfig({
     NODE_ENV: 'production',
     DATABASE_URL: 'postgres://orgistry:orgistry@db.internal:5432/orgistry',
-    JWT_SECRET: '4f1c9b2e7a8d3c6f5e0b9a4d7c2f8e1b6a3d0c5f9e2b7a4d',
+    JWT_SECRET: 'test-suite-jwt-secret-not-real-not-real-not-real',
     COOKIE_SECURE: 'true',
     WEB_DEMO_URL: 'https://app.orgistry.example-deployment.com',
     MAIL_DRIVER: 'smtp',
     MAIL_FROM_EMAIL: 'no-reply@orgistry.example-deployment.com',
     SMTP_HOST: 'smtp.provider.example-deployment.com',
     SMTP_USERNAME: 'orgistry-mailer',
-    SMTP_PASSWORD: '9e2b7a4d0c5f4f1c9b2e7a8d3c6f5e0b',
+    SMTP_PASSWORD: 'test-suite-smtp-password-not-real',
     ...overrides,
   });
 }

@@ -1,6 +1,8 @@
 import type { Database } from '@orgistry/db';
 import { schema } from '@orgistry/db';
 import { and, desc, eq, gt, inArray, isNull, lt, ne, or } from 'drizzle-orm';
+import { requireRow } from '../../lib/db-rows';
+import { isUniqueViolation } from '../../lib/pg-errors';
 import { emailAlreadyRegisteredError } from './auth.errors';
 import type {
   AuthRepository,
@@ -13,18 +15,6 @@ import type {
   RotateRefreshTokenParams,
   RotateRefreshTokenResult,
 } from './auth.types';
-
-/** PostgreSQL unique-violation SQLSTATE. */
-const PG_UNIQUE_VIOLATION = '23505';
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION
-  );
-}
 
 /**
  * Drizzle-backed implementation of the auth persistence boundary. All SQL for
@@ -51,7 +41,7 @@ export function createDbAuthRepository(db: Database): AuthRepository {
     },
 
     async insertSession(values: NewSession) {
-      const [session] = await db
+      const inserted = await db
         .insert(schema.sessions)
         .values({
           userId: values.userId,
@@ -60,7 +50,7 @@ export function createDbAuthRepository(db: Database): AuthRepository {
           expiresAt: values.expiresAt,
         })
         .returning();
-      return session;
+      return requireRow(inserted, 'sessions insert');
     },
 
     async findSessionById(id) {
@@ -73,7 +63,7 @@ export function createDbAuthRepository(db: Database): AuthRepository {
     },
 
     async insertRefreshToken(values: NewRefreshToken) {
-      const [token] = await db
+      const inserted = await db
         .insert(schema.refreshTokens)
         .values({
           sessionId: values.sessionId,
@@ -83,7 +73,7 @@ export function createDbAuthRepository(db: Database): AuthRepository {
           expiresAt: values.expiresAt,
         })
         .returning();
-      return token;
+      return requireRow(inserted, 'refresh_tokens insert');
     },
 
     async findRefreshTokenByHash(tokenHash) {
@@ -155,16 +145,19 @@ export function createDbAuthRepository(db: Database): AuthRepository {
           return { status: 'expired' };
         }
 
-        const [successor] = await tx
-          .insert(schema.refreshTokens)
-          .values({
-            sessionId: token.sessionId,
-            familyId: token.familyId,
-            tokenHash: params.successorTokenHash,
-            parentTokenId: token.id,
-            expiresAt: params.successorExpiresAt,
-          })
-          .returning();
+        const successor = requireRow(
+          await tx
+            .insert(schema.refreshTokens)
+            .values({
+              sessionId: token.sessionId,
+              familyId: token.familyId,
+              tokenHash: params.successorTokenHash,
+              parentTokenId: token.id,
+              expiresAt: params.successorExpiresAt,
+            })
+            .returning(),
+          'refresh_tokens successor insert',
+        );
 
         await tx
           .update(schema.refreshTokens)
@@ -309,9 +302,9 @@ export function createDbAuthRepository(db: Database): AuthRepository {
     // verifiable.
     async changeEmail(params: ChangeEmailParams) {
       return db.transaction(async (tx) => {
-        let updated;
+        let updatedRows;
         try {
-          [updated] = await tx
+          updatedRows = await tx
             .update(schema.users)
             .set({
               email: params.email,
@@ -341,7 +334,7 @@ export function createDbAuthRepository(db: Database): AuthRepository {
             ),
           );
 
-        return updated;
+        return requireRow(updatedRows, 'users email update');
       });
     },
 

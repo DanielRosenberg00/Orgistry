@@ -20,8 +20,8 @@ export interface InMemoryAccountMailer extends AccountMailer {
 function tokenFromText(text: string): string | null {
   // Invitation links carry the token as a query parameter; verification links
   // carry it in the URL fragment (never sent to a server).
-  const match = text.match(/[?&#]token=([^&\s]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+  const token = text.match(/[?&#]token=([^&\s]+)/)?.[1];
+  return token ? decodeURIComponent(token) : null;
 }
 
 export function createInMemoryAccountMailer(): InMemoryAccountMailer {

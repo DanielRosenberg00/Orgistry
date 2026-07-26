@@ -1,6 +1,8 @@
 import { createDbClient, runMigrations } from '@orgistry/db';
 import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireRow } from '../../lib/db-rows';
+import { requireDefined } from '../../lib/invariant';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
@@ -167,15 +169,17 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
 
     const rows = await db.sql`SELECT * FROM invitations WHERE id = ${id}`;
     expect(rows).toHaveLength(1);
-    expect(rows[0].token_hash).not.toBe(rawToken);
-    expect(rows[0].token_hash.length).toBeGreaterThan(0);
-    expect(rows[0].status).toBe('pending');
+    const stored = requireRow(rows, 'stored invitation');
+    expect(stored.token_hash).not.toBe(rawToken);
+    expect(stored.token_hash.length).toBeGreaterThan(0);
+    expect(stored.status).toBe('pending');
 
     const events = await db.sql`
       SELECT metadata FROM security_events WHERE event_type = ${INVITATION_EVENT_TYPES.created}`;
     expect(events).toHaveLength(1);
-    expect(JSON.stringify(events[0].metadata)).not.toContain(rawToken);
-    expect(JSON.stringify(events[0].metadata)).not.toContain(rows[0].token_hash);
+    const createdEvent = requireDefined(events[0], 'invitation.created event');
+    expect(JSON.stringify(createdEvent.metadata)).not.toContain(rawToken);
+    expect(JSON.stringify(createdEvent.metadata)).not.toContain(stored.token_hash);
   });
 
   it('accepts transactionally (membership + accepted) and is single-use', async () => {
@@ -195,10 +199,10 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
     const membership = await db.sql`
       SELECT * FROM memberships WHERE user_id = ${invitee.userId} AND organization_id = ${orgId}`;
     expect(membership).toHaveLength(1);
-    expect(membership[0].status).toBe('active');
+    expect(membership[0]?.status).toBe('active');
 
     const row = await db.sql`SELECT status FROM invitations WHERE id = ${id}`;
-    expect(row[0].status).toBe('accepted');
+    expect(row[0]?.status).toBe('accepted');
 
     const reuse = await app.inject({
       method: 'POST',
@@ -253,7 +257,7 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
     expect(invited?.role_id).toBe('role_member');
 
     const row = await db.sql`SELECT status FROM invitations WHERE id = ${id}`;
-    expect(row[0].status).toBe('accepted');
+    expect(row[0]?.status).toBe('accepted');
   });
 
   it('answers a rejected invitation with the generic acceptance and stages nothing (DB-proven)', async () => {
@@ -291,8 +295,8 @@ describe.skipIf(!connectionString)('invitations against live PostgreSQL', () => 
       SELECT user_id, metadata FROM security_events
       WHERE event_type = 'auth.registration_requested'
       ORDER BY created_at DESC LIMIT 1`;
-    expect(events[0].user_id).toBeNull();
-    expect(events[0].metadata).toEqual({
+    expect(events[0]?.user_id).toBeNull();
+    expect(events[0]?.metadata).toEqual({
       outcome: 'invitation_rejected',
       delivered: false,
     });

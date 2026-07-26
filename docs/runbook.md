@@ -8,9 +8,13 @@ deployment automation here.
 
 | Service | Image | Host port(s) | Purpose |
 | --- | --- | --- | --- |
-| `postgres` | `postgres:16-alpine` | `5432` | Durable application store (and the test database). |
-| `redis` | `redis:7-alpine` | `6379` | Auth + external-API rate limiting; backs the `/ready` probe. |
-| `mailpit` | `axllent/mailpit` | `1025` (SMTP), `8025` (web UI) | Local email sink for invitation delivery. |
+| `postgres` | `postgres:16.14-alpine` | `5432` | Durable application store (and the test database). |
+| `redis` | `redis:7.4.10-alpine` | `6379` | Auth + external-API rate limiting; backs the `/ready` probe. |
+| `mailpit` | `axllent/mailpit:v1.30.5` | `1025` (SMTP), `8025` (web UI) | Local email sink for invitation delivery. |
+
+Image tags are pinned to exact patch versions (Sprint 21, ORG-PR-042);
+Dependabot proposes bumps. Keep this table in sync with
+`infra/docker-compose.yml`.
 
 The Compose project name is `orgistry`, so containers are named
 `orgistry-postgres-1`, `orgistry-redis-1`, `orgistry-mailpit-1`.
@@ -136,7 +140,7 @@ Resolution options, in order of preference:
    ```bash
    docker run -d --name orgistry-pg-alt \
      -e POSTGRES_USER=orgistry -e POSTGRES_PASSWORD=orgistry -e POSTGRES_DB=orgistry \
-     -p 55432:5432 postgres:16-alpine
+     -p 55432:5432 postgres:16.14-alpine
    docker exec orgistry-pg-alt psql -U orgistry -d orgistry -c 'CREATE DATABASE orgistry_test;'
    # then run commands with DATABASE_URL/TEST_DATABASE_URL pointing at :55432
    docker rm -f orgistry-pg-alt   # clean up afterwards

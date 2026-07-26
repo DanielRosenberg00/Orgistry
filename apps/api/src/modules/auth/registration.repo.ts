@@ -3,6 +3,8 @@ import { schema } from '@orgistry/db';
 import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { ERROR_CODES } from '@orgistry/contracts';
 import { AppError } from '../../lib/errors';
+import { requireRow } from '../../lib/db-rows';
+import { uniqueViolationConstraint } from '../../lib/pg-errors';
 import { acceptInvitationWithinTransaction } from '../invitations/invitation.acceptance';
 import {
   insertOrganizationWithOwnerMembership,
@@ -18,21 +20,11 @@ import type {
   RegistrationRepository,
 } from './registration.types';
 
-/** PostgreSQL unique-violation SQLSTATE. */
-const PG_UNIQUE_VIOLATION = '23505';
 /** The one-account-per-normalized-email unique index on `users`. */
 const USERS_EMAIL_CONSTRAINT = 'uq_users_normalized_email';
 
 function isUsersEmailUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION &&
-    'constraint_name' in error &&
-    (error as { constraint_name?: unknown }).constraint_name ===
-      USERS_EMAIL_CONSTRAINT
-  );
+  return uniqueViolationConstraint(error) === USERS_EMAIL_CONSTRAINT;
 }
 
 /**
@@ -174,16 +166,19 @@ export function createDbRegistrationRepository(
           // 1. User — created EMAIL-VERIFIED: completing the emailed token IS
           //    the proof of mailbox control, so no separate verification pass
           //    is ever needed for a verification-first account.
-          const [user] = await tx
-            .insert(schema.users)
-            .values({
-              email: pending.email,
-              normalizedEmail: pending.normalizedEmail,
-              passwordHash: pending.passwordHash,
-              displayName: pending.displayName,
-              emailVerifiedAt: params.now,
-            })
-            .returning();
+          const user = requireRow(
+            await tx
+              .insert(schema.users)
+              .values({
+                email: pending.email,
+                normalizedEmail: pending.normalizedEmail,
+                passwordHash: pending.passwordHash,
+                displayName: pending.displayName,
+                emailVerifiedAt: params.now,
+              })
+              .returning(),
+            'users insert (registration completion)',
+          );
 
           // 2. Personal workspace: organization + active Owner membership +
           //    default plan state, via the shared provisioning seam.
@@ -201,25 +196,31 @@ export function createDbRegistrationRepository(
             });
 
           // 3. Session + first refresh token of a new family (hash-only).
-          const [session] = await tx
-            .insert(schema.sessions)
-            .values({
-              userId: user.id,
-              ipAddress: params.session.ipAddress,
-              userAgent: params.session.userAgent,
-              expiresAt: params.session.expiresAt,
-            })
-            .returning();
-          const [refreshToken] = await tx
-            .insert(schema.refreshTokens)
-            .values({
-              sessionId: session.id,
-              familyId: params.refreshToken.familyId,
-              tokenHash: params.refreshToken.tokenHash,
-              parentTokenId: null,
-              expiresAt: params.refreshToken.expiresAt,
-            })
-            .returning();
+          const session = requireRow(
+            await tx
+              .insert(schema.sessions)
+              .values({
+                userId: user.id,
+                ipAddress: params.session.ipAddress,
+                userAgent: params.session.userAgent,
+                expiresAt: params.session.expiresAt,
+              })
+              .returning(),
+            'sessions insert (registration completion)',
+          );
+          const refreshToken = requireRow(
+            await tx
+              .insert(schema.refreshTokens)
+              .values({
+                sessionId: session.id,
+                familyId: params.refreshToken.familyId,
+                tokenHash: params.refreshToken.tokenHash,
+                parentTokenId: null,
+                expiresAt: params.refreshToken.expiresAt,
+              })
+              .returning(),
+            'refresh_tokens insert (registration completion)',
+          );
 
           // 4. Invitation acceptance — inside a SAVEPOINT (nested
           //    transaction) so the documented invitation-unavailable policy

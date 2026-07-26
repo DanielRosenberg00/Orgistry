@@ -10,6 +10,8 @@ import {
 } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
 import { eq } from 'drizzle-orm';
+import { requireRow } from '../../lib/db-rows';
+import { requireDefined } from '../../lib/invariant';
 
 /**
  * Organization provisioning primitives.
@@ -49,7 +51,11 @@ export function slugify(input: string, fallback = 'workspace'): string {
 function shortSlugToken(): string {
   // `createId` yields `<prefix>_<base32>`; the random tail lowercased is a
   // valid slug segment ([a-z0-9]).
-  return createId('org').split('_')[1].slice(0, 6).toLowerCase();
+  const randomTail = requireDefined(
+    createId('org').split('_')[1],
+    'createId random tail',
+  );
+  return randomTail.slice(0, 6).toLowerCase();
 }
 
 /** True when an organization already uses `slug`. */
@@ -136,26 +142,32 @@ export async function insertOrganizationWithOwnerMembership(
   executor: DbExecutor,
   params: InsertOrganizationParams,
 ): Promise<{ organization: OrganizationRow; membership: MembershipRow }> {
-  const [organization] = await executor
-    .insert(schema.organizations)
-    .values({
-      name: params.name,
-      slug: params.slug,
-      type: params.type,
-      status: params.status ?? 'active',
-      createdByUserId: params.createdByUserId,
-    })
-    .returning();
+  const organization = requireRow(
+    await executor
+      .insert(schema.organizations)
+      .values({
+        name: params.name,
+        slug: params.slug,
+        type: params.type,
+        status: params.status ?? 'active',
+        createdByUserId: params.createdByUserId,
+      })
+      .returning(),
+    'organizations insert',
+  );
 
-  const [membership] = await executor
-    .insert(schema.memberships)
-    .values({
-      userId: params.ownerUserId,
-      organizationId: organization.id,
-      roleId: ROLE_IDS.owner,
-      status: 'active',
-    })
-    .returning();
+  const membership = requireRow(
+    await executor
+      .insert(schema.memberships)
+      .values({
+        userId: params.ownerUserId,
+        organizationId: organization.id,
+        roleId: ROLE_IDS.owner,
+        status: 'active',
+      })
+      .returning(),
+    'owner membership insert',
+  );
 
   // Default plan state. The creator is recorded as having set it; a later demo
   // plan change overwrites the plan key and the actor.

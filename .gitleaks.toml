@@ -1,0 +1,42 @@
+# Gitleaks configuration for Orgistry (Sprint 21, ORG-PR-020).
+#
+# Policy: a suspected live secret fails the scan (CI and local). The allowlist
+# below is intentionally narrow — entries are per-value or per-fixture-file,
+# never broad path trees, and every entry must be explainable as "cannot be a
+# live secret". New entries require the same reachability reasoning in
+# docs/production-readiness/findings-register.md.
+#
+# Local command (mirrors CI): pnpm scan:secrets
+
+[extend]
+# Start from the maintained default ruleset.
+useDefault = true
+
+[allowlist]
+description = "Known-fake fixtures and historical test values (never live secrets)"
+
+paths = [
+  # Committed self-signed certificate + key generated ONLY for the in-process
+  # fake SMTP server's TLS handshake tests. Not trusted anywhere, never
+  # deployed; regenerating one per run would buy nothing. Kept as the one
+  # path-level exception.
+  '''apps/api/src/modules/mail/testing/tls-fixtures\.ts''',
+]
+
+# Regex entries match the detected secret value itself, so they stay valid for
+# git-history scans even though the current tree was rewritten to
+# unmistakable placeholders in Sprint 21.
+regexes = [
+  # Historical test-only JWT fixture (rewritten to an obvious fake in Sprint
+  # 21; this exact value remains in pre-Sprint-21 commits).
+  '''4f1c9b2e7a8d3c6f5e0b9a4d7c2f8e1b6a3d0c5f9e2b7a4d''',
+  # Historical test-only SMTP password fixture (same rewrite).
+  '''9e2b7a4d0c5f4f1c9b2e7a8d3c6f5e0b''',
+  # Historical 31-char too-short-JWT rejection fixture (same rewrite).
+  '''b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e''',
+  # Historical concurrency-test password literal (same rewrite).
+  '''generation-winner-pass-456''',
+  # Prose in docs/production-readiness/sprint-17-artifact-package.md that the
+  # generic-api-key rule misreads as a secret ("password, invalid/same/…").
+  '''invalid/same/duplicate''',
+]

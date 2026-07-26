@@ -4,6 +4,8 @@ import { hashOpaqueToken } from '@orgistry/auth-core';
 import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { createId } from '@orgistry/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireRow } from '../../lib/db-rows';
+import { requireDefined } from '../../lib/invariant';
 import { createDbApiKeyRepository } from '../api-keys/api-key.repo';
 import { createDbInvitationRepository } from '../invitations/invitation.repo';
 import { hashInvitationToken } from '../invitations/invitation.token';
@@ -79,31 +81,37 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
   async function insertUser(label: string): Promise<{ id: string; email: string }> {
     seq += 1;
     const email = `quota.${label}.${seq}@example.com`;
-    const [user] = await db.db
-      .insert(schema.users)
-      .values({
-        email,
-        normalizedEmail: email,
-        passwordHash: 'x-not-a-real-hash',
-        displayName: label,
-        emailVerifiedAt: new Date(),
-      })
-      .returning({ id: schema.users.id });
+    const user = requireRow(
+      await db.db
+        .insert(schema.users)
+        .values({
+          email,
+          normalizedEmail: email,
+          passwordHash: 'x-not-a-real-hash',
+          displayName: label,
+          emailVerifiedAt: new Date(),
+        })
+        .returning({ id: schema.users.id }),
+      'inserted user',
+    );
     return { id: user.id, email };
   }
 
   /** Team org owned by `ownerId`, with plan state (default free). */
   async function insertTeamOrg(ownerId: string, planKey = 'free'): Promise<string> {
     seq += 1;
-    const [org] = await db.db
-      .insert(schema.organizations)
-      .values({
-        name: `Quota Org ${seq}`,
-        slug: `quota-org-${seq}`,
-        type: 'team',
-        createdByUserId: ownerId,
-      })
-      .returning({ id: schema.organizations.id });
+    const org = requireRow(
+      await db.db
+        .insert(schema.organizations)
+        .values({
+          name: `Quota Org ${seq}`,
+          slug: `quota-org-${seq}`,
+          type: 'team',
+          createdByUserId: ownerId,
+        })
+        .returning({ id: schema.organizations.id }),
+      'inserted organization',
+    );
     await db.db.insert(schema.memberships).values({
       userId: ownerId,
       organizationId: org.id,
@@ -209,11 +217,11 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
     const active = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM projects
       WHERE organization_id = ${orgId} AND deleted_at IS NULL`;
-    expect(active[0].count).toBe('3');
+    expect(active[0]?.count).toBe('3');
     const events = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events
       WHERE organization_id = ${orgId} AND event_type = 'project.created'`;
-    expect(events[0].count).toBe('1');
+    expect(events[0]?.count).toBe('1');
   });
 
   it('concurrent API key creates cannot exceed max_api_keys (capacity 1 → exactly 1 wins)', async () => {
@@ -270,11 +278,11 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
       SELECT count(*)::text AS count FROM api_keys
       WHERE organization_id = ${orgId} AND revoked_at IS NULL
         AND (expires_at IS NULL OR expires_at > now())`;
-    expect(active[0].count).toBe('5');
+    expect(active[0]?.count).toBe('5');
     const events = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events
       WHERE organization_id = ${orgId} AND event_type = 'api_key.created'`;
-    expect(events[0].count).toBe('1');
+    expect(events[0]?.count).toBe('1');
   });
 
   it('concurrent acceptances of DISTINCT invitations cannot exceed max_members (capacity 1 → exactly 1 joins)', async () => {
@@ -295,7 +303,11 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
     const results = await Promise.allSettled(
       invitees.map((invitee, i) =>
         invitationRepo.acceptInvitation({
-          selector: { tokenHash: hashInvitationToken(tokens[i]) },
+          selector: {
+            tokenHash: hashInvitationToken(
+              requireDefined(tokens[i], `invitation token ${i}`),
+            ),
+          },
           acceptingUserId: invitee.id,
           acceptingUserNormalizedEmail: invitee.email,
           ctx: { actorUserId: invitee.id, actorMembershipId: null, ...ctx },
@@ -318,7 +330,7 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
     const members = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM memberships
       WHERE organization_id = ${orgId} AND status = 'active'`;
-    expect(members[0].count).toBe('3');
+    expect(members[0]?.count).toBe('3');
     const invitationStates = await db.sql<{ status: string; count: string }[]>`
       SELECT status, count(*)::text AS count FROM invitations
       WHERE organization_id = ${orgId} GROUP BY status ORDER BY status`;
@@ -329,11 +341,11 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
     const accepted = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events
       WHERE organization_id = ${orgId} AND event_type = 'invitation.accepted'`;
-    expect(accepted[0].count).toBe('1');
+    expect(accepted[0]?.count).toBe('1');
     const provenance = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events
       WHERE organization_id = ${orgId} AND event_type = 'membership.created_from_invitation'`;
-    expect(provenance[0].count).toBe('1');
+    expect(provenance[0]?.count).toBe('1');
   });
 
   it('concurrent invited registration completions cannot exceed max_members (accounts commit; exactly 1 membership)', async () => {
@@ -350,16 +362,19 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
       const email = `race.registrant.${seq}@example.com`;
       const rawInvitationToken = await insertInvitation(orgId, owner.id, email);
       // Resolve the id of the invitation just inserted (tokenHash is unique).
-      const [invitationRow] = await db.db
-        .select({ id: schema.invitations.id })
-        .from(schema.invitations)
-        .where(
-          eq(
-            schema.invitations.tokenHash,
-            hashInvitationToken(rawInvitationToken),
-          ),
-        )
-        .limit(1);
+      const invitationRow = requireRow(
+        await db.db
+          .select({ id: schema.invitations.id })
+          .from(schema.invitations)
+          .where(
+            eq(
+              schema.invitations.tokenHash,
+              hashInvitationToken(rawInvitationToken),
+            ),
+          )
+          .limit(1),
+        'inserted invitation',
+      );
       const rawCompletionToken = `race-completion-${seq}`;
       await db.db.insert(schema.pendingRegistrations).values({
         email,
@@ -411,7 +426,7 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
     const members = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM memberships
       WHERE organization_id = ${orgId} AND status = 'active'`;
-    expect(members[0].count).toBe('3');
+    expect(members[0]?.count).toBe('3');
 
     // No partial state for ANY completion: each registrant has a user row, an
     // active personal workspace, a session, and a consumed pending row.
@@ -419,17 +434,18 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
       const users = await db.sql<{ id: string }[]>`
         SELECT id FROM users WHERE normalized_email = ${c.email}`;
       expect(users).toHaveLength(1);
+      const userRow = requireRow(users, `registrant user for ${c.email}`);
       const personal = await db.sql<{ count: string }[]>`
         SELECT count(*)::text AS count FROM organizations
-        WHERE created_by_user_id = ${users[0].id} AND type = 'personal' AND status = 'active'`;
-      expect(personal[0].count).toBe('1');
+        WHERE created_by_user_id = ${userRow.id} AND type = 'personal' AND status = 'active'`;
+      expect(personal[0]?.count).toBe('1');
       const sessions = await db.sql<{ count: string }[]>`
-        SELECT count(*)::text AS count FROM sessions WHERE user_id = ${users[0].id}`;
-      expect(sessions[0].count).toBe('1');
+        SELECT count(*)::text AS count FROM sessions WHERE user_id = ${userRow.id}`;
+      expect(sessions[0]?.count).toBe('1');
     }
     const unusedPending = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM pending_registrations WHERE used_at IS NULL`;
-    expect(unusedPending[0].count).toBe('0');
+    expect(unusedPending[0]?.count).toBe('0');
 
     // Invitation ledger matches: one accepted, three untouched (pending).
     const invitationStates = await db.sql<{ status: string; count: string }[]>`
@@ -475,10 +491,10 @@ describe.skipIf(!connectionString)('quota enforcement under real concurrency', (
     const pending = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM invitations
       WHERE organization_id = ${orgId} AND status = 'pending'`;
-    expect(pending[0].count).toBe('1');
+    expect(pending[0]?.count).toBe('1');
     const events = await db.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM security_events
       WHERE organization_id = ${orgId} AND event_type = 'invitation.created'`;
-    expect(events[0].count).toBe('1');
+    expect(events[0]?.count).toBe('1');
   });
 });

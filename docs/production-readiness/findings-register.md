@@ -103,6 +103,41 @@ ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged.** The repository remains not
 ready for staging or production. See
 [sprint-19-artifact-package.md](sprint-19-artifact-package.md).
 
+**Status update (Sprint 21, 2026-07-26):** supply-chain and CI hardening.
+Sprint 21 repository implementation is complete; ORG-PR-020 remains open
+pending first remote CI execution and negative-path enforcement evidence.
+[ORG-PR-018](#org-pr-018) (P2) **Closed** — `drizzle-orm` upgraded to
+0.45.2 (the GHSA-gpj5-g38j-94v9 fix release) via pnpm; the advisory no longer
+appears in any scan, and the drizzle ≥0.44 `DrizzleQueryError` wrapping is
+handled by a shared, unit-tested cause-chain SQLSTATE helper so every
+unique-violation guard still classifies correctly (live-PostgreSQL integration
+suite green). [ORG-PR-054](#org-pr-054) (P4) **Closed** — every vulnerable
+`esbuild` copy is gone (`drizzle-kit` 0.31.10 plus a scoped override for its
+deprecated `@esbuild-kit` chain). [ORG-PR-019](#org-pr-019) (P2) **Closed** —
+every workflow action is pinned to a verified full commit SHA with explicit
+least-privilege `permissions:` and `concurrency` groups; Dependabot proposes
+pin updates. [ORG-PR-040](#org-pr-040) (P3) **Closed** —
+`noUncheckedIndexedAccess` is enabled in the shared tsconfig for every project;
+all 297 resulting errors fixed with no suppressions.
+[ORG-PR-020](#org-pr-020) (P2) **remains Open, materially advanced**:
+dependency audit (pnpm `--audit-level high` gates), secret scanning (Gitleaks
+with a narrow documented allowlist), SAST (CodeQL), and Dependabot are fully
+configured and validated locally where locally runnable — but none of the new
+workflows has yet executed on GitHub-hosted CI, and configuration is not
+execution evidence. [ORG-PR-042](#org-pr-042) (P3) **remains Open, materially
+advanced**: every development/CI image is pinned to an exact patch tag
+(`postgres:16.14-alpine`, `redis:7.4.10-alpine`, `axllent/mailpit:v1.30.5`);
+digest pinning is deferred to the production-artifact track (ORG-PR-001). Two
+accepted dependency-advisory exceptions are recorded with reachability
+analyses (react-router GHSA-qwww-vcr4-c8h2 — RSC-only CSRF, no RSC usage in
+the client-only SPA; brace-expansion GHSA-mh99-v99m-4gvg — dev-only eslint
+chain with no compatible fixed release), each pinned in
+`pnpm.auditConfig.ignoreGhsas` and `osv-scanner.toml`. **Open P1 production
+blockers: ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged**
+(ORG-PR-015 also remains open). The repository remains not ready for staging
+or production. See
+[sprint-21-artifact-package.md](sprint-21-artifact-package.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
@@ -124,9 +159,9 @@ ready for staging or production. See
 | [ORG-PR-015](#org-pr-015) | No retention/cleanup for unbounded tables | Data governance | Operational gap | P2 | High |
 | [ORG-PR-016](#org-pr-016) | No background-processing runtime (workers/scheduler) | Reliability | Operational gap | P2 | High |
 | [ORG-PR-017](#org-pr-017) | Admin can escalate self/others to Owner (no role-transition guard) — **Closed (Sprint 20)** | Authorization | Security risk | P2 | Medium |
-| [ORG-PR-018](#org-pr-018) | `drizzle-orm` high-severity advisory (installed `<0.45.2`) | Supply chain | Security risk | P2 | Medium |
-| [ORG-PR-019](#org-pr-019) | CI actions pinned to mutable tags; no workflow `permissions` block | CI/CD | Security risk | P2 | High |
-| [ORG-PR-020](#org-pr-020) | No dependency/vuln/secret/SAST scanning in CI | Supply chain | Operational gap | P2 | High |
+| [ORG-PR-018](#org-pr-018) | `drizzle-orm` high-severity advisory (installed `<0.45.2`) — **Closed (Sprint 21)** | Supply chain | Security risk | P2 | Medium |
+| [ORG-PR-019](#org-pr-019) | CI actions pinned to mutable tags; no workflow `permissions` block — **Closed (Sprint 21)** | CI/CD | Security risk | P2 | High |
+| [ORG-PR-020](#org-pr-020) | No dependency/vuln/secret/SAST scanning in CI — **Open; materially advanced (Sprint 21): scanners + Dependabot configured and locally validated; first remote CI run outstanding** | Supply chain | Operational gap | P2 | High |
 | [ORG-PR-021](#org-pr-021) | No DB pool / statement / lock timeouts | Reliability | Reliability risk | P2 | Medium |
 | [ORG-PR-022](#org-pr-022) | App and migrations share a single Postgres superuser | Infra/Security | Security risk | P2 | High |
 | [ORG-PR-023](#org-pr-023) | No React error boundary; a render throw blanks the SPA | Frontend | Reliability risk | P2 | High |
@@ -146,9 +181,9 @@ ready for staging or production. See
 | [ORG-PR-037](#org-pr-037) | `reset-test` destructive guard weaker than documented | Database/DX | Maintainability issue | P3 | High |
 | [ORG-PR-038](#org-pr-038) | "One personal workspace per user" invariant unenforced — **Closed (Sprint 20)** | Database | Data-integrity risk | P3 | Medium |
 | [ORG-PR-039](#org-pr-039) | No password-change / email-change flows — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P3 | High |
-| [ORG-PR-040](#org-pr-040) | `noUncheckedIndexedAccess` disabled | Type safety/DX | Maintainability issue | P3 | High |
+| [ORG-PR-040](#org-pr-040) | `noUncheckedIndexedAccess` disabled — **Closed (Sprint 21)** | Type safety/DX | Maintainability issue | P3 | High |
 | [ORG-PR-041](#org-pr-041) | Mailpit / live SMTP path never exercised in CI | Testing | Operational gap | P3 | High |
-| [ORG-PR-042](#org-pr-042) | Docker infra images pinned by floating tags | Supply chain | Maintainability issue | P3 | High |
+| [ORG-PR-042](#org-pr-042) | Docker infra images pinned by floating tags — **Open; materially advanced (Sprint 21): exact patch tags everywhere; digest pinning deferred to the ORG-PR-001 artifact track** | Supply chain | Maintainability issue | P3 | High |
 | [ORG-PR-043](#org-pr-043) | PII in audit/security metadata with no retention | Privacy | Compliance dependency | P3 | Medium |
 | [ORG-PR-044](#org-pr-044) | Narrow concurrency test coverage — **Closed (Sprint 20)** | Testing | Reliability risk | P3 | High |
 | [ORG-PR-045](#org-pr-045) | No MFA/passkeys and no security notifications | Account lifecycle | Product completeness gap | P3 | High |
@@ -160,7 +195,7 @@ ready for staging or production. See
 | [ORG-PR-051](#org-pr-051) | Redundant unique index duplicates PK on `role_permissions` | Database | Optional enhancement | P4 | High |
 | [ORG-PR-052](#org-pr-052) | Minor API disclosures (`/ready` deps, inbound `x-request-id`, no shutdown timeout) — **Closed (Sprint 19)** | API | Maintainability issue | P4 | Medium |
 | [ORG-PR-053](#org-pr-053) | Two read paths skip the permission gate (divergence, no current gap) — **Closed (Sprint 20)** | Authorization | Maintainability issue | P4 | High |
-| [ORG-PR-054](#org-pr-054) | `esbuild` moderate dev-only advisory (via `drizzle-kit`) | Supply chain | Optional enhancement | P4 | High |
+| [ORG-PR-054](#org-pr-054) | `esbuild` moderate dev-only advisory (via `drizzle-kit`) — **Closed (Sprint 21)** | Supply chain | Optional enhancement | P4 | High |
 
 ---
 
@@ -501,6 +536,10 @@ Standards · Threats.
 
 <a id="org-pr-018"></a>
 ### ORG-PR-018 — `drizzle-orm` high-severity advisory (installed `<0.45.2`)
+
+> **Status: CLOSED (Sprint 21, 2026-07-26).** The lines below describe the
+> pre-close state; see the *Resolution* line.
+
 - **Class / Sev / Conf:** Security risk · P2 · Medium · Verified fact (advisory) / inference (exploitability).
 - **Evidence:** `pnpm audit --prod` → 1 high: `drizzle-orm` "SQL injection via improperly escaped SQL identifiers", vulnerable `<0.45.2`, path `apps__api>drizzle-orm`; installed `^0.38.3` (`apps/api/package.json`), advisory GHSA-gpj5-g38j-94v9.
 - **Current behavior:** The API depends on a drizzle-orm version in the advisory range.
@@ -508,9 +547,14 @@ Standards · Threats.
 - **Risk:** Potential SQL injection if any identifier is ever derived from user input; unpatched high advisory in the dependency tree.
 - **Remediation:** Triage exploitability, then remediate on the dependency track. **Per Sprint 14 scope, dependencies are NOT upgraded solely for remediation here** — routed to the roadmap.
 - **Dependencies:** ORG-PR-020 (scanning). **Effort:** S. **Validation:** `pnpm audit` clean or documented acceptance; grep confirms no dynamic identifiers. **Roadmap:** Phase 3. **Standards:** ASVS V5.3 (injection); SLSA/SSDF PW.4. **Threats:** T-DEP, T-SQLI.
+- **Resolution (Sprint 21, 2026-07-26): CLOSED.** `drizzle-orm` upgraded 0.38.4 → **0.45.2** (exactly the GHSA-gpj5-g38j-94v9 / CVE-2026-39356 fix release) in `packages/db` and `apps/api` via pnpm (lockfile updated by pnpm only); `drizzle-kit` 0.30.6 → 0.31.10 for toolchain compatibility. The advisory is absent from current scans (`osv-scanner` against `pnpm-lock.yaml` reports no `drizzle-orm` finding; the CI `pnpm audit` gate covers it going forward). Exploitability context: Orgistry's queries use static identifiers throughout (the Sprint 14 triage grep stands), so no reachable injection path was evident — the dependency was remediated anyway rather than risk-accepted. The upgrade's one behavioral break — drizzle ≥ 0.44 wraps driver errors in `DrizzleQueryError` with the postgres-js error as `cause` — was identified and fixed: the five duplicated `code === '23505'` guards were replaced by one shared cause-chain helper (`apps/api/src/lib/pg-errors.ts`, unit-tested incl. bare/wrapped/nested/cyclic cases), preserving unique-violation classification for registration conflicts, duplicate pending invitations, email changes, and the active-membership backstop. Evidence: `pnpm validate` exit 0; `pnpm validate:integration` (live PostgreSQL + Redis; 82 tests incl. the quota/uniqueness races) exit 0; schema-drift check clean under drizzle-kit 0.31.10 (no migration churn).
 
 <a id="org-pr-019"></a>
 ### ORG-PR-019 — CI actions pinned to mutable tags; no workflow `permissions` block
+
+> **Status: CLOSED (Sprint 21, 2026-07-26).** The lines below describe the
+> pre-close state; see the *Resolution* line.
+
 - **Class / Sev / Conf:** Security risk · P2 · High · Verified fact.
 - **Evidence:** `.github/workflows/ci.yml` uses `actions/checkout@v4`, `pnpm/action-setup@v4`, `actions/setup-node@v4` (major-version tags, not SHAs). No `permissions:` block → default `GITHUB_TOKEN` scope applies. No `concurrency:` group.
 - **Current behavior:** CI trusts mutable third-party action references and runs with default token permissions.
@@ -518,6 +562,7 @@ Standards · Threats.
 - **Risk:** A hijacked/retagged action executes in CI with broader-than-needed token scope (supply-chain/CI compromise).
 - **Remediation:** Pin to SHAs, add `permissions: { contents: read }` (widen per job as needed).
 - **Dependencies:** none. **Effort:** S. **Validation:** workflow lints; pins are SHAs. **Roadmap:** Phase 3 / Phase 6. **Standards:** SLSA source/build; SSDF PO.5. **Threats:** T-CI.
+- **Resolution (Sprint 21, 2026-07-26): CLOSED.** Every `uses:` in `.github/workflows/{ci,security,codeql}.yml` is a full commit SHA resolved from the upstream repository via `git ls-remote` (annotated tags dereferenced to their commit) with the version retained as a trailing comment: `actions/checkout` v7.0.1, `actions/setup-node` v7.0.0, `pnpm/action-setup` v6.0.9, `github/codeql-action` v4.37.3, `gitleaks/gitleaks-action` v3.0.0. All three workflows declare workflow-level `permissions: contents: read`; the only wider scope anywhere is `security-events: write` (plus the CodeQL-required `actions: read`) on the single CodeQL analyze job. `concurrency` groups cancel superseded runs (the finding's expected-behavior item). Dependabot's `github-actions` ecosystem proposes SHA-pin bumps weekly; the pin-update review procedure (re-verify the SHA against the upstream release before merging) is documented in docs/validation.md. Validation evidence: `actionlint` exit 0 across all workflows; repo-wide search finds zero mutable action references. Residual (documented; tracked under ORG-PR-020, does not reopen this finding): the hardened workflows have not yet executed on GitHub-hosted CI.
 
 <a id="org-pr-020"></a>
 ### ORG-PR-020 — No dependency/vuln/secret/SAST scanning in CI
@@ -528,6 +573,7 @@ Standards · Threats.
 - **Risk:** Known-vulnerable dependencies and committed secrets ship undetected.
 - **Remediation:** Add Dependabot/Renovate, an `audit`/OSV gate, secret scanning, and CodeQL.
 - **Dependencies:** none. **Effort:** M. **Validation:** CI runs the scanners and fails on a seeded finding. **Roadmap:** Phase 3 / Phase 6. **Standards:** SSDF PW.4/RV.1; SLSA. **Threats:** T-DEP, T-SECRET, T-CI.
+- **Progress (Sprint 21, 2026-07-26): Open — materially advanced.** Implemented and configured: **(1) dependency vulnerability gate** — `security.yml` runs `pnpm audit --prod --audit-level high` and `pnpm audit --dev --audit-level high` (high/critical fail; production and development risk separated; no `|| true` or `continue-on-error` anywhere) on push/PR/weekly schedule/manual dispatch; exceptions live ONLY in `pnpm.auditConfig.ignoreGhsas` (currently two, each with a reachability analysis — react-router GHSA-qwww-vcr4-c8h2: CSRF in unstable RSC APIs, fix is a major upgrade, the web demo is a client-only SPA with zero RSC usage; brace-expansion GHSA-mh99-v99m-4gvg: DoS in a dev-only eslint transitive with no compatible fixed release). In-range vulnerable transitives were remediated outright instead of accepted (find-my-way 9.7.0, fast-uri 3.1.4, postcss 8.5.18, shell-quote 1.9.0, brace-expansion 1.1.16). Local equivalents: `pnpm scan:deps` (audit) and `pnpm scan:deps:local` (osv-scanner with the mirrored `osv-scanner.toml` ignore file). The exact CI audit commands were executed locally in the closing pass: prod and dev gates exit 0 with exactly the two documented ignores reported, and a negative test (ignore entry temporarily removed, `package.json` restored byte-identical afterwards) made the prod gate exit 1 — the gate demonstrably fails on an unaccepted high. **(2) Secret scanning** — Gitleaks (SHA-pinned action) fails on suspected live secrets; realistic-looking committed fixtures were REWRITTEN to unmistakable fakes; `.gitleaks.toml` allowlists only the committed fake SMTP TLS fixture (one path) and five exact historical fake values / one prose false-positive (regexes), each annotated in-file; local `pnpm scan:secrets` (full git-history scan) exits clean, the pre-rewrite run detected all 8 fixture hits, and a disposable-repository negative test proved the final config fails (exit 1) on a synthetic secret with redacted output while accepting the allowlisted historical value ONLY verbatim (a one-character mutation fails) — see artifact §17. CI scan semantics verified against the pinned action source: push/PR scan the event's commit range, schedule/dispatch scan full history (checkout `fetch-depth: 0`), PR comments disabled so the job needs no write permission and is fork-PR-safe. **(3) SAST** — CodeQL v4, `javascript-typescript`, build-mode `none` (no install/build, no secrets), push/PR/weekly, `security-events: write` scoped to the one analyze job. **(4) Dependency-update automation** — `dependabot.yml` covering npm (workspace root), github-actions (SHA pins), and docker-compose (`infra/` — the ecosystem that actually discovers `docker-compose.yml`), weekly, minor/patch grouped, majors individual; no auto-merge exists. Local validation: osv-scanner exit 0, gitleaks history scan exit 0, actionlint exit 0. **Why still open:** none of the new workflows has executed on GitHub-hosted CI. Closure requires the first green remote run of `security.yml` and `codeql.yml` plus a verified failure on a seeded finding (and, for CodeQL on a private repository, code-scanning availability). Configuration is not enforcement until it has run.
 
 <a id="org-pr-021"></a>
 ### ORG-PR-021 — No DB pool / statement / lock timeouts
@@ -812,6 +858,10 @@ Standards · Threats.
 
 <a id="org-pr-040"></a>
 ### ORG-PR-040 — `noUncheckedIndexedAccess` disabled
+
+> **Status: CLOSED (Sprint 21, 2026-07-26).** The lines below describe the
+> pre-close state; see the *Resolution* line.
+
 - **Class / Sev / Conf:** Maintainability issue · P3 · High · Verified fact.
 - **Evidence:** `tsconfig.base.json` sets `strict: true` and many strict flags but not `noUncheckedIndexedAccess` (nor `exactOptionalPropertyTypes`). Repos/mappers index arrays/records throughout.
 - **Current behavior:** Index access is typed as always-defined; undefined-at-index bugs pass `tsc`.
@@ -819,6 +869,7 @@ Standards · Threats.
 - **Risk:** Latent undefined-access runtime bugs the type system currently hides.
 - **Remediation:** Enable the flag and remediate fallout. **Not implemented during the Sprint 14 audit** (would touch production code).
 - **Dependencies:** none. **Effort:** M. **Validation:** `pnpm typecheck` clean with the flag on. **Roadmap:** Phase 6 / hardening. **Standards:** SSDF PW.5. **Threats:** T-OPS.
+- **Resolution (Sprint 21, 2026-07-26): CLOSED.** `noUncheckedIndexedAccess: true` is set in `tsconfig.base.json` and inherited by ALL eight TypeScript projects (five packages, the API, the web demo and its node config); no project overrides it. The full initial failure surface was measured first (297 errors: 292 `apps/api`, 3 `packages/db`, 1 `packages/shared`, 1 `apps/web-demo`) and fixed without suppression: zero new non-null assertions, zero `as any`, zero `@ts-ignore`/`@ts-expect-error` (one pre-existing `match![1]` was actually removed). Guaranteed-index invariants are encoded in two named helpers instead of scattered `!` — `requireRow` (`apps/api/src/lib/db-rows.ts`) for `INSERT/UPDATE … RETURNING` and caller-verified single-row lookups, and `requireDefined` (`apps/api/src/lib/invariant.ts`) for bounds-guaranteed indexing (regex groups, populated fixtures); one-off `expect(rows[0]?.x)` narrowing is used only where a missing row still fails the assertion (never with negated matchers). Runtime behavior is unchanged except that a violated row invariant now fails loudly with query context instead of surfacing later as an undefined-property error. Evidence: `pnpm typecheck` exit 0 with the flag on; `pnpm validate` exit 0 (incl. 825 unit tests); `pnpm validate:integration` exit 0 (82 live-PostgreSQL tests).
 
 <a id="org-pr-041"></a>
 ### ORG-PR-041 — Mailpit / live SMTP path never exercised in CI
@@ -839,6 +890,7 @@ Standards · Threats.
 - **Risk:** Non-reproducible environments; surprise breakage. Bounded impact today (dev-only).
 - **Remediation:** Pin production images by digest; tighten dev tags.
 - **Dependencies:** ORG-PR-001. **Effort:** S. **Validation:** images referenced by digest in production manifests. **Roadmap:** Phase 4. **Standards:** SLSA (reproducibility). **Threats:** T-DEP.
+- **Progress (Sprint 21, 2026-07-26): Open — materially advanced.** All floating tags are removed from current repository scope: `infra/docker-compose.yml` and the CI integration service containers now pin exact patch tags (`postgres:16.14-alpine`, `redis:7.4.10-alpine`, `axllent/mailpit:v1.30.5`; `latest` eliminated). Tags were verified to exist on Docker Hub, `docker compose config` validates, the local stack and CI service definitions stay drop-in compatible (same majors as before), and the runbook's service table and examples were updated. Dependabot's `docker` ecosystem proposes tag bumps for `infra/`. **Why still open:** the finding's production half — digest-pinned images in production manifests — cannot be satisfied until the ORG-PR-001 deployment-artifact track creates those manifests; digest pinning of the dev/CI images was deliberately deferred with them so one mechanism governs both. Residual risk (accepted, documented): a registry tag can in principle be re-pushed; exact patch tags narrow but do not eliminate that window — precisely what digest pinning will close.
 
 <a id="org-pr-043"></a>
 ### ORG-PR-043 — PII in audit/security metadata with no retention
@@ -1005,6 +1057,10 @@ Standards · Threats.
 
 <a id="org-pr-054"></a>
 ### ORG-PR-054 — `esbuild` moderate dev-only advisory (via `drizzle-kit`)
+
+> **Status: CLOSED (Sprint 21, 2026-07-26).** The lines below describe the
+> pre-close state; see the *Resolution* line.
+
 - **Class / Sev / Conf:** Optional enhancement · P4 · High · Verified fact.
 - **Evidence:** `pnpm audit` → 2 moderate: `esbuild <=0.24.2` (dev-server request exposure) via `packages__db>drizzle-kit>...>esbuild`. Dev/build-time only; not in the runtime path.
 - **Current behavior:** A transitive dev dependency carries a moderate advisory.
@@ -1012,3 +1068,4 @@ Standards · Threats.
 - **Risk:** Low — affects only the local dev server, not production runtime.
 - **Remediation:** Address on the dependency-update track (ORG-PR-020). **Not upgraded here** per scope.
 - **Dependencies:** ORG-PR-020. **Effort:** S. **Validation:** `pnpm audit` clean or documented acceptance. **Roadmap:** Phase 3. **Standards:** SSDF PW.4. **Threats:** T-DEP.
+- **Resolution (Sprint 21, 2026-07-26): CLOSED.** Every vulnerable `esbuild` copy (0.18.20 and 0.19.12; GHSA-67mh-4wv8-2f99 — dev-server CORS exposure, fixed in 0.25.0) is GONE from the lockfile: `drizzle-kit` 0.31.10 depends on esbuild ^0.25 and dropped `esbuild-register`, and the deprecated `@esbuild-kit/core-utils` chain it still carries is forced to esbuild ^0.25 by a scoped pnpm override (`"@esbuild-kit/core-utils>esbuild": "^0.25.0"` — path-scoped, not global). Remaining copies are 0.25.12 (vite) and 0.28.1 (tsx), both ≥ the fix. Dependency-path evidence: `pnpm why -r esbuild` shows no copy below 0.25; `osv-scanner` reports no esbuild finding. The advisory was dev-only (drizzle-kit is a devDependency and no repository path ever starts the affected esbuild dev server — vite's own dev server carries the fixed 0.25.12) — but it is now absent rather than risk-accepted. Validation: drizzle-kit codegen under the override is exercised by the schema-drift check (clean), migrations by `pnpm db:migrate` + the integration suite (green), full `pnpm validate` exit 0.

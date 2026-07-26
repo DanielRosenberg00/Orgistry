@@ -43,7 +43,9 @@ export function registerGlobalRateLimit(
       return;
     }
     // Compare the path only (readiness probes may carry query strings).
-    const path = request.url.split('?', 1)[0];
+    // `split` always yields at least one element; the fallback is for the
+    // type system only.
+    const path = request.url.split('?', 1)[0] ?? request.url;
     if (EXEMPT_PATHS.has(path)) {
       return;
     }

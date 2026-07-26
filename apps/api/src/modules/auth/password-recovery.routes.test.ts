@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import { createInMemoryRateLimiter } from '../../lib/rate-limit';
+import { requireDefined } from '../../lib/invariant';
 import { hashPasswordResetToken } from './password-recovery.token';
 import {
   buildAuthTestApp,
@@ -140,7 +141,7 @@ describe('POST /v1/auth/password-recovery/request', () => {
     expect(ctx.mailer.messages).toHaveLength(before + 1);
     // …and no token row exists for the unknown address.
     expect(ctx.passwordRecoveryRepo.tokens).toHaveLength(1);
-    expect(ctx.passwordRecoveryRepo.tokens[0].userId).toBe(ctx.userId);
+    expect(ctx.passwordRecoveryRepo.tokens[0]?.userId).toBe(ctx.userId);
   });
 
   it('answers a disabled account with the same generic acceptance, sending nothing', async () => {
@@ -176,7 +177,10 @@ describe('POST /v1/auth/password-recovery/request', () => {
     await requestReset(ctx, REGISTER_BODY.email);
     const rawToken = ctx.mailer.lastLinkToken()!;
 
-    const [record] = ctx.passwordRecoveryRepo.tokens;
+    const record = requireDefined(
+      ctx.passwordRecoveryRepo.tokens[0],
+      'stored reset token',
+    );
     expect(record.tokenHash).toBe(hashPasswordResetToken(rawToken));
     expect(record.tokenHash).not.toBe(rawToken);
     expect(JSON.stringify(ctx.passwordRecoveryRepo.tokens)).not.toContain(
@@ -234,7 +238,7 @@ describe('POST /v1/auth/password-recovery/request', () => {
     expect(ctx.passwordRecoveryRepo.tokens).toHaveLength(2);
     expect(usable).toHaveLength(1);
     // The delivered link matches the usable row (committed-before-send).
-    expect(usable[0].tokenHash).toBe(
+    expect(usable[0]?.tokenHash).toBe(
       hashPasswordResetToken(ctx.mailer.lastLinkToken()!),
     );
   });
@@ -344,7 +348,7 @@ describe('POST /v1/auth/password-recovery/complete', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, data: { reset: true } });
-    expect(ctx.passwordRecoveryRepo.tokens[0].usedAt).toBeInstanceOf(Date);
+    expect(ctx.passwordRecoveryRepo.tokens[0]?.usedAt).toBeInstanceOf(Date);
 
     expect((await login(ctx, REGISTER_BODY.password)).statusCode).toBe(401);
     expect((await login(ctx, NEW_PASSWORD)).statusCode).toBe(200);
@@ -433,7 +437,10 @@ describe('POST /v1/auth/password-recovery/complete', () => {
     const ctx = await setup();
     await requestReset(ctx, REGISTER_BODY.email);
     const rawToken = ctx.mailer.lastLinkToken()!;
-    ctx.passwordRecoveryRepo.tokens[0].expiresAt = new Date(Date.now() - 1000);
+    requireDefined(
+      ctx.passwordRecoveryRepo.tokens[0],
+      'issued reset token',
+    ).expiresAt = new Date(Date.now() - 1000);
 
     const response = await completeReset(ctx, rawToken);
 
@@ -460,7 +467,7 @@ describe('POST /v1/auth/password-recovery/complete', () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json().error.code).toBe('PASSWORD_RESET_TOKEN_INVALID');
-    expect(ctx.passwordRecoveryRepo.tokens[0].usedAt).toBeNull();
+    expect(ctx.passwordRecoveryRepo.tokens[0]?.usedAt).toBeNull();
   });
 
   it('validates the new password through the shared registration policy', async () => {
@@ -477,7 +484,7 @@ describe('POST /v1/auth/password-recovery/complete', () => {
     expect(response.json().error.code).toBe('VALIDATION_ERROR');
     // The token survives a validation failure (it was never presented to the
     // domain layer) — the user can retry with a compliant password.
-    expect(ctx.passwordRecoveryRepo.tokens[0].usedAt).toBeNull();
+    expect(ctx.passwordRecoveryRepo.tokens[0]?.usedAt).toBeNull();
     const retry = await completeReset(ctx, ctx.mailer.lastLinkToken()!);
     expect(retry.statusCode).toBe(200);
   });

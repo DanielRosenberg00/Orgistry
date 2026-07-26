@@ -138,7 +138,7 @@ Phase 6: End-to-End Verification & Security Review
   (materially advanced):** sensitive buckets fail closed under the
   production-default `RATE_LIMIT_FAILURE_MODE=closed` (guard refuses `open`
   in production), but the finding's alerting half depends on ORG-PR-007
-  (Sprint 23). Exit criteria met: proxy-trust/header/limiter test suites plus
+  (Sprint 24). Exit criteria met: proxy-trust/header/limiter test suites plus
   a DB-backed failed-auth storm test bounding pre-auth writes;
   `pnpm validate` and `pnpm validate:integration` exit 0 (2026-07-21).
 - *(original plan)* Security headers, `trustProxy`,
@@ -157,32 +157,63 @@ Phase 6: End-to-End Verification & Security Review
   `EXPLAIN` evidence; schema-drift passes; `pnpm validate` and
   `pnpm validate:integration` exit 0 (2026-07-21). Artifact:
   [sprint-20-artifact-package.md](sprint-20-artifact-package.md).
-- **Sprint 21 (next) — Supply-chain & CI hardening (parallel, can start now).** SHA-pin
-  actions + `permissions` block, Dependabot/Renovate, `audit`/CodeQL/secret-scan,
-  triage & remediate `drizzle-orm`/`esbuild` advisories, pin images, enable
-  `noUncheckedIndexedAccess`. Closes ORG-PR-018, 019, 020, 040, 042, 054. Exit:
-  scanners in CI; `pnpm audit` clean or documented acceptance.
+- **Sprint 21 — Supply-chain & CI hardening. Repository implementation
+  COMPLETE (2026-07-26); ORG-PR-020 remains open pending first remote CI
+  execution and negative-path enforcement evidence.** Actions SHA-pinned + explicit least-privilege `permissions`
+  + concurrency on every workflow; `security.yml` (pnpm audit high/critical
+  gates, prod/dev separated; Gitleaks secret scan with rewritten fixtures and
+  a narrow annotated allowlist) + `codeql.yml` (JS/TS, source-only) +
+  Dependabot (npm / github-actions / docker-compose, weekly, no auto-merge); `drizzle-orm`
+  0.38.4→0.45.2 (advisory fix release; `DrizzleQueryError` cause-chain guard
+  adaptation, unit + integration tested) and all vulnerable `esbuild` copies
+  eliminated (drizzle-kit 0.31.10 + scoped override); in-range vulnerable
+  transitives updated; images pinned to exact patch tags;
+  `noUncheckedIndexedAccess` ON repo-wide (297 errors fixed, zero
+  suppressions). **Closed ORG-PR-018, 019, 040, 054. Open, materially
+  advanced: ORG-PR-020 (first remote scanner run + seeded-finding proof
+  outstanding), ORG-PR-042 (digest pinning deferred to the ORG-PR-001
+  artifact track).** Exit evidence: `pnpm validate` +
+  `pnpm validate:integration` exit 0; actionlint, osv-scanner, and gitleaks
+  history scan exit 0 locally; two accepted advisories documented. Artifact:
+  [sprint-21-artifact-package.md](sprint-21-artifact-package.md).
+
+> **Numbering correction (Sprint 21 closure, 2026-07-26 — corrective
+> maintenance, not a roadmap redesign).** Before this closure the roadmap
+> carried a genuine pre-existing collision: Phase 3 listed “Sprint 21 (next) —
+> Supply-chain & CI hardening” while Phase 4 ALSO used “Sprint 21 — Deployable
+> artifact & pipeline”, and the parallelizable-work section still called the
+> supply-chain sprint “Sprint 20” (which was actually the executed
+> authorization/concurrency sprint). Recording Sprint 21’s completion without
+> resolving this would have left two contradictory “Sprint 21” entries — one
+> complete, one not. Resolution: the executed supply-chain sprint keeps the
+> number 21 it ran under; the not-yet-started Phase 4–6 sprints shift by one
+> (deployable artifact 21→22, backups/DR 22→23, observability 23→24,
+> verification/review 24→25). Sprint scopes, content, ordering, dependencies,
+> and phase structure are unchanged. Cross-references updated in this
+> document, the launch checklist (Sprint column + prose), and
+> production-target.md (DG-5 note); executed-sprint artifacts (14–20) are
+> historical records and retain their original text.
 
 ### Phase 4 — Production infrastructure & deployment
-- **Sprint 21 — Deployable artifact & pipeline.** Per-app non-root Dockerfiles,
+- **Sprint 22 (next) — Deployable artifact & pipeline.** Per-app non-root Dockerfiles,
   minimal IaC for the target profile, build→migrate→deploy pipeline with rollback,
   secrets manager + rotation, least-privilege DB roles, pool/statement/lock
   timeouts. Closes ORG-PR-001, 006, 021, 022, 042. Deps: Phase 1–3. Exit: a
   tagged build deploys reproducibly to staging; secret rotation rehearsed.
 
 ### Phase 5 — Reliability, recovery & operations
-- **Sprint 22 — Backups, DR & background jobs.** Automated encrypted backups +
+- **Sprint 23 — Backups, DR & background jobs.** Automated encrypted backups +
   PITR, **tested restore drill**, migration-recovery rehearsal, scheduler/worker,
   retention/expiry jobs, retention enforcement, account deletion/export.
   Closes ORG-PR-005, 015, 016, 025, 028, 043. Exit: restore drill reconstructs DB
   to a timestamp and passes checks; jobs observable & idempotent.
-- **Sprint 23 — Observability & incident readiness.** Metrics + tracing +
+- **Sprint 24 — Observability & incident readiness.** Metrics + tracing +
   dashboards + alerts, production runbooks, incident process, ops documentation.
   Closes ORG-PR-007, 008, 027; supports ORG-PR-009 alerting. Exit: dashboard +
   synthetic-failure alert; tabletop against one runbook.
 
 ### Phase 6 — End-to-end verification & security review
-- **Sprint 24 — Verification & external review.** Failure-injection integration
+- **Sprint 25 — Verification & external review.** Failure-injection integration
   tests, browser E2E, live SMTP CI assertion, external pentest + DAST, standards
   re-map. Closes ORG-PR-026, 041; verifies 044; addresses external-verification
   items. Exit: E2E + failure-injection green; pentest findings triaged.
@@ -194,18 +225,18 @@ Phase 6: End-to-End Verification & Security Review
 
 ## Critical path
 
-`Sprint 15 → Sprint 16 → Sprint 21 → Sprint 22 → Sprint 24 → Launch`, with
+`Sprint 15 → Sprint 16 → Sprint 22 → Sprint 23 → Sprint 25 → Launch`, with
 Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restore
-(Sprint 22) is the longest-pole reliability item and must precede production data.
+(Sprint 23) is the longest-pole reliability item and must precede production data.
 
 ## Parallelizable work
 
-- **Sprint 20** (supply-chain/CI) and **Sprint FE** (frontend) can start
-  immediately, independent of the critical path.
+- **Sprint 21** (supply-chain/CI — complete 2026-07-26) and **Sprint FE**
+  (frontend) run independent of the critical path.
 - **Sprint 18** and **Sprint 19** (both Phase 3) can run concurrently by different
   owners.
-- **Sprint 23** (observability) can begin once infra (Sprint 21) exists, in
-  parallel with Sprint 22.
+- **Sprint 24** (observability) can begin once infra (Sprint 22) exists, in
+  parallel with Sprint 23.
 
 ## Decision gates
 
@@ -222,11 +253,11 @@ Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restor
 
 ## Dependency notes
 
-- **Infrastructure dependency:** everything in Phases 4–6 depends on Sprint 21.
+- **Infrastructure dependency:** everything in Phases 4–6 depends on Sprint 22 (deployable artifact).
 - **External service dependency:** a real email provider (Sprint 16) gates
   recovery/verification.
 - **Legal dependency:** ORG-PR-025/043 scope is blocked on DG-3 legal review.
-- **Security-review dependency:** launch is blocked on Sprint 24's external review.
+- **Security-review dependency:** launch is blocked on Sprint 25's external review.
 
 ## Production launch gate
 
@@ -249,7 +280,7 @@ planning sprint.
   `JWT_SECRET` and a non-Secure refresh cookie (threat **T-CONF**, rated
   Critical). Fixing it is an **S**-effort config-plus-tests change that removes the
   most dangerous day-one misconfiguration. It has no dependencies, so it can start
-  immediately, and production infrastructure (Sprint 21) should not be built on a
+  immediately, and production infrastructure (Sprint 22) should not be built on a
   config layer that still accepts unsafe production values.
 - **P1 findings it closes:** **ORG-PR-003** (production config secret guards).
   Also closes **ORG-PR-047** (resolve/remove the unused `COOKIE_SECRET`). It does
@@ -257,7 +288,7 @@ planning sprint.
   this sprint only ratifies the decision gates that scope them.
 - **Depends on:** nothing (can start immediately).
 - **What cannot proceed safely before it:** production infrastructure design
-  (Sprint 21) and any staging deploy (would otherwise boot with unsafe defaults).
+  (Sprint 22) and any staging deploy (would otherwise boot with unsafe defaults).
 - **Objective:** eliminate unsafe production configuration and ratify the
   implementation-relevant decision gates.
 - **Scope:** (1) add a production `superRefine` to `packages/config` rejecting the
@@ -277,7 +308,7 @@ planning sprint.
   **fails to boot** under `NODE_ENV=production` (test-proven); `COOKIE_SECRET`
   resolved; DG-1/DG-2/DG-5 recorded with owners; `pnpm validate` green.
 - **Relative effort:** S.
-- **Work blocked until completion:** Sprint 21 (infrastructure) and any staging
+- **Work blocked until completion:** Sprint 22 (infrastructure) and any staging
   deployment.
 - **Sprint 15 outcome (2026-07-18): COMPLETE.** The engineering
   implementation is complete and validated — ORG-PR-003 and ORG-PR-047 closed

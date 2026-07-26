@@ -6,6 +6,8 @@ import { createId } from '@orgistry/shared';
 import { quotaExceededError } from '../entitlements/entitlement.errors';
 import { acquireOrganizationQuotaLock } from '../entitlements/quota-lock';
 import { lockOrganizationEntitlements } from '../entitlements/entitlement.snapshot';
+import { requireRow } from '../../lib/db-rows';
+import { isUniqueViolation } from '../../lib/pg-errors';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
 import {
   alreadyActiveMemberError,
@@ -53,18 +55,6 @@ import type {
 
 const INVITATION_TARGET_TYPE = 'invitation';
 const MEMBERSHIP_TARGET_TYPE = 'membership';
-
-/** PostgreSQL unique-violation SQLSTATE. */
-const PG_UNIQUE_VIOLATION = '23505';
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION
-  );
-}
 
 /**
  * Record an invitation action event on the existing organization-scoped
@@ -218,9 +208,9 @@ export async function acceptInvitationWithinTransaction(
 
   // 6. Membership creation — the unique index uq_memberships_active_user_org
   //    backstops the duplicate-active guard under a race.
-  let membership;
+  let membershipRows;
   try {
-    [membership] = await tx
+    membershipRows = await tx
       .insert(schema.memberships)
       .values({
         userId: params.acceptingUserId,
@@ -237,18 +227,22 @@ export async function acceptInvitationWithinTransaction(
     }
     throw error;
   }
+  const membership = requireRow(membershipRows, 'memberships insert');
 
   // 7. Invitation accepted mutation (single use), same transaction.
-  const [accepted] = await tx
-    .update(schema.invitations)
-    .set({
-      status: 'accepted',
-      acceptedAt: now,
-      acceptedByUserId: params.acceptingUserId,
-      updatedAt: now,
-    })
-    .where(eq(schema.invitations.id, invitation.id))
-    .returning();
+  const accepted = requireRow(
+    await tx
+      .update(schema.invitations)
+      .set({
+        status: 'accepted',
+        acceptedAt: now,
+        acceptedByUserId: params.acceptingUserId,
+        updatedAt: now,
+      })
+      .where(eq(schema.invitations.id, invitation.id))
+      .returning(),
+    'invitations accepted update',
+  );
 
   // 8. Event recording — both the acceptance and the membership provenance.
   await recordInvitationEvent(tx, {

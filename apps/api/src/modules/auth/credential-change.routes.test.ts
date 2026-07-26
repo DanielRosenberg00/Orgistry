@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import { createInMemoryRateLimiter } from '../../lib/rate-limit';
+import { requireDefined } from '../../lib/invariant';
 import {
   buildAuthTestApp,
   type AuthTestContext,
@@ -203,7 +204,10 @@ describe('POST /v1/auth/change-password', () => {
 
   it('changes the password: hash rotates, old fails, new authenticates', async () => {
     const ctx = await setup();
-    const hashBefore = ctx.repo.users[0].passwordHash;
+    const hashBefore = requireDefined(
+      ctx.repo.users[0],
+      'registered user',
+    ).passwordHash;
 
     const response = await changePassword(ctx, ctx.accessToken, {
       currentPassword: REGISTER_BODY.password,
@@ -212,8 +216,9 @@ describe('POST /v1/auth/change-password', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, data: { success: true } });
-    expect(ctx.repo.users[0].passwordHash).not.toBe(hashBefore);
-    expect(ctx.repo.users[0].passwordHash).not.toContain(NEW_PASSWORD);
+    const changedUser = requireDefined(ctx.repo.users[0], 'user after change');
+    expect(changedUser.passwordHash).not.toBe(hashBefore);
+    expect(changedUser.passwordHash).not.toContain(NEW_PASSWORD);
     expect(
       (await login(ctx, REGISTER_BODY.email, REGISTER_BODY.password)).statusCode,
     ).toBe(401);
@@ -310,7 +315,7 @@ describe('POST /v1/auth/change-email', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json().error.code).toBe('INVALID_CREDENTIALS');
-    expect(ctx.repo.users[0].email).toBe(REGISTER_BODY.email);
+    expect(ctx.repo.users[0]?.email).toBe(REGISTER_BODY.email);
   });
 
   it('rejects an invalid email as a validation error', async () => {
@@ -350,14 +355,14 @@ describe('POST /v1/auth/change-email', () => {
     });
     expect(response.statusCode).toBe(409);
     expect(response.json().error.code).toBe('EMAIL_ALREADY_REGISTERED');
-    expect(ctx.repo.users[0].email).toBe(REGISTER_BODY.email);
+    expect(ctx.repo.users[0]?.email).toBe(REGISTER_BODY.email);
   });
 
   it('changes the email, clears verification, and reissues a verification generation', async () => {
     const ctx = await setup();
     // A completed registration is already verified, so the clearing below is
     // observable without any extra verification step.
-    expect(ctx.repo.users[0].emailVerifiedAt).toBeInstanceOf(Date);
+    expect(ctx.repo.users[0]?.emailVerifiedAt).toBeInstanceOf(Date);
     const mailsBefore = ctx.mailer.messages.length;
 
     const response = await changeEmail(ctx, ctx.accessToken, {
@@ -370,7 +375,7 @@ describe('POST /v1/auth/change-email', () => {
     expect(returnedUser.email).toBe(NEW_EMAIL);
     expect(returnedUser.emailVerified).toBe(false);
 
-    const user = ctx.repo.users[0];
+    const user = requireDefined(ctx.repo.users[0], 'user after email change');
     expect(user.email).toBe(NEW_EMAIL);
     expect(user.normalizedEmail).toBe(NEW_EMAIL_NORMALIZED);
     expect(user.emailVerifiedAt).toBeNull();
@@ -391,7 +396,7 @@ describe('POST /v1/auth/change-email', () => {
       payload: { token: ctx.mailer.lastLinkToken()! },
     });
     expect(complete.statusCode).toBe(200);
-    expect(ctx.repo.users[0].emailVerifiedAt).toBeInstanceOf(Date);
+    expect(ctx.repo.users[0]?.emailVerifiedAt).toBeInstanceOf(Date);
   });
 
   it('invalidates outstanding old-address verification tokens even when the new email fails to send', async () => {
@@ -416,7 +421,7 @@ describe('POST /v1/auth/change-email', () => {
 
     // The committed change wins; the send failure is recorded, not surfaced.
     expect(response.statusCode).toBe(200);
-    expect(ctx.repo.users[0].email).toBe(NEW_EMAIL);
+    expect(ctx.repo.users[0]?.email).toBe(NEW_EMAIL);
 
     // The old address's token can no longer verify anything.
     const stale = await ctx.app.inject({
@@ -425,7 +430,7 @@ describe('POST /v1/auth/change-email', () => {
       payload: { token: oldVerificationToken },
     });
     expect(stale.statusCode).toBe(409);
-    expect(ctx.repo.users[0].emailVerifiedAt).toBeNull();
+    expect(ctx.repo.users[0]?.emailVerifiedAt).toBeNull();
 
     // The account stays usable (advisory verification) and can resend.
     expect((await me(ctx, ctx.accessToken)).statusCode).toBe(200);

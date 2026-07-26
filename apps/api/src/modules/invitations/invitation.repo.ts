@@ -8,6 +8,8 @@ import { schema } from '@orgistry/db';
 import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { and, count, desc, eq, gt, lt, or } from 'drizzle-orm';
+import { requireRow } from '../../lib/db-rows';
+import { uniqueViolationConstraint } from '../../lib/pg-errors';
 import { evaluateCountQuota, requireQuota } from '../entitlements/quota';
 import { acquireOrganizationQuotaLock } from '../entitlements/quota-lock';
 import { lockOrganizationEntitlements } from '../entitlements/entitlement.snapshot';
@@ -35,21 +37,6 @@ import type {
 /** Stable target type recorded on every invitation action event. */
 const INVITATION_TARGET_TYPE = 'invitation';
 
-/** PostgreSQL unique-violation SQLSTATE. */
-const PG_UNIQUE_VIOLATION = '23505';
-
-function uniqueViolationConstraint(error: unknown): string | null {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION
-  ) {
-    const constraint = (error as { constraint_name?: unknown }).constraint_name;
-    return typeof constraint === 'string' ? constraint : '';
-  }
-  return null;
-}
 
 /** Load a seeded role row by id (always present for a referenced role). */
 async function loadRole(executor: DbExecutor, roleId: string): Promise<RoleRow> {
@@ -149,20 +136,23 @@ export function createDbInvitationRepository(
               ),
             );
 
-          const [invitation] = await tx
-            .insert(schema.invitations)
-            .values({
-              id: createId('inv'),
-              organizationId: params.organizationId,
-              invitedEmail: params.invitedEmail,
-              invitedEmailNormalized: params.invitedEmailNormalized,
-              roleId: params.roleId,
-              tokenHash: params.tokenHash,
-              status: 'pending',
-              invitedByUserId: params.ctx.actorUserId,
-              expiresAt: params.expiresAt,
-            })
-            .returning();
+          const invitation = requireRow(
+            await tx
+              .insert(schema.invitations)
+              .values({
+                id: createId('inv'),
+                organizationId: params.organizationId,
+                invitedEmail: params.invitedEmail,
+                invitedEmailNormalized: params.invitedEmailNormalized,
+                roleId: params.roleId,
+                tokenHash: params.tokenHash,
+                status: 'pending',
+                invitedByUserId: params.ctx.actorUserId,
+                expiresAt: params.expiresAt,
+              })
+              .returning(),
+            'invitations insert',
+          );
 
           await recordInvitationEvent(tx, {
             organizationId: params.organizationId,

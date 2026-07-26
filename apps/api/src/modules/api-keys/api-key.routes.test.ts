@@ -2,6 +2,7 @@ import { ROLE_IDS } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { requireDefined } from '../../lib/invariant';
 import { API_KEY_EVENT_TYPES } from './api-key.events';
 import { registerTestUser } from '../auth/testing/register-test-user';
 import {
@@ -233,13 +234,14 @@ describe('POST …/api-keys (create)', () => {
       (e) => e.eventType === API_KEY_EVENT_TYPES.created,
     );
     expect(events).toHaveLength(1);
-    expect(events[0].actorType).toBe('user');
-    expect(events[0].organizationId).toBe(orgId);
-    expect(events[0].userId).toBe(owner.userId);
-    expect(events[0].metadata.actorMembershipId).toMatch(/^mem_/);
-    expect(events[0].metadata.targetKeyId).toBe(body.apiKey.id);
-    expect(typeof events[0].requestId).toBe('string');
-    const eventJson = JSON.stringify(events[0]);
+    const createdEvent = requireDefined(events[0], 'created event');
+    expect(createdEvent.actorType).toBe('user');
+    expect(createdEvent.organizationId).toBe(orgId);
+    expect(createdEvent.userId).toBe(owner.userId);
+    expect(createdEvent.metadata.actorMembershipId).toMatch(/^mem_/);
+    expect(createdEvent.metadata.targetKeyId).toBe(body.apiKey.id);
+    expect(typeof createdEvent.requestId).toBe('string');
+    const eventJson = JSON.stringify(createdEvent);
     expect(eventJson).not.toContain(body.secret);
     expect(eventJson).not.toContain(stored.secretHash);
   });
@@ -396,7 +398,7 @@ describe('GET …/api-keys (list)', () => {
     expect(ids).toContain(created.id);
     expect(ids).not.toContain(foreign.id);
 
-    const item = items[0];
+    const item = requireDefined(items[0], 'first listed key');
     expect(item.displayPrefix).toBeTruthy();
     expect(item.status).toBe('active');
     expect(item).toHaveProperty('lastUsedAt');
@@ -474,11 +476,12 @@ describe('DELETE …/api-keys/:apiKeyId (revoke)', () => {
       (e) => e.eventType === API_KEY_EVENT_TYPES.revoked,
     );
     expect(revokeEvents).toHaveLength(1);
-    expect(revokeEvents[0].actorType).toBe('user');
-    expect(revokeEvents[0].organizationId).toBe(orgId);
-    expect(revokeEvents[0].userId).toBe(owner.userId);
-    expect(revokeEvents[0].metadata.actorMembershipId).toMatch(/^mem_/);
-    expect(revokeEvents[0].metadata.targetKeyId).toBe(key.id);
+    const revokeEvent = requireDefined(revokeEvents[0], 'revoked event');
+    expect(revokeEvent.actorType).toBe('user');
+    expect(revokeEvent.organizationId).toBe(orgId);
+    expect(revokeEvent.userId).toBe(owner.userId);
+    expect(revokeEvent.metadata.actorMembershipId).toMatch(/^mem_/);
+    expect(revokeEvent.metadata.targetKeyId).toBe(key.id);
   });
 
   it('is idempotent: a repeated revoke does not overwrite markers or duplicate the event', async () => {

@@ -3,6 +3,7 @@ import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
 import {
   createInMemoryAccountMailer,
@@ -117,20 +118,21 @@ describe.skipIf(!connectionString)(
         FROM pending_registrations WHERE normalized_email = ${normalizedEmail}
       `;
       expect(pendingRows).toHaveLength(1);
-      expect(pendingRows[0].password_hash.startsWith('$argon2id$')).toBe(true);
-      expect(pendingRows[0].password_hash).not.toContain(account.password);
+      const pendingRow = requireRow(pendingRows, 'pending registration row');
+      expect(pendingRow.password_hash.startsWith('$argon2id$')).toBe(true);
+      expect(pendingRow.password_hash).not.toContain(account.password);
       const rawToken = lastCompletionTokenFor(mailer, account.email) as string;
-      expect(pendingRows[0].token_hash).not.toBe(rawToken);
-      expect(pendingRows[0].invitation_id).toBeNull();
+      expect(pendingRow.token_hash).not.toBe(rawToken);
+      expect(pendingRow.invitation_id).toBeNull();
 
       const userCount = await db.sql<{ count: string }[]>`
         SELECT count(*)::text AS count FROM users
       `;
-      expect(userCount[0].count).toBe('0');
+      expect(userCount[0]?.count).toBe('0');
       const sessionCount = await db.sql<{ count: string }[]>`
         SELECT count(*)::text AS count FROM sessions
       `;
-      expect(sessionCount[0].count).toBe('0');
+      expect(sessionCount[0]?.count).toBe('0');
     });
 
     it('serializes CONCURRENT issuance for one email: exactly one usable generation survives', async () => {
@@ -146,8 +148,8 @@ describe.skipIf(!connectionString)(
           count(*)::text AS total
         FROM pending_registrations WHERE normalized_email = ${normalizedEmail}
       `;
-      expect(rows[0].total).toBe('6');
-      expect(rows[0].usable).toBe('1');
+      expect(rows[0]?.total).toBe('6');
+      expect(rows[0]?.usable).toBe('1');
     });
 
     it('completes exactly ONE of many concurrent completion attempts for the same token', async () => {
@@ -201,21 +203,24 @@ describe.skipIf(!connectionString)(
         WHERE normalized_email = ${normalizedEmail}
       `;
       expect(users).toHaveLength(1);
-      expect(users[0].email_verified_at).not.toBeNull();
-      expect(users[0].password_hash.startsWith('$argon2id$')).toBe(true);
+      const userRow = requireRow(users, 'completed user row');
+      expect(userRow.email_verified_at).not.toBeNull();
+      expect(userRow.password_hash.startsWith('$argon2id$')).toBe(true);
 
       // Pending registration consumed.
       const pending = await db.sql<{ used_at: string | null }[]>`
         SELECT used_at FROM pending_registrations
         WHERE normalized_email = ${normalizedEmail}
       `;
-      expect(pending[0].used_at).not.toBeNull();
+      expect(
+        requireRow(pending, 'consumed pending registration').used_at,
+      ).not.toBeNull();
 
       // The new session works end-to-end (personal workspace + membership).
       const memberships = await db.sql<{ count: string }[]>`
         SELECT count(*)::text AS count FROM memberships
       `;
-      expect(memberships[0].count).toBe('1');
+      expect(memberships[0]?.count).toBe('1');
     });
 
     it('a repeated request supersedes the previous emailed link at the database', async () => {
@@ -258,11 +263,13 @@ describe.skipIf(!connectionString)(
         SELECT count(*)::text AS count FROM users
         WHERE normalized_email = ${normalizedEmail}
       `;
-      expect(users[0].count).toBe('1');
+      expect(users[0]?.count).toBe('1');
       const orgsAfter = await db.sql<{ count: string }[]>`
         SELECT count(*)::text AS count FROM organizations
       `;
-      expect(orgsAfter[0].count).toBe(orgsBefore[0].count);
+      expect(requireRow(orgsAfter, 'org count after').count).toBe(
+        requireRow(orgsBefore, 'org count before').count,
+      );
     });
 
     it('records anonymous request events and a user-attributed completion event', async () => {
@@ -292,7 +299,7 @@ describe.skipIf(!connectionString)(
         WHERE event_type = 'auth.registration_completion_succeeded'
       `;
       expect(completed).toHaveLength(1);
-      expect(completed[0].user_id).not.toBeNull();
+      expect(requireRow(completed, 'completion event').user_id).not.toBeNull();
     });
   },
 );

@@ -26,6 +26,9 @@ There are two tiers:
 | `pnpm db:reset:test` | integration | Drops + recreates + migrates the **test** database. |
 | `pnpm test:integration` | integration | DB migration-from-scratch + live API readiness/route tests. |
 | **`pnpm validate:integration`** | **integration** | **`db:reset:test` then `test:integration`.** |
+| `pnpm scan:deps` | scan (network) | Dependency audit via `pnpm audit` — fails on unaccepted high/critical advisories (prod and dev audited separately). |
+| `pnpm scan:deps:local` | scan | Same policy via [osv-scanner](https://google.github.io/osv-scanner/) against `pnpm-lock.yaml` (`brew install osv-scanner`); use when the registry audit endpoint is unreachable. |
+| `pnpm scan:secrets` | scan | Gitleaks full git-history secret scan (`brew install gitleaks`) — fails on any suspected live secret; run before pushing. |
 
 ## Offline validation: `pnpm validate`
 
@@ -182,15 +185,105 @@ credentials; see [known limitations](./known-limitations.md) and
 
 ## CI
 
+Three workflows run on GitHub-hosted CI (Sprint 21 hardening: every action is
+pinned to a full commit SHA, every workflow declares explicit least-privilege
+permissions, and nothing publishes or deploys — see
+[CI security policy](#ci-security-policy)).
+
 `.github/workflows/ci.yml` mirrors this matrix as two jobs:
 
-- **Validate (offline)** — install, typecheck, lint, unit tests, web tests, web
-  build, schema drift check, whitespace check. Equivalent to `pnpm validate`.
-- **Integration (PostgreSQL + Redis)** — spins up `postgres:16-alpine` and
-  `redis:7-alpine` service containers, creates the test database, applies the
+- **Validate (offline)** — install (frozen lockfile), typecheck, lint, unit
+  tests, web tests, web build, schema drift check, whitespace check.
+  Equivalent to `pnpm validate`.
+- **Integration (PostgreSQL + Redis)** — spins up `postgres:16.14-alpine` and
+  `redis:7.4.10-alpine` service containers (exact patch tags, matching
+  `infra/docker-compose.yml`), creates the test database, applies the
   migration baseline, and runs `pnpm validate:integration`.
 
 Mailpit is intentionally omitted from CI (see above).
+
+`.github/workflows/security.yml` (push to main, pull requests, weekly
+schedule, manual dispatch) runs the scanners:
+
+- **Dependency audit (pnpm)** — `pnpm audit --prod --audit-level high` then
+  `pnpm audit --dev --audit-level high`, straight from the lockfile (no
+  install, so no dependency code executes). High/critical advisories fail the
+  job; moderate/low are printed only. Local equivalent: `pnpm scan:deps`
+  (or `pnpm scan:deps:local` via osv-scanner when the registry audit endpoint
+  is unreachable — some networks gzip the response in a way `pnpm audit`
+  cannot parse).
+- **Secret scan (Gitleaks)** — fails on any suspected live secret, with
+  output always redacted. Scan range depends on the event (verified against
+  the pinned action's source): push runs scan the pushed commit range, PR
+  runs scan the PR's commit range, and the weekly schedule / manual dispatch
+  scan the **full git history** (the checkout uses `fetch-depth: 0` for
+  this). PR review comments are explicitly disabled
+  (`GITLEAKS_ENABLE_COMMENTS: 'false'`) so the job needs no write
+  permission and behaves identically on fork PRs; the action requires
+  `GITHUB_TOKEN` only for two read-only API calls. Local equivalent:
+  `pnpm scan:secrets` — a full-history scan, i.e. stricter than the
+  per-range CI runs and equal to the scheduled run. Untracked local files
+  (tool caches, databases) are never scanned: both CI and the local command
+  use git-aware scanning of tracked content.
+
+`.github/workflows/codeql.yml` (push/PR to main, weekly schedule) runs CodeQL
+static analysis for `javascript-typescript` in source-only mode
+(`build-mode: none` — no install, no build, no secrets). Findings appear
+under the repository's **Security → Code scanning** tab; there is no local
+equivalent. Alerts are triaged there: dismiss with a stated reason
+(false positive / accepted risk referencing a finding ID) or fix; a
+high-confidence high-severity alert must never be dismissed without a
+findings-register entry.
+
+### CI security policy
+
+Stable guarantees introduced in Sprint 21 (ORG-PR-019/020) — do not weaken
+these when editing workflows:
+
+- **Every `uses:` is a full commit SHA** with the upstream version as a
+  trailing comment (`uses: owner/action@<sha> # vX.Y.Z`). Never a tag or
+  branch.
+- **Every workflow declares explicit `permissions:`** — workflow-level
+  `contents: read`; the ONLY wider grant in the repository is
+  `security-events: write` (+ `actions: read`) on the single CodeQL analyze
+  job, which uploads SARIF results.
+- **Scanner failures must not be hidden** — no `|| true`,
+  `continue-on-error`, or `--ignore-registry-errors` on any scanner step.
+- **Accepted advisory exceptions are narrow and mirrored** — a GHSA goes in
+  `pnpm.auditConfig.ignoreGhsas` (package.json) AND `osv-scanner.toml`, with a
+  reachability analysis in the
+  [findings register](production-readiness/findings-register.md). Never add a
+  broad ignore.
+- **Secret-scan allowlists live in `.gitleaks.toml` only**, per-value or
+  per-fixture-file, each entry annotated with why it cannot be a live secret.
+  Prefer rewriting a realistic-looking fixture to an unmistakable fake over
+  allowlisting it.
+- **CI installs with `--frozen-lockfile`**; the lockfile is only ever changed
+  by pnpm commands.
+- **No CI workflow publishes, deploys, or writes repository contents.**
+  Dependency-update PRs (Dependabot) require human review; auto-merge is not
+  configured and must not be enabled.
+
+### Updating pinned actions
+
+Dependabot (`.github/dependabot.yml`) proposes weekly pin bumps for the
+`npm`, `github-actions`, and `docker-compose` (in `infra/` — the ecosystem
+that discovers `docker-compose.yml`; there are no Dockerfiles) ecosystems.
+The CI service-container images in `ci.yml` are **not** covered by any
+Dependabot ecosystem — bump them by hand in the same PR whenever a
+`docker-compose` update PR lands, keeping the two in sync (the runbook's
+image table notes the same). Reviewing an Action pin PR:
+
+1. Confirm the new SHA matches the claimed upstream release:
+   `git ls-remote https://github.com/<owner>/<action>.git refs/tags/<version> 'refs/tags/<version>^{}'`
+   — for annotated tags use the `^{}` (dereferenced commit) value; that commit
+   SHA is what belongs in `uses:`.
+2. Read the upstream release notes for permission or behavior changes.
+3. Check the version comment was updated alongside the SHA.
+4. Run `actionlint` (`brew install actionlint`) on the branch.
+
+The same `git ls-remote` procedure is used to add a new action: never copy a
+SHA from a blog post or invent one.
 
 ## Interpreting failures
 
@@ -203,6 +296,9 @@ Mailpit is intentionally omitted from CI (see above).
 | `test:integration` skipped | Missing `TEST_DATABASE_URL` / `REDIS_URL` | Set env (`cp .env.example .env`) and ensure `pnpm infra:up` is healthy. |
 | `db:reset:test` refuses to run | `TEST_DATABASE_URL` unset or equals `DATABASE_URL` | Point `TEST_DATABASE_URL` at a distinct database. |
 | Integration tests fail to connect | Port conflict on 5432 / infra down | See [troubleshooting](./troubleshooting.md). |
+| `scan:deps` / CI dependency audit fails | A new high/critical advisory in the dependency tree | Upgrade the affected package (in-range first: `pnpm update -r --depth Infinity <pkg>`); only if no compatible fix exists, record a reachability analysis in the findings register and add the GHSA to `pnpm.auditConfig.ignoreGhsas` + `osv-scanner.toml`. |
+| `pnpm audit` errors with a JSON/gzip parse failure | Network layer mangles the registry audit response (seen on some local setups) | Use `pnpm scan:deps:local` (osv-scanner) locally; CI is unaffected. |
+| `scan:secrets` / CI secret scan fails | A suspected live secret in tracked content | If live: rotate it immediately and purge it. If a fixture: rewrite it to an unmistakable fake; allowlist in `.gitleaks.toml` only when rewriting is impossible, with an annotation. |
 
 See the [troubleshooting guide](./troubleshooting.md) for environment-level
 failures (Docker not running, port conflicts, stale Drizzle artifacts, CI

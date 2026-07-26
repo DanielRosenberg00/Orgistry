@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { requireDefined } from '../../lib/invariant';
 import { UnsafeHeaderValueError, type AccountEmail } from './account-mailer';
 import { createMailpitAccountMailer } from './mailpit-account-mailer';
 import {
@@ -85,7 +86,7 @@ describe('Mailpit account mailer (plaintext local driver)', () => {
     smtp = await startFakeSmtp();
     await mailer(smtp.port).deliver(message({ subject: 'Bestätige deine E-Mail ✓' }));
 
-    const delivered = smtp.received[0];
+    const delivered = requireDefined(smtp.received[0], 'delivered message');
     // RFC 2047 encoded-word (nodemailer's encoding) — a single Subject line.
     expect(delivered).toMatch(/Subject: =\?utf-8\?/i);
     expect(delivered.match(/^Subject:/gim)).toHaveLength(1);

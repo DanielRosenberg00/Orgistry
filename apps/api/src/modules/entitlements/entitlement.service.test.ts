@@ -182,7 +182,7 @@ describe('changePlan', () => {
       (e) => e.eventType === 'plan.changed_demo',
     );
     expect(events).toHaveLength(1);
-    expect(events[0].metadata).toMatchObject({
+    expect(events[0]?.metadata).toMatchObject({
       previousPlanKey: 'free',
       newPlanKey: 'business',
     });

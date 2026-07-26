@@ -3,6 +3,7 @@ import { schema } from '@orgistry/db';
 import { ENTITLEMENT_KEYS } from '@orgistry/contracts';
 import { createId } from '@orgistry/shared';
 import { and, count, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
+import { requireRow } from '../../lib/db-rows';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
 import {
   evaluateCountQuota,
@@ -128,7 +129,7 @@ export function createDbApiKeyRepository(db: Database): ApiKeyRepository {
           evaluateCountQuota(activeCount, values.max_api_keys),
         );
 
-        const [key] = await tx
+        const insertedKeys = await tx
           .insert(schema.apiKeys)
           .values({
             id: createId('key'),
@@ -141,6 +142,7 @@ export function createDbApiKeyRepository(db: Database): ApiKeyRepository {
             createdByUserId: params.createdByUserId,
           })
           .returning();
+        const key = requireRow(insertedKeys, 'api_keys insert');
 
         await recordKeyEvent(tx, {
           organizationId: params.organizationId,

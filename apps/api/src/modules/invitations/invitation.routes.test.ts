@@ -2,6 +2,7 @@ import { ROLE_IDS } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { requireDefined } from '../../lib/invariant';
 import {
   lastCompletionTokenFor,
   registerTestUser,
@@ -166,7 +167,10 @@ describe('invitation create', () => {
     expect(JSON.stringify(response.json())).not.toContain(rawToken as string);
 
     // Hash-only storage: the raw token is never persisted.
-    const stored = ctx.orgStore.invitations[0];
+    const stored = requireDefined(
+      ctx.orgStore.invitations[0],
+      'stored invitation',
+    );
     expect(stored.tokenHash).not.toBe(rawToken);
     expect(stored.tokenHash.length).toBeGreaterThan(0);
     // The DTO carries neither the token nor its hash.
@@ -175,7 +179,9 @@ describe('invitation create', () => {
     // invitation.created recorded, with NO token/hash in metadata.
     const created = eventsOfType(INVITATION_EVENT_TYPES.created);
     expect(created).toHaveLength(1);
-    const metaJson = JSON.stringify(created[0].metadata);
+    const metaJson = JSON.stringify(
+      requireDefined(created[0], 'created event').metadata,
+    );
     expect(metaJson).not.toContain(rawToken as string);
     expect(metaJson).not.toContain(stored.tokenHash);
   });
@@ -184,7 +190,7 @@ describe('invitation create', () => {
     const owner = await registerUser();
     const orgId = await createTeamOrg(owner.token);
     await inviteOk(owner.token, orgId, 'Mixed.Case@Example.COM');
-    expect(ctx.orgStore.invitations[0].invitedEmailNormalized).toBe(
+    expect(ctx.orgStore.invitations[0]?.invitedEmailNormalized).toBe(
       'mixed.case@example.com',
     );
   });
@@ -318,7 +324,10 @@ describe('invitation list', () => {
     const orgId = await createTeamOrg(owner.token);
     await inviteOk(owner.token, orgId, 'a@example.com');
     // Force expiry on the stored row (no background job exists).
-    ctx.orgStore.invitations[0].expiresAt = new Date(Date.now() - 1000);
+    requireDefined(
+      ctx.orgStore.invitations[0],
+      'stored invitation',
+    ).expiresAt = new Date(Date.now() - 1000);
 
     const response = await app.inject({
       method: 'GET',

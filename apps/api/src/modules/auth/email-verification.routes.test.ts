@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import { createInMemoryRateLimiter } from '../../lib/rate-limit';
+import { requireDefined } from '../../lib/invariant';
 import { hashEmailVerificationToken } from './email-verification.token';
 import {
   buildAuthTestApp,
@@ -133,7 +134,7 @@ describe('POST /v1/auth/email-verification/request', () => {
       data: { sent: true, alreadyVerified: false },
     });
     expect(ctx.mailer.messages).toHaveLength(1);
-    const email = ctx.mailer.messages[0];
+    const email = requireDefined(ctx.mailer.messages[0], 'first captured email');
     expect(email.to).toBe(REGISTER_BODY.email);
     expect(email.subject).toContain('Verify');
     // The link carries the token in the URL FRAGMENT — never a query string,
@@ -152,7 +153,10 @@ describe('POST /v1/auth/email-verification/request', () => {
     const rawToken = ctx.mailer.lastLinkToken();
     expect(rawToken).toBeTruthy();
 
-    const [record] = ctx.verificationRepo.tokens;
+    const record = requireDefined(
+      ctx.verificationRepo.tokens[0],
+      'stored verification token',
+    );
     expect(record.tokenHash).toBe(hashEmailVerificationToken(rawToken!));
     expect(record.tokenHash).not.toBe(rawToken);
     expect(JSON.stringify(ctx.verificationRepo.tokens)).not.toContain(rawToken);
@@ -238,7 +242,10 @@ describe('POST /v1/auth/email-verification/complete', () => {
     // User timestamp set; token consumed.
     const user = ctx.repo.users.find((u) => u.id === ctx.userId)!;
     expect(user.emailVerifiedAt).toBeInstanceOf(Date);
-    const [record] = ctx.verificationRepo.tokens;
+    const record = requireDefined(
+      ctx.verificationRepo.tokens[0],
+      'consumed verification token',
+    );
     expect(record.usedAt).toBeInstanceOf(Date);
 
     // The current-user contract reflects the new state.
@@ -255,7 +262,10 @@ describe('POST /v1/auth/email-verification/complete', () => {
     await requestVerification(ctx, ctx.accessToken);
     const usableToken = ctx.mailer.lastLinkToken()!;
     ctx.verificationRepo.tokens.push({
-      ...ctx.verificationRepo.tokens[0],
+      ...requireDefined(
+        ctx.verificationRepo.tokens[0],
+        'first verification token',
+      ),
       id: 'evtok_sibling_fixture',
       tokenHash: hashEmailVerificationToken('sibling-raw-token'),
       usedAt: null,
@@ -292,7 +302,10 @@ describe('POST /v1/auth/email-verification/complete', () => {
     makeUnverified(ctx);
     await requestVerification(ctx, ctx.accessToken);
     const rawToken = ctx.mailer.lastLinkToken()!;
-    ctx.verificationRepo.tokens[0].expiresAt = new Date(Date.now() - 1000);
+    requireDefined(
+      ctx.verificationRepo.tokens[0],
+      'issued verification token',
+    ).expiresAt = new Date(Date.now() - 1000);
 
     const response = await completeVerification(ctx, rawToken);
 
@@ -323,7 +336,7 @@ describe('POST /v1/auth/email-verification/complete', () => {
     expect(response.statusCode).toBe(404);
     expect(response.json().error.code).toBe('EMAIL_VERIFICATION_TOKEN_INVALID');
     // The token was not consumed (nothing mutated for an unverifiable account).
-    expect(ctx.verificationRepo.tokens[0].usedAt).toBeNull();
+    expect(ctx.verificationRepo.tokens[0]?.usedAt).toBeNull();
   });
 
   it('rejects a missing or empty token as a validation error', async () => {

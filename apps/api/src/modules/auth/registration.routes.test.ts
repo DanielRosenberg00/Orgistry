@@ -2,6 +2,7 @@ import { hashOpaqueToken } from '@orgistry/auth-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import type { RateLimiter } from '../../lib/rate-limit';
+import { requireDefined } from '../../lib/invariant';
 import {
   buildAuthTestApp,
   type AuthTestContext,
@@ -91,7 +92,10 @@ describe('POST /v1/auth/register (request)', () => {
 
   it('stages the password only as an Argon2id hash and the token only as a hash', async () => {
     await register(VALID_REGISTER);
-    const pending = ctx.registrationRepo.pendingRegistrations[0];
+    const pending = requireDefined(
+      ctx.registrationRepo.pendingRegistrations[0],
+      'staged pending registration',
+    );
     expect(pending.normalizedEmail).toBe(NORMALIZED_EMAIL);
     expect(pending.passwordHash.startsWith('$argon2id$')).toBe(true);
     expect(pending.passwordHash).not.toContain(VALID_REGISTER.password);
@@ -116,7 +120,10 @@ describe('POST /v1/auth/register (request)', () => {
   it('never returns or logs the raw token, password, or hashes', async () => {
     const response = await register(VALID_REGISTER);
     const rawToken = lastCompletionTokenFor(ctx.mailer, VALID_REGISTER.email);
-    const pending = ctx.registrationRepo.pendingRegistrations[0];
+    const pending = requireDefined(
+      ctx.registrationRepo.pendingRegistrations[0],
+      'staged pending registration',
+    );
 
     const responseText = response.body;
     expect(responseText).not.toContain(rawToken as string);
@@ -255,7 +262,7 @@ describe('POST /v1/auth/register (existing and ineligible accounts)', () => {
   });
 
   it('answers an UNVERIFIED active account identically and discloses nothing', async () => {
-    const user = ctx.repo.users[0];
+    const user = requireDefined(ctx.repo.users[0], 'registered user');
     user.emailVerifiedAt = null;
     const response = await register(VALID_REGISTER);
     expect(response.statusCode).toBe(200);
@@ -266,7 +273,7 @@ describe('POST /v1/auth/register (existing and ineligible accounts)', () => {
   });
 
   it('answers a DISABLED account identically and sends nothing', async () => {
-    ctx.repo.users[0].status = 'disabled';
+    requireDefined(ctx.repo.users[0], 'registered user').status = 'disabled';
     const response = await register(VALID_REGISTER);
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, data: { accepted: true } });
@@ -275,7 +282,7 @@ describe('POST /v1/auth/register (existing and ineligible accounts)', () => {
   });
 
   it('answers a SOFT-DELETED account identically and sends nothing', async () => {
-    ctx.repo.users[0].deletedAt = new Date();
+    requireDefined(ctx.repo.users[0], 'registered user').deletedAt = new Date();
     const response = await register(VALID_REGISTER);
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, data: { accepted: true } });
@@ -494,7 +501,7 @@ describe('replacement and issuance', () => {
       (p) => p.usedAt === null && p.invalidatedAt === null,
     );
     expect(usable).toHaveLength(1);
-    expect(usable[0].tokenHash).toBe(hashOpaqueToken(secondToken));
+    expect(usable[0]?.tokenHash).toBe(hashOpaqueToken(secondToken));
 
     // The superseded emailed link fails safely; the newest link works.
     const superseded = await complete(firstToken);
@@ -543,18 +550,25 @@ describe('POST /v1/auth/registration/complete', () => {
 
     // User + personal workspace + Owner membership + session + refresh token.
     expect(ctx.repo.users).toHaveLength(1);
-    expect(ctx.repo.users[0].normalizedEmail).toBe(NORMALIZED_EMAIL);
-    expect(ctx.repo.users[0].emailVerifiedAt).not.toBeNull();
+    const createdUser = requireDefined(ctx.repo.users[0], 'created user');
+    expect(createdUser.normalizedEmail).toBe(NORMALIZED_EMAIL);
+    expect(createdUser.emailVerifiedAt).not.toBeNull();
     expect(ctx.repo.orgStore.organizations).toHaveLength(1);
-    expect(ctx.repo.orgStore.organizations[0].type).toBe('personal');
+    expect(ctx.repo.orgStore.organizations[0]?.type).toBe('personal');
     expect(ctx.repo.orgStore.memberships).toHaveLength(1);
     expect(ctx.repo.sessions).toHaveLength(1);
     expect(ctx.repo.refreshTokens).toHaveLength(1);
     // The refresh token is stored hash-only (not any raw value we ever saw).
-    expect(ctx.repo.refreshTokens[0].tokenHash).not.toBe(token);
+    expect(
+      requireDefined(ctx.repo.refreshTokens[0], 'stored refresh token')
+        .tokenHash,
+    ).not.toBe(token);
 
     // The pending registration is consumed.
-    const pending = ctx.registrationRepo.pendingRegistrations[0];
+    const pending = requireDefined(
+      ctx.registrationRepo.pendingRegistrations[0],
+      'consumed pending registration',
+    );
     expect(pending.usedAt).not.toBeNull();
 
     // The access token works against /me.
@@ -573,7 +587,7 @@ describe('POST /v1/auth/registration/complete', () => {
       (e) => e.eventType === 'auth.registration_completion_succeeded',
     );
     expect(event).toBeDefined();
-    expect(event?.userId).toBe(ctx.repo.users[0].id);
+    expect(event?.userId).toBe(ctx.repo.users[0]?.id);
     expect(event?.actorType).toBe('user');
     expect(event?.metadata).toEqual({ invitation: 'none' });
     const raw = JSON.stringify(event);
@@ -610,9 +624,10 @@ describe('POST /v1/auth/registration/complete', () => {
 
   it('rejects an expired token with REGISTRATION_TOKEN_EXPIRED', async () => {
     const token = await stagedToken();
-    ctx.registrationRepo.pendingRegistrations[0].expiresAt = new Date(
-      Date.now() - 1000,
-    );
+    requireDefined(
+      ctx.registrationRepo.pendingRegistrations[0],
+      'staged pending registration',
+    ).expiresAt = new Date(Date.now() - 1000);
     const response = await complete(token);
     expect(response.statusCode).toBe(410);
     expect(response.json().error.code).toBe('REGISTRATION_TOKEN_EXPIRED');

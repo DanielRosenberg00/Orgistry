@@ -155,7 +155,7 @@ describe.skipIf(!connectionString)('entitlements against live PostgreSQL', () =>
       const rows = await db.sql<{ plan_key: string }[]>`
         SELECT plan_key FROM organization_plans WHERE organization_id = ${orgId}`;
       expect(rows).toHaveLength(1);
-      expect(rows[0].plan_key).toBe('free');
+      expect(rows[0]?.plan_key).toBe('free');
     }
   });
 
@@ -174,13 +174,13 @@ describe.skipIf(!connectionString)('entitlements against live PostgreSQL', () =>
 
     const rows = await db.sql<{ plan_key: string }[]>`
       SELECT plan_key FROM organization_plans WHERE organization_id = ${orgId}`;
-    expect(rows[0].plan_key).toBe('pro');
+    expect(rows[0]?.plan_key).toBe('pro');
 
     const events = await db.sql<{ event_type: string; metadata: unknown }[]>`
       SELECT event_type, metadata FROM security_events
       WHERE organization_id = ${orgId} AND event_type = 'plan.changed_demo'`;
     expect(events).toHaveLength(1);
-    expect(events[0].metadata).toMatchObject({
+    expect(events[0]?.metadata).toMatchObject({
       previousPlanKey: 'free',
       newPlanKey: 'pro',
     });
@@ -215,7 +215,7 @@ describe.skipIf(!connectionString)('entitlements against live PostgreSQL', () =>
     const count = await db.sql<{ value: number }[]>`
       SELECT count(*)::int AS value FROM projects
       WHERE organization_id = ${orgId} AND deleted_at IS NULL`;
-    expect(count[0].value).toBe(3);
+    expect(count[0]?.value).toBe(3);
 
     // Soft-deleting one frees a slot.
     await app.inject({

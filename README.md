@@ -130,7 +130,12 @@ pnpm validate:integration  # live gate — needs PostgreSQL + Redis (pnpm infra:
 build, a database **schema-drift check**, and a whitespace check — failing
 non-zero on the first problem. `pnpm validate:integration` resets the test
 database and runs migration-from-scratch plus live API readiness/route tests.
-[CI](.github/workflows/ci.yml) mirrors both. Full detail and failure
+[CI](.github/workflows/ci.yml) mirrors both; two further workflows run the
+security scanners — dependency audit + secret scan
+([security.yml](.github/workflows/security.yml)) and CodeQL
+([codeql.yml](.github/workflows/codeql.yml)) — with local equivalents
+`pnpm scan:deps` / `pnpm scan:secrets`. Full detail, the CI security policy
+(SHA-pinned actions, least-privilege permissions), and failure
 interpretation: [docs/validation.md](docs/validation.md).
 
 | Command | Purpose |

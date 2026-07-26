@@ -55,6 +55,21 @@ fails open by design), but the finding's alerting half depends on ORG-PR-007
 (observability), which remains open. Fail-closed behavior does not replace
 monitoring.
 
+**Sprint 21 update (2026-07-26) — supply chain & CI hardening.** Sprint 21
+repository implementation is complete: **ORG-PR-018** (drizzle-orm 0.45.2,
+the advisory fix release, with the drizzle ≥0.44 `DrizzleQueryError`
+cause-chain guard adaptation validated against live PostgreSQL),
+**ORG-PR-054** (no esbuild copy below the 0.25.0 fix remains), **ORG-PR-019**
+(full-SHA action pins, explicit least-privilege permissions, concurrency),
+and **ORG-PR-040** (`noUncheckedIndexedAccess` repo-wide, zero suppressions)
+are **Closed**. **ORG-PR-020 remains open pending first remote CI execution
+and negative-path enforcement evidence** — the audit/Gitleaks/CodeQL
+workflows and Dependabot are configured and locally validated where a local
+equivalent exists, but the CI security boundary is not yet proven enforced.
+**ORG-PR-042 remains open** — exact patch tags shipped; digest pinning is
+deferred to the ORG-PR-001 artifact track. Full detail:
+[sprint-21-artifact-package.md](sprint-21-artifact-package.md).
+
 ## Authentication & account lifecycle
 
 **Strengths (verified):** Argon2id at OWASP-minimum parameters (`password.ts`
@@ -186,18 +201,26 @@ metadata).
 
 **Strengths:** `pnpm-lock.yaml` + `--frozen-lockfile`; `onlyBuiltDependencies`
 restricts postinstall scripts to esbuild; well-chosen primitives (`@node-rs/argon2`,
-`jose`). **Gaps:** high `drizzle-orm` advisory in range (ORG-PR-018) and moderate
-dev-only `esbuild` (ORG-PR-054); no automated scanning/updates (ORG-PR-020); CI
-actions on mutable tags with default token perms (ORG-PR-019); floating Docker
-tags (ORG-PR-042); no SBOM/provenance/signing.
+`jose`); the `drizzle-orm` (ORG-PR-018) and `esbuild` (ORG-PR-054) advisories
+are remediated (Sprint 21: 0.45.2 / no copy < 0.25), in-range vulnerable
+transitives updated, and Dependabot (npm / github-actions / docker-compose) +
+audit gates + Gitleaks + `osv-scanner` are configured with two narrowly
+documented advisory acceptances. **Gaps:** the scanners have not yet executed
+on GitHub-hosted CI (ORG-PR-020 open); Docker images are exact-patch-tag
+pinned but not digest-pinned (ORG-PR-042 open, deferred to the ORG-PR-001
+artifact track); no SBOM/provenance/signing.
 
 ## CI/CD & release readiness
 
-`ci.yml` mirrors local validation across two jobs with PG+Redis service
-containers. **Gaps:** ORG-PR-019 (pinning/permissions), ORG-PR-020 (scanning),
-ORG-PR-041 (SMTP untested), ORG-PR-001 (no release/deploy pipeline, no artifacts,
-no tags, no versioning). The minimum release pipeline for the target is defined in
-[production-roadmap.md](production-roadmap.md).
+Three workflows: `ci.yml` mirrors local validation across two jobs with
+PG+Redis service containers; `security.yml` runs the pnpm dependency-audit
+gates and the Gitleaks secret scan; `codeql.yml` runs JS/TS SAST. All actions
+are pinned to verified full commit SHAs with explicit least-privilege
+permissions (ORG-PR-019 closed, Sprint 21). **Gaps:** ORG-PR-020 (first
+remote scanner execution and negative-path enforcement evidence outstanding),
+ORG-PR-041 (SMTP untested), ORG-PR-001 (no release/deploy pipeline, no
+artifacts, no tags, no versioning). The minimum release pipeline for the
+target is defined in [production-roadmap.md](production-roadmap.md).
 
 ## Infrastructure & deployment
 
@@ -259,6 +282,9 @@ marked **Legal review required** and are out of scope for this audit.
 ## Developer operations
 
 **Strengths:** excellent local DX — `validate`/`validate:integration`, schema-drift
-guard, migrate-from-scratch test, idempotent demo seed, strong extension recipes.
-**Gaps:** production ops undocumented (ORG-PR-027), `noUncheckedIndexedAccess` off
-(ORG-PR-040), no security-focused lint rules, stale subsystem docs (ORG-PR-046).
+guard, migrate-from-scratch test, idempotent demo seed, strong extension
+recipes; strict TypeScript including repo-wide `noUncheckedIndexedAccess`
+(ORG-PR-040 closed, Sprint 21); local scanner commands (`scan:deps`,
+`scan:deps:local`, `scan:secrets`) mirroring CI. **Gaps:** production ops
+undocumented (ORG-PR-027), no security-focused lint rules, stale subsystem
+docs (ORG-PR-046).

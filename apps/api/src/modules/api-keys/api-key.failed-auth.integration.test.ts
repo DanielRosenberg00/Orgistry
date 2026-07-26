@@ -3,6 +3,7 @@ import { loadWorkspaceEnv } from '@orgistry/shared/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app';
+import { requireRow } from '../../lib/db-rows';
 import { buildLoggerOptions } from '../../lib/logging';
 import { createInMemoryRateLimiter } from '../../lib/rate-limit';
 import { passingProbe, testConfig } from '../../testing/build-test-app';
@@ -71,7 +72,7 @@ describe.skipIf(!connectionString)(
       const rows = await db.sql<{ count: string }[]>`
         SELECT COUNT(*)::text AS count FROM security_events
         WHERE event_type IN ('api_key.auth_malformed', 'api_key.auth_unknown')`;
-      return Number(rows[0].count);
+      return Number(requireRow(rows, 'failed-auth event count').count);
     }
 
     beforeAll(async () => {

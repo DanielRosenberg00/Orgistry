@@ -1,0 +1,97 @@
+name: Security scans
+
+# Dependency vulnerability audit + repository secret scanning (Sprint 21,
+# ORG-PR-020). Both jobs are read-only, need no production secrets, and
+# publish/deploy nothing. The weekly schedule catches advisories published
+# between pushes; workflow_dispatch allows an on-demand re-run and bypasses
+# no other validation (CI runs independently on every push/PR).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays 06:20 UTC — advisory databases update continuously; weekly is
+    # the freshness floor, not the only trigger.
+    - cron: '20 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- Dependency vulnerability audit (pnpm-native, lockfile-driven) ----
+  #
+  # Failure policy (documented in docs/validation.md):
+  #   - production dependencies: high/critical advisories FAIL the job;
+  #   - development dependencies: high/critical advisories FAIL the job;
+  #   - moderate/low advisories are printed but do not fail;
+  #   - accepted exceptions live ONLY in `pnpm.auditConfig.ignoreGhsas`
+  #     (package.json) with a matching entry in osv-scanner.toml and a
+  #     reachability analysis in the findings register.
+  # No step may swallow a scanner failure (`|| true`, continue-on-error).
+  dependency-audit:
+    name: Dependency audit (pnpm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # `pnpm audit` reads pnpm-lock.yaml and queries the registry advisory
+      # endpoint; no install is needed, so no dependency code executes here.
+      - name: Audit production dependencies (fail on high/critical)
+        run: pnpm audit --prod --audit-level high
+
+      - name: Audit development dependencies (fail on high/critical)
+        run: pnpm audit --dev --audit-level high
+
+  # ---- Secret scanning (Gitleaks over tracked git content) ----
+  #
+  # Fails (exit non-zero) on any suspected live secret; output is always
+  # redacted (`gitleaks detect --redact`, hard-coded by the action). Known-fake
+  # fixtures are allowlisted narrowly in .gitleaks.toml (auto-detected by
+  # gitleaks at the repo root). Untracked local tooling state can never affect
+  # this job: the action runs git-aware `gitleaks detect` over the clean CI
+  # checkout of tracked content only.
+  #
+  # Scan range per event (verified against the pinned action source):
+  #   - push:          the pushed commit range (--log-opts base^..head);
+  #   - pull_request:  the PR's commit range;
+  #   - schedule / workflow_dispatch: FULL git history (no --log-opts),
+  #     which is why the checkout fetches fetch-depth: 0 — it also gives the
+  #     range scans their base commits. Local `pnpm scan:secrets` is the
+  #     full-history equivalent.
+  #
+  # Token/permissions: the action REQUIRES GITHUB_TOKEN for two read-only API
+  # calls (account-type lookup; PR commit listing). PR review comments are
+  # explicitly disabled below, so no write permission is needed or granted and
+  # fork PRs (read-only token) behave identically to same-repo PRs. The
+  # redacted results.sarif job artifact + job summary need no token scopes.
+  # Note: if this repository ever moves into a GitHub organization, the action
+  # additionally requires a GITLEAKS_LICENSE secret (free for personal
+  # accounts, which need none).
+  secret-scan:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: required by the schedule/dispatch full-history scan
+          # and by the push/PR range scans' base commits.
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          # Required by the action for read-only API calls (see above).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Keep this job a pure pass/fail gate: PR review comments would
+          # require `pull-requests: write`, which this workflow does not grant.
+          GITLEAKS_ENABLE_COMMENTS: 'false'

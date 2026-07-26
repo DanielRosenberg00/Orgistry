@@ -151,7 +151,7 @@ decisions via DG-1/DG-5.
   hour with PITR available before production data is accepted (daily
   snapshots only for evaluation-only environments with no production data);
   RTO ≤ 4 hours via a documented, rehearsed restore. Implementation is
-  Sprint 21/22 work (ORG-PR-005 stays open until then).
+  Sprint 22/23 work (ORG-PR-005 stays open until then).
 
 ## What this target explicitly is not
 

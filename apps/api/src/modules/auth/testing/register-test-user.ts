@@ -36,8 +36,8 @@ export interface RegisterTestUserResult {
 
 /** Extract the raw completion token from a captured completion email body. */
 export function completionTokenFromEmailText(text: string): string | null {
-  const match = text.match(/\/auth\/complete-registration#token=([^\s&]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+  const token = text.match(/\/auth\/complete-registration#token=([^\s&]+)/)?.[1];
+  return token ? decodeURIComponent(token) : null;
 }
 
 /**
@@ -50,7 +50,7 @@ export function lastCompletionTokenFor(
 ): string | null {
   for (let i = mailer.messages.length - 1; i >= 0; i -= 1) {
     const message = mailer.messages[i];
-    if (message.to !== email) {
+    if (message === undefined || message.to !== email) {
       continue;
     }
     const token = completionTokenFromEmailText(message.text);

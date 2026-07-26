@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
+import { requireDefined } from '../../lib/invariant';
 import {
   type AuthTestContext,
   buildAuthTestApp,
@@ -51,7 +52,7 @@ function setCookieHeader(response: LightMyRequestResponse): string {
 
 function cookieValueFrom(raw: string | string[] | undefined): string {
   const match = new RegExp(`${cookieName}=([^;]*)`).exec(firstSetCookie(raw));
-  return match ? decodeURIComponent(match[1]) : '';
+  return match ? decodeURIComponent(match[1] ?? '') : '';
 }
 
 function cookieValue(response: LightMyRequestResponse): string {
@@ -138,7 +139,10 @@ describe('refresh issuance + cookie', () => {
     // The raw token never appears in the completion JSON body.
     expect(JSON.stringify(result.completion)).not.toContain(raw);
     // Persistence holds a SHA-256 hash, not the raw token.
-    const stored = ctx.repo.refreshTokens[0];
+    const stored = requireDefined(
+      ctx.repo.refreshTokens[0],
+      'stored refresh token',
+    );
     expect(stored.tokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(stored.tokenHash).not.toBe(raw);
     expect(ctx.repo.refreshTokens.some((t) => t.tokenHash === raw)).toBe(false);
@@ -175,7 +179,8 @@ describe('refresh rotation', () => {
 
   it('fails for an expired token', async () => {
     const raw = await registerCookie();
-    ctx.repo.refreshTokens[0].expiresAt = new Date(Date.now() - 1000);
+    requireDefined(ctx.repo.refreshTokens[0], 'stored refresh token').expiresAt =
+      new Date(Date.now() - 1000);
     const response = await refresh(raw);
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('INVALID_REFRESH_TOKEN');
@@ -183,7 +188,10 @@ describe('refresh rotation', () => {
 
   it('rotates a valid token: new access token + new cookie, old token consumed', async () => {
     const raw = await registerCookie();
-    const original = ctx.repo.refreshTokens[0];
+    const original = requireDefined(
+      ctx.repo.refreshTokens[0],
+      'original refresh token',
+    );
 
     const response = await refresh(raw);
     const body = response.json();
@@ -204,7 +212,7 @@ describe('refresh rotation', () => {
     expect(original.replacementTokenId).not.toBeNull();
     // Exactly one successor was minted in the same family.
     expect(ctx.repo.refreshTokens).toHaveLength(2);
-    expect(ctx.repo.refreshTokens[1].familyId).toBe(original.familyId);
+    expect(ctx.repo.refreshTokens[1]?.familyId).toBe(original.familyId);
   });
 
   it('writes a refresh_token_rotated security event on success', async () => {
@@ -214,8 +222,8 @@ describe('refresh rotation', () => {
       (e) => e.eventType === 'auth.refresh_token_rotated',
     );
     expect(event).toBeDefined();
-    expect(event?.sessionId).toBe(ctx.repo.sessions[0].id);
-    expect(event?.userId).toBe(ctx.repo.users[0].id);
+    expect(event?.sessionId).toBe(ctx.repo.sessions[0]?.id);
+    expect(event?.userId).toBe(ctx.repo.users[0]?.id);
   });
 
   it('does not let concurrent refreshes mint two valid successors', async () => {
@@ -236,8 +244,14 @@ describe('refresh rotation', () => {
 describe('refresh token reuse detection', () => {
   it('revokes the family + session, clears the cookie, and issues no access token', async () => {
     const raw = await registerCookie();
-    const familyId = ctx.repo.refreshTokens[0].familyId;
-    const sessionId = ctx.repo.sessions[0].id;
+    const familyId = requireDefined(
+      ctx.repo.refreshTokens[0],
+      'original refresh token',
+    ).familyId;
+    const sessionId = requireDefined(
+      ctx.repo.sessions[0],
+      'registration session',
+    ).id;
 
     // First rotation consumes the original token.
     await refresh(raw);
@@ -273,7 +287,10 @@ describe('refresh token reuse detection', () => {
 describe('logout', () => {
   it('revokes server-side state, clears the cookie, and writes an event', async () => {
     const raw = await registerCookie();
-    const sessionId = ctx.repo.sessions[0].id;
+    const sessionId = requireDefined(
+      ctx.repo.sessions[0],
+      'registration session',
+    ).id;
 
     const response = await logout(raw);
     expect(response.statusCode).toBe(200);
@@ -402,7 +419,10 @@ describe('session revocation', () => {
 
   it('lets a user revoke their own session and revokes its refresh tokens', async () => {
     const reg = await register();
-    const sessionId = ctx.repo.sessions[0].id;
+    const sessionId = requireDefined(
+      ctx.repo.sessions[0],
+      'registration session',
+    ).id;
 
     const response = await ctx.app.inject({
       method: 'DELETE',
@@ -432,22 +452,29 @@ describe('session revocation', () => {
   it("cannot revoke another user's session", async () => {
     await register(); // user A -> sessions[0]
     const other = await register('other.person@example.com'); // user B
+    const targetSession = requireDefined(
+      ctx.repo.sessions[0],
+      "user A's session",
+    );
 
     const response = await ctx.app.inject({
       method: 'DELETE',
-      url: `/v1/auth/sessions/${ctx.repo.sessions[0].id}`,
+      url: `/v1/auth/sessions/${targetSession.id}`,
       headers: { authorization: `Bearer ${other.accessToken}` },
     });
 
     // 404 (not 403) so other users' session ids cannot be probed.
     expect(response.statusCode).toBe(404);
-    expect(ctx.repo.sessions[0].revokedAt).toBeNull();
+    expect(ctx.repo.sessions[0]?.revokedAt).toBeNull();
   });
 
   it('makes refresh fail after the session is revoked', async () => {
     const reg = await register();
     const raw = cookieValueFrom(reg.setCookie);
-    const sessionId = ctx.repo.sessions[0].id;
+    const sessionId = requireDefined(
+      ctx.repo.sessions[0],
+      'registration session',
+    ).id;
 
     await ctx.app.inject({
       method: 'DELETE',
@@ -462,7 +489,10 @@ describe('session revocation', () => {
   it('is idempotent for an already-revoked (non-current) session', async () => {
     await register(); // session 0
     const second = await login(); // session 1 — its token stays valid
-    const targetId = ctx.repo.sessions[0].id; // revoke the OTHER session twice
+    const targetId = requireDefined(
+      ctx.repo.sessions[0],
+      'first session',
+    ).id; // revoke the OTHER session twice
     const token = accessToken(second);
 
     const first = await ctx.app.inject({

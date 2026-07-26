@@ -2,6 +2,7 @@ import type { Database, DbExecutor, OrganizationPlanRow } from '@orgistry/db';
 import { schema } from '@orgistry/db';
 import { createId } from '@orgistry/shared';
 import { and, count, eq } from 'drizzle-orm';
+import { requireRow } from '../../lib/db-rows';
 import { sanitizeSecurityMetadata } from '../../lib/security-metadata';
 import { planStateMissingError } from './entitlement.errors';
 import { PLAN_EVENT_TYPES, type PlanEventType } from './plan.events';
@@ -117,17 +118,20 @@ export function createDbEntitlementRepository(
 
         const previousPlanKey = current.planKey;
         const now = new Date();
-        const [updated] = await tx
-          .update(schema.organizationPlans)
-          .set({
-            planKey: params.targetPlanKey,
-            changedByUserId: params.actor.userId,
-            // `assignedAt` marks when the CURRENT plan took effect.
-            assignedAt: now,
-            updatedAt: now,
-          })
-          .where(eq(schema.organizationPlans.id, current.id))
-          .returning();
+        const updated = requireRow(
+          await tx
+            .update(schema.organizationPlans)
+            .set({
+              planKey: params.targetPlanKey,
+              changedByUserId: params.actor.userId,
+              // `assignedAt` marks when the CURRENT plan took effect.
+              assignedAt: now,
+              updatedAt: now,
+            })
+            .where(eq(schema.organizationPlans.id, current.id))
+            .returning(),
+          'organization_plans update',
+        );
 
         await recordPlanEvent(tx, {
           organizationId: params.organizationId,

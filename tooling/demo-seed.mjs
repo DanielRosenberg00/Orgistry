@@ -4,18 +4,30 @@
 // invariant the backend enforces — registration provisioning, permissions,
 // entitlements, quotas — holds exactly as it would for a human operator. The
 // goal is a one-command, presentable demo state: a signed-up owner, a team
-// organization on the Pro plan, a few projects, a pending invitation (visible in
-// Mailpit), and an API key whose one-time secret is printed for you to try the
-// external API.
+// organization on the Pro plan, a few projects, and a pending invitation
+// (visible in Mailpit).
 //
 // Requirements: the API must be running (`pnpm dev:api`) with PostgreSQL/Redis
 // up (`pnpm infra:up`). Re-running is safe: existing demo state is reused, not
 // duplicated.
 //
-// The credentials below are LOCAL-ONLY demo values. They are not secrets and
-// must never be used outside a throwaway local database. `assertLocalTarget`
-// enforces that: the tool refuses any non-loopback API target before it makes
-// a single request (Sprint 22, ORG-PR-056).
+// THIS TOOL PRINTS NO CREDENTIALS (Sprint 22, ORG-PR-056). It creates no API
+// key, and it emits no secret, token, password, or Authorization value on any
+// output stream. That is a deliberate boundary, not an oversight: a terminal is
+// a logging sink like any other — scrollback, screen shares, terminal
+// recordings, CI transcripts, and redirected stdout all retain whatever is
+// written to it, and a one-time credential printed there survives far longer
+// than the moment it was needed.
+//
+// An API key is therefore minted interactively instead, in the web demo at
+// `/app/api-keys`, where the backend returns the raw secret exactly once to the
+// requesting browser and no server- or tool-side copy exists. See
+// docs/demo-walkthrough.md.
+//
+// The demo identities this tool seeds are LOCAL-ONLY published values (they
+// live in docs/demo-walkthrough.md) and must never be used outside a throwaway
+// local database. `assertLocalTarget` enforces that: the tool refuses any
+// non-loopback API target before it makes a single request.
 
 import { assertLocalTarget } from './lib/demo-target-guard.mjs';
 
@@ -218,25 +230,13 @@ async function ensureInvitation(orgId) {
   throw new Error(`Create invitation failed: ${result.code} — ${result.message}`);
 }
 
-async function ensureApiKey(orgId) {
-  const list = expectOk(
-    await apiCall('GET', `/v1/organizations/${orgId}/api-keys`),
-    'List API keys',
-  );
-  if (list.items.length > 0) {
-    log('apikey', `An API key already exists (secret shown only at creation). Revoke + re-run to mint a fresh one.`);
-    return null;
-  }
-
-  const created = expectOk(
-    await apiCall('POST', `/v1/organizations/${orgId}/api-keys`, {
-      body: { name: 'Demo Read Key', scopes: ['projects:read'] },
-    }),
-    'Create API key',
-  );
-  log('apikey', `Created API key "${created.apiKey.name}" — secret shown once below.`);
-  return created.secret;
-}
+// NOTE: this tool deliberately does NOT create an API key. The create endpoint
+// returns the raw secret exactly once, and the only thing a CLI could do with
+// it is write it somewhere — a terminal, a file, an environment variable — all
+// of which outlive the need. Key creation belongs where the secret can be
+// delivered straight to a human and then discarded: the web demo's API Keys
+// page. Removing it here is what makes "this tool prints no credentials" a
+// property of the code rather than a promise in a comment.
 
 async function main() {
   assertLocalTarget(API_BASE_URL);
@@ -247,25 +247,23 @@ async function main() {
   await ensureProPlan(orgId);
   await ensureProjects(orgId);
   await ensureInvitation(orgId);
-  const apiKeySecret = await ensureApiKey(orgId);
 
+  // Summary: identifiers and locations only. The owner's password is a
+  // published local-only value and lives in docs/demo-walkthrough.md — it is
+  // pointed at rather than reprinted, so this tool has no output path that
+  // carries a credential of any kind.
   console.log('\n──────────────────────────────────────────────────────');
-  console.log('Demo state ready. Local-only credentials:');
+  console.log('Demo state ready.');
   console.log(`  Web demo:        http://localhost:5173`);
-  console.log(`  Owner email:     ${OWNER.email}`);
-  console.log(`  Owner password:  ${OWNER.password}`);
+  console.log(`  Owner sign-in:   ${OWNER.email}`);
+  console.log(`  Owner password:  see docs/demo-walkthrough.md (local-only)`);
   console.log(`  Team org id:     ${orgId}`);
   console.log(`  Mailpit (email): ${MAILPIT_URL}`);
-  if (apiKeySecret) {
-    console.log(`\n  API key secret (shown ONCE — copy it now):`);
-    console.log(`    ${apiKeySecret}`);
-    // The secret is printed exactly once, above. The example below carries a
-    // placeholder rather than a second copy: repeating a credential adds no
-    // information and doubles the number of places it can be captured from
-    // (scrollback, screen shares, terminal-recording tools, CI transcripts).
-    console.log(`\n  Try the external API (paste the secret above):`);
-    console.log(`    curl -H "Authorization: Bearer <api-key-secret>" ${API_BASE_URL}/v1/external/projects`);
-  }
+  console.log('');
+  console.log('  Need an API key for the external API?');
+  console.log('  Create one in the web demo under Organization → API Keys.');
+  console.log('  The raw secret is shown once, in your browser, and is never');
+  console.log('  written to this terminal. Walkthrough steps 12-13.');
   console.log('──────────────────────────────────────────────────────');
 }
 

@@ -86,9 +86,12 @@ read filtered on five un-indexed JSONB metadata keys over a table with no
 retention policy, so a `targetId` matching nothing scanned the organization's
 entire event slice with only a coarse per-IP ceiling in front of it; per-user
 and per-organization buckets now bound it (the scan cost itself remains
-open). **ORG-PR-056** records the demo bootstrap's one-time secret print as
-an owned accepted risk, with the duplicate print removed and a new
-loopback-target guard. Two claims were re-verified rather than inherited: the
+open). **ORG-PR-056** is CLOSED: the demo bootstrap emitted a one-time API
+key secret to stdout, was first mitigated with a loopback-target guard, and
+was then fully remediated — the bootstrap no longer creates an API key or
+prints any credential, and key minting moved to the existing web-demo API
+Keys page where the secret reaches only the requesting browser. No accepted
+clear-text logging risk remains. Two claims were re-verified rather than inherited: the
 password/token hashing boundary is Argon2id-only across all seven password
 paths, and both flagged modulo operations are exactly uniform (256 = 32 x 8).
 Full detail: [sprint-22-artifact-package.md](sprint-22-artifact-package.md).

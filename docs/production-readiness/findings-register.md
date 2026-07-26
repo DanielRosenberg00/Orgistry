@@ -156,10 +156,12 @@ filter compares against five un-indexed JSONB metadata keys over a table with
 no retention policy, so a filter matching nothing scanned the organization's
 entire event slice, bounded only by a coarse per-IP ceiling. Per-user and
 per-organization buckets now bound it; the underlying scan cost remains open.
-[ORG-PR-056](#org-pr-056) (P4) **Accepted risk** — the demo bootstrap prints a
-one-time API key secret (its only delivery channel); the duplicate print in
-the `curl` example was removed and a loopback-target guard now prevents the
-tool from ever running against a non-local API. Everything else was proved a
+[ORG-PR-056](#org-pr-056) (P4) **Closed** — the demo bootstrap emitted a
+one-time API key secret to stdout. The completion iteration removed the sink
+outright rather than accepting it: the bootstrap no longer creates an API key
+at all, prints no credential of any kind, and points at the web demo's API
+Keys page, where the backend hands the raw secret straight to the browser
+once. **No accepted clear-text logging risk remains.** Everything else was proved a
 false positive with recorded evidence: the password/token hashing boundary is
 Argon2id-only for all seven password paths, and both flagged modulo operations
 are exactly uniform (256 = 32 x 8). **Open P1 production blockers: ORG-PR-001,
@@ -226,7 +228,7 @@ ready for staging or production. See
 | [ORG-PR-053](#org-pr-053) | Two read paths skip the permission gate (divergence, no current gap) — **Closed (Sprint 20)** | Authorization | Maintainability issue | P4 | High |
 | [ORG-PR-054](#org-pr-054) | `esbuild` moderate dev-only advisory (via `drizzle-kit`) — **Closed (Sprint 21)** | Supply chain | Optional enhancement | P4 | High |
 | [ORG-PR-055](#org-pr-055) | Audit-log read has unbounded query cost and no per-actor ceiling — **Found and mitigated (Sprint 22); underlying scan cost open** | API | Security risk | P3 | High |
-| [ORG-PR-056](#org-pr-056) | Demo bootstrap prints a one-time API key secret to stdout — **Accepted risk with a loopback-target guard (Sprint 22)** | Tooling | Accepted risk | P4 | High |
+| [ORG-PR-056](#org-pr-056) | Demo bootstrap printed a one-time API key secret to stdout — **Closed (Sprint 22): secret output removed entirely; key creation moved to the interactive UI** | Tooling | Security risk | P4 | High |
 
 ---
 
@@ -608,7 +610,7 @@ Standards · Threats.
 - **Resolution (Sprint 22, 2026-07-26): CLOSED.** The three conditions Sprint 21 named as outstanding are now met with remote evidence.
   **(1) First green remote runs.** All three workflows executed on GitHub-hosted CI on the Sprint 21 commit `c33a150f` (event `push`, branch `main`): CI run [30205303375](https://github.com/DanielRosenberg00/Orgistry/actions/runs/30205303375) success; Security scans run [30205303370](https://github.com/DanielRosenberg00/Orgistry/actions/runs/30205303370) success; CodeQL run [30205303373](https://github.com/DanielRosenberg00/Orgistry/actions/runs/30205303373) success.
   **(2) Verified failure on a seeded finding — remote, not local.** A temporary branch `chore/sprint-22-scanner-negative-path` (commit `75daffcdfd7e52969a1e97a52e15af751ccbb662`, based on `origin/main`) carried one synthetic, non-provider-format, never-valid high-entropy assignment in `SPRINT-22-SCANNER-NEGATIVE-PATH.txt`. `security.yml` was dispatched against that ref: run [30207672121](https://github.com/DanielRosenberg00/Orgistry/actions/runs/30207672121) concluded **failure**. Job-level detail proves the failure was specific rather than a broken workflow: *Dependency audit (pnpm)* → success; *Secret scan (Gitleaks)* → **failure** at the gitleaks step, reporting `RuleID: generic-api-key`, `File: SPRINT-22-SCANNER-NEGATIVE-PATH.txt`, `Line: 13`, `Commit: 75daffcd`, `leaks found: 1`, with `Secret: REDACTED` — confirming the redaction guarantee holds on a real failure. The branch was deleted from the remote and locally immediately afterwards; `gh api /repos/DanielRosenberg00/Orgistry/branches` lists only `main` and Dependabot branches. Nothing from that branch was merged or cherry-picked into `main`. The GitHub run record persists as durable evidence.
-  **(3) SAST is operational AND triaged.** CodeQL is not merely running: its first analysis produced 41 High alerts, every one of which was individually triaged in Sprint 22 with source/sink evidence, root-cause grouping, and an individual GitHub disposition — see [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) and [sprint-22-artifact-package.md](sprint-22-artifact-package.md). The triage found and fixed one true positive (ORG-PR-055) and recorded one owned accepted risk (ORG-PR-056). Code scanning is available (public repository); the analysis uploads SARIF under the single `security-events: write` job.
+  **(3) SAST is operational AND triaged.** CodeQL is not merely running: its first analysis produced 41 High alerts, every one of which was individually triaged in Sprint 22 with source/sink evidence, root-cause grouping, and an individual GitHub disposition — see [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) and [sprint-22-artifact-package.md](sprint-22-artifact-package.md). The triage found and fixed two true positives: ORG-PR-055 (audit-read cost) and ORG-PR-056 (credential output from the demo bootstrap, initially mitigated and then fully remediated in the completion iteration). Code scanning is available (public repository); the analysis uploads SARIF under the single `security-events: write` job.
   **(4) Enforcement, which is what "gate" required.** Sprint 21 correctly noted that configuration is not enforcement. Sprint 22 added the missing half: a repository ruleset targeting `main` requires a pull request and makes the CI, Security, and CodeQL checks required status checks, so a scanner failure now blocks the merge instead of merely being visible. Direct pushes to `main` are refused. The gate policy that governs dispositions is documented in [validation.md](../validation.md#codeql-alert-policy).
   **Residual (does NOT reopen this finding, tracked elsewhere):** code-scanning merge protection blocks on alert *severity* and cannot express a per-query allow-list, so the "no new High alerts" rule is enforced at that granularity only; the remainder of the alert policy (evidence-bearing individual dismissals, no bulk dismissal) is a documented manual control, stated as such rather than claimed as enforced. Container image digest pinning remains under ORG-PR-042; artifact signing and SLSA provenance remain out of scope under ORG-PR-001.
 
@@ -1124,17 +1126,35 @@ Standards · Threats.
 - **Residual (OPEN):** The limiter bounds exploitation; it does not make the query cheap. A legitimate operator on a large tenant still pays a full-slice scan for a non-matching `targetId`. A durable fix is either (a) an index covering the target-id metadata keys — a GIN index on `metadata`, or expression indexes per key — or (b) retention/cleanup on `security_events` under ORG-PR-015, or both. Neither is in Sprint 22 scope. Owner: repository maintainer. Re-review when ORG-PR-015 is scheduled.
 
 <a id="org-pr-056"></a>
-### ORG-PR-056 — Demo bootstrap prints a one-time API key secret to stdout
+### ORG-PR-056 — Demo bootstrap printed a one-time API key secret to stdout
 
-> **Status: ACCEPTED RISK with a compensating control (Sprint 22, 2026-07-26).**
-> Surfaced by CodeQL alerts 5, 6, 7 (`js/clear-text-logging`).
+> **Status: CLOSED — fully remediated (Sprint 22 completion iteration,
+> 2026-07-26).** Surfaced by CodeQL alerts 5, 6, 7 (`js/clear-text-logging`);
+> the surviving sink was tracked as alert 45. This finding passed through an
+> intermediate ACCEPTED-RISK state within the same sprint; that decision and
+> its reasoning are preserved below under *Remediation history* rather than
+> rewritten, because the reversal is the useful part of the record.
 
-- **Class / Sev / Conf:** Accepted risk · P4 · High · Verified fact.
-- **Evidence:** `tooling/demo-seed.mjs` printed the created API key secret twice — once as the labelled one-time value, and once interpolated into a ready-to-run `curl` example. A third alert on the `log()` helper resolved to `created.apiKey.name` (a display label, not the secret) and is a false positive.
-- **Current behavior:** The secret is written to stdout by a local developer CLI. It is not part of the deployed API, ships no runtime code, and its output goes to an interactive terminal rather than an aggregated log pipeline. The API's Pino redaction backstop (ORG-PR-033) does NOT cover it: this is a separate process using `console.log` with string interpolation, which bypasses path-based redaction entirely.
-- **Expected production behavior:** Credential-issuing tooling prints a secret only where the operator is the intended recipient, and cannot be aimed at a shared environment.
-- **Risk:** Terminal scrollback, screen shares, and terminal-recording tools capture the secret. Before this sprint, `DEMO_API_BASE_URL` could point the tool at any host, so the secret printed could have been a real one against a shared environment.
-- **Remediation (partial, applied):** (1) The duplicate print inside the `curl` example was **removed** and replaced with a `<api-key-secret>` placeholder — it carried no information the labelled line above did not, while doubling the capture surface. (2) `assertLocalTarget` (`tooling/lib/demo-target-guard.mjs`, called from `demo-seed.mjs` before any request) refuses any non-loopback target, so a misdirected run creates no account and prints no secret. Hostname equality is used rather than a prefix check, so `localhost.evil.example.com` is refused.
-- **Why the remaining print is accepted:** The API returns an API key secret exactly once, at creation. Printing it to the operator's terminal IS the delivery channel, and `docs/demo-walkthrough.md` depends on it. Removing the print leaves an unusable key and a broken demo. This is the standard pattern for credential-issuing CLIs.
-- **Dependencies:** none. **Effort:** S. **Validation:** `tooling/demo-target-guard.test.ts` — 5 cases: loopback forms accepted (`localhost`, `127.0.0.1`, `[::1]`, with/without port, http/https); hosted and private-network targets refused; `localhost.evil.example.com` and `127.0.0.1.evil.example.com` refused; the rejected host is named in the message; malformed URLs refused rather than passed through. **Roadmap:** n/a. **Standards:** ASVS V7.1 (log content). **Threats:** T-SECRET.
-- **Owner / follow-up:** Repository maintainer. Re-review whenever `demo-seed.mjs` changes or the demo gains a non-local mode. Recorded as accepted risk — deliberately NOT dismissed as a false positive, because the dataflow is real.
+- **Class / Sev / Conf:** Security risk · P4 · High · Verified fact.
+- **Evidence:** `tooling/demo-seed.mjs` created an API key during bootstrap and printed the returned raw secret to stdout — originally twice (once labelled, once interpolated into a ready-to-run `curl` example). A third alert on the `log()` helper resolved to `created.apiKey.name` (a display label, not the secret) and was a genuine false positive.
+- **Original behavior:** The secret was written to stdout by a local developer CLI. The API's Pino redaction backstop (ORG-PR-033) does NOT cover it — a separate process using `console.log` with string interpolation bypasses path-based redaction entirely.
+- **Expected production behavior:** Credential-issuing tooling emits no credential to any logging sink. A one-time secret is delivered to a human directly and retained nowhere else.
+- **Risk:** Terminal scrollback, screen shares, terminal recordings, wrappers, CI transcripts, and redirected stdout all retain a printed credential far longer than the moment it was needed.
+
+**Remediation history (both steps preserved deliberately):**
+
+1. **Partial mitigation, then accepted (first pass).** The duplicate print inside the `curl` example was removed, and `assertLocalTarget` (`tooling/lib/demo-target-guard.mjs`) was added to refuse any non-loopback target before the first request. The remaining print was then recorded as an accepted residual risk on the argument that the API returns a key secret exactly once, so printing it *was* the delivery channel and the demo depended on it. **That argument was wrong on the decisive point:** it treated the delivery channel as fixed. The Definition of Done condition — no raw secrets, tokens, passwords, Authorization headers, cookies, or SMTP credentials are logged — admits no accepted-risk exception, and a loopback guard bounds *where* the credential is emitted without stopping it being emitted.
+2. **Full remediation (completion iteration, applied).** The delivery channel was changed instead of the secret being protected in transit to a terminal:
+   - `ensureApiKey` was **removed** from `tooling/demo-seed.mjs`; the bootstrap now creates no API key and touches no `/api-keys` endpoint.
+   - The summary block emits identifiers and locations only. The owner password — a published local-only value — is **pointed at** (`see docs/demo-walkthrough.md`) rather than reprinted, so no output path in the tool carries a credential of any kind.
+   - Key creation moved to the **existing** authenticated web-demo surface (`/app/api-keys`, `ApiKeysPage`), where the backend returns the raw secret exactly once to the requesting browser and no tool-side copy exists. No new product feature, API route, or contract was added — walkthrough steps 12–13 already documented this path.
+   - The loopback guard was **kept** and its documentation corrected: it now protects against seeding published demo credentials into a shared environment and mutating organization/plan/project/invitation state somewhere real. It is no longer standing between a secret and a terminal.
+
+- **Explicitly rejected substitutions:** switching `console.log` to `process.stdout.write`, base64-encoding the secret, printing it via an error, embedding it in a command example, printing the whole HTTP response, writing it to a file, or suppressing the query. Each would defeat the scanner without changing the exposure, which is the opposite of the intent.
+- **Dependencies:** none. **Effort:** S. **Validation:**
+  - `tooling/demo-seed.output.test.ts` (7 cases) runs the REAL script as a child process against a stub API on loopback and inspects everything it actually wrote: exits 0 with empty stderr; issues **no** request to any `/api-keys` path; emits no owner password, no access token, and no key secret — asserted both by literal value and by shape (`/orgistry_[A-Z0-9]{6,}_/`, `/Bearer\s+\S+/`, `/[A-Za-z0-9_-]{40,}/`) so a *different* credential would also be caught; still prints the org id, sign-in address, and web-demo URL; directs the operator to the API Keys page; leaves the rest of the flow intact (login, org list/create, plan change, three projects, invitation); and refuses a non-loopback target before issuing any request.
+  - Negative control: temporarily reinstating API-key creation plus a secret print made exactly two of those cases fail (`creates no API key…`, `emits no password, token, or key secret…`), then the file was restored byte-identically. The test has teeth rather than passing vacuously.
+  - `tooling/demo-target-guard.test.ts` (5 cases) unchanged and still green.
+- **CodeQL evidence:** recorded in [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) against the final analysis of the merged `main` commit.
+- **Roadmap:** n/a. **Standards:** ASVS V7.1 (log content). **Threats:** T-SECRET.
+- **Owner / follow-up:** Repository maintainer. Re-review whenever `demo-seed.mjs` gains new output or the demo gains a non-local mode. **No accepted clear-text logging risk remains in this repository.**

@@ -64,7 +64,23 @@ export interface AuditServiceOptions {
   audit: AuditRepository;
   /** Resolves the `audit_log_access` gate and `audit_retention_days` metadata. */
   entitlements: EntitlementService;
-  /** Redis-backed in production; a no-op limiter when omitted. */
+  /**
+   * Redis-backed in production; a no-op limiter when omitted.
+   *
+   * Optional by REPOSITORY CONVENTION, not by accident (reviewed Sprint 22):
+   * all twelve rate-limited services and the API-key authenticator declare
+   * `rateLimiter` / `rateLimits` / `rateLimitFailureMode` exactly this way, so
+   * that unit tests which do not exercise throttling construct a service
+   * without ceremony. Making this one service strict would diverge from its
+   * eleven siblings without closing the gap they share.
+   *
+   * What prevents a production process from silently running unthrottled:
+   * `server.ts` is the ONLY production composition root and passes the
+   * Redis-backed limiter to every service, and `buildApp` THROWS under
+   * `NODE_ENV=production` when the global limiter is missing (`app.ts`).
+   * Honest residual, unchanged from Sprint 19 and inherited here: the
+   * per-service hand-off is review-proven, not type-enforced.
+   */
   rateLimiter?: RateLimiter;
   /** Audit-read buckets (Sprint 22; from `config.rateLimit.auditRead`). */
   rateLimits?: AuditReadRateLimits;

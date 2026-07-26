@@ -154,9 +154,9 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > closure — complete.** Sprint 21 shipped scanners; Sprint 22 turned them into
 > a control. All **41** High alerts from CodeQL's first operational run were
 > individually triaged with source/sink evidence and given individual GitHub
-> dispositions: **2 fixed defects**, 13 covered by endpoint-specific controls
+> dispositions: **3 fixed defects**, 13 covered by endpoint-specific controls
 > the query cannot model, 19 covered by the global limiter, 6 false positives
-> (framework-model + high-entropy-token), 1 owned accepted risk. Zero alerts
+> (framework-model + high-entropy-token), **0 accepted risks**. Zero alerts
 > were bulk-dismissed and zero true positives were left unresolved — see
 > [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md).
 > **ORG-PR-020 is CLOSED**: all three workflows ran green remotely on
@@ -167,8 +167,10 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > triage opened two findings of its own: **ORG-PR-055** (the audit-log read
 > scanned an entire tenant's event history on an un-indexed `targetId` filter
 > — now bounded by per-user and per-organization buckets; the scan cost itself
-> stays open) and **ORG-PR-056** (the demo bootstrap's one-time secret print,
-> accepted with a new loopback-target guard). `pnpm validate` and
+> stays open) and **ORG-PR-056** (the demo bootstrap's one-time secret print
+> — first mitigated with a loopback-target guard, then fully remediated by
+> removing API-key creation from the bootstrap entirely, so it now prints no
+> credential of any kind). `pnpm validate` and
 > `pnpm validate:integration` exit 0 (2026-07-26). See
 > [sprint-22-artifact-package.md](sprint-22-artifact-package.md). Four P1
 > blockers remain open (ORG-PR-001/002/005/006); the repository is still

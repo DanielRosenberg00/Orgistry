@@ -1,13 +1,19 @@
 /**
  * Demo-seed target guard (Sprint 22, ORG-PR-056).
  *
- * `demo-seed.mjs` seeds an account whose password is published in the repo and
- * prints a one-time API key secret to the terminal. That print is the delivery
- * channel for the credential — the demo is useless without it — so it cannot be
- * removed. What can be removed is the ability to point the tool somewhere it
- * does not belong: this guard refuses any target that is not a loopback host,
- * before the first request is made, so a misdirected run creates no account and
- * emits no secret.
+ * `demo-seed.mjs` registers an account whose password is published in this
+ * repository and then MUTATES state through it — creating an organization,
+ * changing its plan, creating projects, and sending a real invitation email.
+ * None of that belongs anywhere but a throwaway local stack, so this guard
+ * refuses any target that is not a loopback host, before the first request is
+ * made. A misdirected run creates nothing.
+ *
+ * Note what this guard is NOT doing any more: the bootstrap no longer creates
+ * an API key and prints no credential on any stream, so the guard is no longer
+ * standing between a secret and a terminal. It protects against seeding
+ * published demo credentials into a shared environment and against writing
+ * demo data somewhere real — which is why it survives the removal of the
+ * secret print rather than becoming redundant.
  *
  * Extracted from the CLI so the rule is testable on its own (mirroring
  * `lib/migrations-snapshot.mjs`).
@@ -39,8 +45,9 @@ export function assertLocalTarget(rawUrl) {
   if (!LOOPBACK_SET.has(parsed.hostname)) {
     throw new Error(
       `Demo seed refuses to run against a non-loopback API (${parsed.hostname}). ` +
-        'It seeds a published demo password and prints a one-time API key secret, ' +
-        'so it is safe only against a throwaway local stack.',
+        'It registers a published demo password and mutates organization, plan, ' +
+        'project, and invitation state, so it is safe only against a throwaway ' +
+        'local stack.',
     );
   }
 }

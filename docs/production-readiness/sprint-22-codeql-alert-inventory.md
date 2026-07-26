@@ -40,7 +40,7 @@ Four baseline alerts closed as *fixed* and four new alerts appeared. Only one of
 | 42 | biased-cryptographic-random | `packages/shared/src/random-alphabet.ts:53` | **Supersedes alerts 1 and 2.** Both closed because the duplicated mapping moved into one shared helper. Net effect: two alerts became one. No defect was fixed — the arithmetic was already uniform. |
 | 43 | insufficient-password-hash | `packages/auth-core/src/hashing-invariants.test.ts:38` | **New, test-only.** The test computes `sha256(password)` so the next lines can assert the stored Argon2id hash is not it. Dismissed *used in tests*. |
 | 44 | insufficient-password-hash | `packages/auth-core/src/hashing-invariants.test.ts:48` | **New, test-only.** Same pattern, asserting `verifyPassword(sha256, password)` is false. Dismissed *used in tests*. |
-| 45 | clear-text-logging | `tooling/demo-seed.mjs:261` | **Supersedes alert 6.** The sink is unchanged; only its line number moved (256 → 261) when the guard import and comments were added. Carries alert 6's accepted-risk disposition. |
+| 45 | clear-text-logging | `tooling/demo-seed.mjs:261` | **Supersedes alert 6.** Initially the same sink at a shifted line (256 → 261). **Remediated in the completion iteration** — API-key creation was removed from the bootstrap, so the sink no longer exists. |
 
 Genuinely fixed by a code change: **alert 7 only** (the duplicate secret print inside the `curl` example was deleted). Alerts 1, 2, and 6 are bookkeeping closures caused by code motion, and their substance lives on in alerts 42 and 45.
 
@@ -58,7 +58,7 @@ A note on the two test-file alerts: writing a test that proves passwords are *no
 | `S22-RC-006` | **Confirmed defect** — audit read has unbounded query cost and no per-actor ceiling | 12 | 1 |
 | `S22-RC-007` | SHA-256 digest of a 32-byte CSPRNG opaque token modelled as password hashing | 3, 4 | 2 |
 | `S22-RC-008` | Modulo over a 32-character alphabet, which divides the 256-value byte domain exactly | 1, 2 | 2 |
-| `S22-RC-009` | Demo bootstrap prints the one-time API key secret to the operator's terminal | 6, 7 | 2 |
+| `S22-RC-009` | **Confirmed defect** — demo bootstrap emitted the one-time API key secret to a terminal | 6, 7 | 2 |
 | `S22-RC-010` | Demo bootstrap log helper flagged on a non-secret field of an `apiKey` object | 5 | 1 |
 | | | **Total** | **41** |
 
@@ -66,19 +66,21 @@ A note on the two test-file alerts: writing a test that proves passwords are *no
 
 | Final classification | Count | Alerts |
 | --- | --- | --- |
-| Fixed defect | 2 | 7, 12 |
+| Fixed defect | 3 | 6, 7, 12 |
 | Covered by endpoint-specific control but invisible to CodeQL | 13 | 8, 11, 13, 15, 18, 19, 22, 24, 25, 30, 34, 36, 37 |
 | Covered by global control but invisible to CodeQL | 19 | 9, 10, 14, 16, 17, 20, 21, 23, 26, 27, 28, 29, 31, 32, 33, 35, 38, 39, 40 |
 | Framework/model false positive | 4 | 1, 2, 5, 41 |
 | High-entropy-token false positive | 2 | 3, 4 |
-| Accepted residual risk | 1 | 6 |
+| Accepted residual risk | 0 | — |
 | Duplicate of another alert | 0 | — |
 | Confirmed defect (unresolved) | 0 | — |
 | Needs follow-up | 0 | — |
 | Not reproducible | 0 | — |
 | **Total** | **41** | |
 
-Two classifications carry zero members and that is a finding in itself: no alert was left as an unresolved true positive, and no alert resisted reproduction. Both defects found were fixed inside this sprint.
+Four classifications carry zero members, and that is a finding in itself: no alert was left as an unresolved true positive, none resisted reproduction, none needed follow-up, and — after the completion iteration — **none was accepted as a residual risk**. All three defects found were fixed inside this sprint.
+
+Alert 6 moved from *Accepted residual risk* to *Fixed defect* during the sprint. The first pass accepted the credential print with a loopback-target compensating control; the completion iteration rejected that reasoning and removed the output entirely. See [S22-RC-009](#s22-rc-009--demo-bootstrap-emitted-the-one-time-api-key-secret) for why the original acceptance was indefensible.
 
 ### Verified final GitHub state
 
@@ -106,7 +108,7 @@ Every one of the 41 baseline alerts, with its final state. `RC` links to the gro
 | 3 | insufficient-password-hash | `apps/api/src/modules/api-keys/api-key-secret.ts:56` | `hashApiKeySecret` | 007 | High-entropy-token false positive | Dismissed — false positive |
 | 4 | insufficient-password-hash | `packages/auth-core/src/opaque-token.ts:32` | `hashOpaqueToken` | 007 | High-entropy-token false positive | Dismissed — false positive |
 | 5 | clear-text-logging | `tooling/demo-seed.mjs:75` | `log()` helper | 010 | Framework/model false positive | Dismissed — false positive |
-| 6 | clear-text-logging | `tooling/demo-seed.mjs:256` | one-time secret print | 009 | Accepted residual risk | Auto-closed (line moved); superseded by alert 45, dismissed won't-fix (ORG-PR-056) |
+| 6 | clear-text-logging | `tooling/demo-seed.mjs:256` | one-time secret print | 009 | **Fixed defect** | Auto-closed (line moved); successor alert 45 remediated in the completion iteration (ORG-PR-056 closed) |
 | 7 | clear-text-logging | `tooling/demo-seed.mjs:258` | `curl` example | 009 | Fixed defect | **Closed by fix** (verified: state `fixed` on GitHub) |
 | 8 | missing-rate-limiting | `api-key.routes.ts:50-79` | `POST …/api-keys` | 001 | Covered by endpoint-specific control | Dismissed — false positive |
 | 9 | missing-rate-limiting | `api-key.routes.ts:85-97` | `GET …/api-keys` | 003 | Covered by global control | Dismissed — false positive |
@@ -373,26 +375,44 @@ This is a clarity and invariant-hardening change, not an attempt to move the sca
 
 **Final action.** Refactor for clarity + enforced invariant; alerts dismissed as false positives with the divisibility proof.
 
-### S22-RC-009 — Demo bootstrap prints the one-time API key secret
+### S22-RC-009 — Demo bootstrap emitted the one-time API key secret
 
-**Alerts:** 6 (`demo-seed.mjs:256`), 7 (`demo-seed.mjs:258`) (2)
+**Alerts:** 6 (`demo-seed.mjs:256`), 7 (`demo-seed.mjs:258`) (2) — successor alert 45.
 
-Both sinks are `console.log` in `tooling/demo-seed.mjs`, a local developer CLI that drives the public API to produce a presentable demo state. It is not part of the deployed API and ships no runtime code.
+Both sinks were `console.log` in `tooling/demo-seed.mjs`, a local developer CLI that drives the public API to produce a presentable demo state. It is not part of the deployed API and ships no runtime code.
 
-**Alert 7 — Fixed defect.** The line printed a second copy of the secret inside a ready-to-run `curl` example. The secret is already printed two lines above, so the duplicate carried no information while doubling the number of places it could be captured from (scrollback, screen shares, terminal recordings, CI transcripts). Replaced with a `<api-key-secret>` placeholder and a "paste the secret above" instruction. The sink is gone; the alert should close on the next analysis.
+**Both are now Fixed defects.** This group was triaged twice, and the second pass reversed the first. The reversal is recorded here rather than smoothed over, because it is the instructive part.
 
-**Alert 6 — Accepted residual risk.** This line cannot be removed. The API returns an API key secret exactly once at creation; printing it to the operator's terminal IS the delivery channel, and the documented demo (`docs/demo-walkthrough.md`) depends on it. Removing the print would leave an unusable key.
+**Alert 7 — fixed in the first pass.** The line printed a second copy of the secret inside a ready-to-run `curl` example. The secret was already printed two lines above, so the duplicate carried no information while doubling the number of places it could be captured from. Replaced with a placeholder. Closed as `fixed` on the next analysis.
 
-- **Rationale:** local-only developer tooling; the value is a demo key against a throwaway local database; the sink is an interactive terminal, not an aggregated log pipeline. The same pattern is standard for credential-issuing CLIs.
-- **Compensating control added (Sprint 22):** `assertLocalTarget` (`tooling/lib/demo-target-guard.mjs`) refuses any non-loopback API target and throws **before the first request**, so a misdirected run creates no account and prints no secret. Previously `DEMO_API_BASE_URL` could point the tool anywhere.
-- **Owner:** repository maintainer, tracked as **ORG-PR-056**.
-- **Follow-up mechanism:** ORG-PR-056 in the findings register; re-reviewed whenever `demo-seed.mjs` changes or the demo gains a non-local mode.
+**Alert 6 — accepted, then rejected and fully remediated.**
 
-**Why the Pino redaction backstop is not the answer here.** `lib/logging.ts` redacts `apiKeySecret` and `apiKey` on the API's structured logger. It has no bearing on these alerts: `demo-seed.mjs` is a separate CLI using `console.log` with string interpolation, which bypasses path-based redaction entirely. Claiming coverage from the backstop would be false — recording it explicitly so no future reader assumes otherwise.
+*First pass (superseded).* The remaining print was classified as an accepted residual risk on the reasoning that the API returns a key secret exactly once, so printing it to the terminal *was* the delivery channel and the demo depended on it. A loopback-target guard (`assertLocalTarget`) was added as a compensating control, bounding where a misdirected run could emit a secret.
 
-**Test evidence.** `tooling/demo-target-guard.test.ts` (5 cases) — loopback forms accepted (`localhost`, `127.0.0.1`, `[::1]`, with and without port, http and https); hosted and private-network targets rejected; `localhost.evil.example.com` and `127.0.0.1.evil.example.com` rejected (a prefix check would pass them, hostname equality does not); the rejected host is named in the message; malformed URLs are rejected rather than passed through.
+*Why that was wrong.* The argument treated the delivery channel as fixed and then protected it. It should have questioned it. Three things make the accepted-risk framing indefensible:
 
-**Final action.** Alert 7 fixed; alert 6 dismissed as "won't fix" with the accepted-risk rationale and the ORG-PR-056 reference. It is deliberately NOT dismissed as a false positive — the dataflow is real.
+1. The Definition of Done condition — *no raw secrets, tokens, passwords, Authorization headers, cookies, or SMTP credentials are logged* — admits no accepted-risk exception. A finding that contradicts a mandatory condition is not a candidate for acceptance.
+2. A terminal is a logging sink like any other. Scrollback, screen shares, terminal recordings, tmux/CI capture, and `> out.txt` all retain it. "Interactive terminal, not an aggregated log pipeline" understated that.
+3. The loopback guard bounds *where* the credential is emitted. It never stopped it being emitted. A compensating control that does not remove the exposure cannot discharge a condition that forbids the exposure.
+
+*Second pass (final).* The delivery channel was changed instead:
+
+- `ensureApiKey` was **removed** from `demo-seed.mjs`. The bootstrap creates no API key and touches no `/api-keys` endpoint, so no secret is produced for it to print.
+- The summary block emits identifiers and locations only. The owner password — a published local-only literal — is **pointed at** (`see docs/demo-walkthrough.md`) rather than reprinted, so no output path in the tool carries a credential of any kind.
+- Key creation moved to the **existing** authenticated web-demo surface (`/app/api-keys`), where the backend returns the raw secret exactly once to the requesting browser. Walkthrough steps 12–13 already documented that path, so no new product feature, API route, or contract was added.
+- The loopback guard was **kept**, with its documentation corrected. It no longer stands between a secret and a terminal; it prevents seeding published demo credentials into a shared environment and mutating organization, plan, project, and invitation state somewhere real.
+
+**Substitutions explicitly rejected**, because each defeats the scanner without changing the exposure: switching to `process.stdout.write`, base64-encoding the secret, printing it via an error, embedding it in a command example, printing the whole HTTP response, writing it to a file, or suppressing the query.
+
+**Why the Pino redaction backstop is not the answer here.** `lib/logging.ts` redacts `apiKeySecret` and `apiKey` on the API's structured logger. It has no bearing on these alerts: `demo-seed.mjs` is a separate process using `console.log` with string interpolation, which bypasses path-based redaction entirely. Claiming coverage from the backstop would be false — recorded explicitly so no future reader assumes otherwise.
+
+**Test evidence.**
+
+- `tooling/demo-seed.output.test.ts` (7 cases) runs the REAL script as a child process against a stub API on loopback and inspects everything it actually wrote to stdout and stderr — deliberately end-to-end rather than a source scan, so a credential emitted through *any* output primitive would be caught. It proves: exit 0 with empty stderr; **no** request to any `/api-keys` path; no owner password, access token, or key secret in the captured output, asserted both by literal value and by shape (`/orgistry_[A-Z0-9]{6,}_/`, `/Bearer\s+\S+/`, `/[A-Za-z0-9_-]{40,}/`) so a *different* credential also fails the test; the org id, sign-in address, and web-demo URL still printed; the operator directed to the API Keys page; the rest of the flow intact (login, org list/create, plan change, three projects, invitation); and a non-loopback target refused before any request is issued.
+- **Negative control:** temporarily reinstating API-key creation plus a secret print made exactly two cases fail (`creates no API key…`, `emits no password, token, or key secret…`); the file was then restored byte-identically. The test has teeth rather than passing vacuously.
+- `tooling/demo-target-guard.test.ts` (5 cases) unchanged and still green.
+
+**Final action.** Alert 7 fixed in the first pass; alerts 6/45 fully remediated in the completion iteration. **ORG-PR-056 is closed, and no accepted clear-text logging risk remains in this repository.**
 
 ### S22-RC-010 — Log helper flagged on a non-secret field
 
@@ -437,3 +457,9 @@ Chronological record of triage iterations, classification changes, and evidence 
 **Iteration 9 — a flaky test surfaced by the remote gate.** The first remote CI run on the Sprint 22 commit (`9733b880`) failed while `pnpm validate` had passed locally. The failure was NOT caused by any Sprint 22 change: `audit.routes.test.ts > redacts sensitive top-level and nested metadata keys` seeded two-character sentinel values (`'pw'`, `'rt'`) and asserted their absence from `JSON.stringify(item).toLowerCase()`. That payload contains generated Crockford base32 ids, so any id containing `PW` or `RT` lowercased into a false "leak". Measured over 100,000 generated organization ids: `RT` appears in 2.37%, `PW` in 2.43%, either in **4.77%** — a pre-existing flake rate of at least one run in twenty, which local runs had simply been lucky enough to miss.
 
 Fixed by replacing every sentinel with a long, distinctive value (`nested-password-value`, `refresh-token-value`, …) and, while there, asserting the two sentinels that had been seeded but never checked (`apiKeySecret`, `invitationTokenHash`) — so the test now proves more than it did before. Re-ran the suite 15 consecutive times: 15/15 green. This is exactly the class of defect the sprint specification warns against ("avoid probabilistic tests that can fail nondeterministically"), and it mattered here because a gate that fails randomly cannot be made a required check.
+
+**Iteration 10 — the accepted risk was reopened and removed.** A completion review held the sprint against its own Definition of Done condition — *no raw secrets, tokens, passwords, Authorization headers, cookies, or SMTP credentials are logged* — and found alert 6/45 in violation. The first pass had accepted the credential print because it was the key's only delivery channel, and had added a loopback-target guard as compensation. That reasoning does not survive the condition: a terminal is a logging sink, and a guard that bounds *where* a secret is emitted does not stop it being emitted.
+
+The fix was to change the delivery channel rather than defend it: `ensureApiKey` was removed from the bootstrap, the owner password print became a pointer to documentation, and key minting moved to the web demo's existing API Keys page, where the backend hands the raw secret to the requesting browser exactly once. The loopback guard was kept — it still prevents seeding published demo credentials into a shared environment — with its documentation corrected to stop claiming it protects a secret print.
+
+Alert 6's classification changed from *Accepted residual risk* to *Fixed defect*, taking the sprint to **zero accepted clear-text logging risks**. A new end-to-end test (`demo-seed.output.test.ts`) runs the real script against a stub API and inspects captured stdout/stderr, and a negative control confirmed it fails when key creation is reinstated.

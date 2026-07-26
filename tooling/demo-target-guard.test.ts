@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { assertLocalTarget } from './lib/demo-target-guard.mjs';
 
 /**
- * The demo seed prints a one-time API key secret to stdout — the credential's
- * only delivery channel. These tests pin the compensating control: the tool
- * must refuse to run anywhere but loopback, so that print can never happen
- * against a shared or hosted environment (Sprint 22, ORG-PR-056).
+ * The demo seed registers a published demo password and then mutates state
+ * through it — creating an organization, changing its plan, creating projects,
+ * and sending a real invitation email. These tests pin the guard that keeps
+ * all of that on a throwaway local stack (Sprint 22, ORG-PR-056).
+ *
+ * The guard is deliberately NOT the control that satisfies the no-credential-
+ * logging condition: the bootstrap no longer creates an API key or prints any
+ * credential at all, which is proven separately in `demo-seed.output.test.ts`.
  */
 
 describe('assertLocalTarget', () => {

@@ -481,16 +481,28 @@ describe('GET …/audit-events — metadata sanitization', () => {
     const orgId = await createTeamOrg(owner.token, 'Acme');
     await enableAudit(owner.token, orgId);
     resetEvents();
+    // Every sentinel must be long and distinctive. The assertion below
+    // lowercases the whole serialized item, which contains generated Crockford
+    // base32 ids — a two-character sentinel like 'rt' or 'pw' collides with a
+    // random id whenever one happens to contain those letters (~1/1024 per
+    // adjacent pair, several percent per run), which made this test flaky.
     seedEvent(orgId, {
       metadata: {
         name: 'Launch',
         token: 'raw-token-value',
-        tokenHash: 'hash-value',
+        tokenHash: 'token-hash-value',
         secret: 'secret-value',
-        apiKeySecret: 'aks',
-        invitationTokenHash: 'ith',
-        nested: { password: 'pw', cookie: 'sid=1', keep: 'ok' },
-        requestBody: { authorization: 'Bearer leak', refreshToken: 'rt' },
+        apiKeySecret: 'api-key-secret-value',
+        invitationTokenHash: 'invitation-token-hash-value',
+        nested: {
+          password: 'nested-password-value',
+          cookie: 'sid=cookie-value',
+          keep: 'ok',
+        },
+        requestBody: {
+          authorization: 'Bearer authorization-value',
+          refreshToken: 'refresh-token-value',
+        },
       },
     });
 
@@ -502,12 +514,14 @@ describe('GET …/audit-events — metadata sanitization', () => {
     const serialized = JSON.stringify(item).toLowerCase();
     for (const leak of [
       'raw-token-value',
-      'hash-value',
+      'token-hash-value',
       'secret-value',
-      'bearer leak',
-      'sid=1',
-      'pw',
-      'rt',
+      'api-key-secret-value',
+      'invitation-token-hash-value',
+      'nested-password-value',
+      'sid=cookie-value',
+      'bearer authorization-value',
+      'refresh-token-value',
     ]) {
       expect(serialized).not.toContain(leak.toLowerCase());
     }

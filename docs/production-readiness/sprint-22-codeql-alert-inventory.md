@@ -21,15 +21,30 @@ The baseline count in the sprint specification and the observed GitHub state agr
 
 ## Query distribution
 
-| Query | Baseline | Post-remediation | Notes |
+| Query | Baseline | Observed after remediation | Notes |
 | --- | --- | --- | --- |
-| `js/missing-rate-limiting` | 34 | 34 | 1 defect fixed; the limiter stays invisible to the query (service layer), so the alert persists and is dismissed with evidence |
-| `js/clear-text-logging` | 3 | 2 | 1 sink removed outright |
-| `js/insufficient-password-hash` | 2 | 2 | both are high-entropy token digests, not passwords |
-| `js/biased-cryptographic-random` | 2 | 2 | both are mathematically uniform |
-| **Total** | **41** | **40** | |
+| `js/missing-rate-limiting` | 34 | 34 | 1 defect fixed (alert 12); the limiter stays invisible to the query (service layer), so the alert persists and is dismissed with evidence |
+| `js/clear-text-logging` | 3 | 2 | alert 7's sink removed outright; alert 6 relocated by the edit and re-registered as alert 45 |
+| `js/insufficient-password-hash` | 2 | 4 | +2 in the NEW test file, which computes SHA-256 of a password deliberately, to assert the stored hash is *not* that value |
+| `js/biased-cryptographic-random` | 2 | 1 | the two duplicated sites collapsed into one shared helper — alert 42 supersedes 1 and 2 |
+| **Total** | **41** | **41** | 45 alerts have existed in total |
 
-"Post-remediation" is the expected count from code inspection; the observed count from the fresh run is recorded in the artifact package.
+Counts verified against GitHub after analysis `1528767654` (commit `9733b880`, `refs/heads/main`), not inferred from code inspection.
+
+### Alerts created by the remediation itself
+
+Four baseline alerts closed as *fixed* and four new alerts appeared. Only one of the four closures is an actual defect fix — the other three are location changes, and recording them as fixes without saying so would overstate the result.
+
+| New | Query | Location | Relationship |
+| --- | --- | --- | --- |
+| 42 | biased-cryptographic-random | `packages/shared/src/random-alphabet.ts:53` | **Supersedes alerts 1 and 2.** Both closed because the duplicated mapping moved into one shared helper. Net effect: two alerts became one. No defect was fixed — the arithmetic was already uniform. |
+| 43 | insufficient-password-hash | `packages/auth-core/src/hashing-invariants.test.ts:38` | **New, test-only.** The test computes `sha256(password)` so the next lines can assert the stored Argon2id hash is not it. Dismissed *used in tests*. |
+| 44 | insufficient-password-hash | `packages/auth-core/src/hashing-invariants.test.ts:48` | **New, test-only.** Same pattern, asserting `verifyPassword(sha256, password)` is false. Dismissed *used in tests*. |
+| 45 | clear-text-logging | `tooling/demo-seed.mjs:261` | **Supersedes alert 6.** The sink is unchanged; only its line number moved (256 → 261) when the guard import and comments were added. Carries alert 6's accepted-risk disposition. |
+
+Genuinely fixed by a code change: **alert 7 only** (the duplicate secret print inside the `curl` example was deleted). Alerts 1, 2, and 6 are bookkeeping closures caused by code motion, and their substance lives on in alerts 42 and 45.
+
+A note on the two test-file alerts: writing a test that proves passwords are *not* SHA-256 hashed necessarily contains a SHA-256 call on a password. The scanner cannot distinguish an assertion's negative control from a real hashing path. That is a fair limitation to accept rather than a reason to delete the test — the test is the strongest evidence the invariant holds.
 
 ## Root-cause groups
 
@@ -65,19 +80,34 @@ The baseline count in the sprint specification and the observed GitHub state agr
 
 Two classifications carry zero members and that is a finding in itself: no alert was left as an unresolved true positive, and no alert resisted reproduction. Both defects found were fixed inside this sprint.
 
+### Verified final GitHub state
+
+Read back from the API after all dispositions were applied, not asserted from intent:
+
+| State | Count | Detail |
+| --- | --- | --- |
+| Open | 0 | — |
+| Fixed | 4 | alerts 1, 2, 6, 7 |
+| Dismissed | 41 | 38 *false positive*, 2 *used in tests*, 1 *won't fix* |
+| **Total alerts ever created** | **45** | 41 baseline + 4 successors |
+
+Every dismissal carries an individual comment naming its own route, control, or arithmetic; a check for dismissals with a comment shorter than 50 characters returns zero. GitHub caps `dismissed_comment` at 280 characters, so each comment states the specific evidence and cites its root-cause group in this document rather than reproducing the full analysis.
+
+**Reaching zero open alerts was an outcome, not a target.** It follows from 34 of the 41 belonging to one architectural pattern the query cannot model. The honest consequence is recorded in [known-limitations.md](../known-limitations.md): this repository cannot use "zero open alerts" as a health signal, and depends instead on the dismissal-evidence rule in the [CodeQL alert policy](../validation.md#codeql-alert-policy).
+
 ## Master reconciliation table
 
 Every one of the 41 baseline alerts, with its final state. `RC` links to the group analysis below.
 
 | # | Query | Location | Route / symbol | RC | Final classification | GitHub disposition |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | biased-cryptographic-random | `apps/api/src/modules/api-keys/api-key-secret.ts:39` | `randomBase32` (display id) | 008 | Framework/model false positive | Dismissed — false positive |
-| 2 | biased-cryptographic-random | `packages/shared/src/ids.ts:53` | `randomBase32` (public ids) | 008 | Framework/model false positive | Dismissed — false positive |
+| 1 | biased-cryptographic-random | `apps/api/src/modules/api-keys/api-key-secret.ts:39` | `randomBase32` (display id) | 008 | Framework/model false positive | Auto-closed (code moved); superseded by alert 42, dismissed FP |
+| 2 | biased-cryptographic-random | `packages/shared/src/ids.ts:53` | `randomBase32` (public ids) | 008 | Framework/model false positive | Auto-closed (code moved); superseded by alert 42, dismissed FP |
 | 3 | insufficient-password-hash | `apps/api/src/modules/api-keys/api-key-secret.ts:56` | `hashApiKeySecret` | 007 | High-entropy-token false positive | Dismissed — false positive |
 | 4 | insufficient-password-hash | `packages/auth-core/src/opaque-token.ts:32` | `hashOpaqueToken` | 007 | High-entropy-token false positive | Dismissed — false positive |
 | 5 | clear-text-logging | `tooling/demo-seed.mjs:75` | `log()` helper | 010 | Framework/model false positive | Dismissed — false positive |
-| 6 | clear-text-logging | `tooling/demo-seed.mjs:256` | one-time secret print | 009 | Accepted residual risk | Dismissed — won't fix (ORG-PR-056) |
-| 7 | clear-text-logging | `tooling/demo-seed.mjs:258` | `curl` example | 009 | Fixed defect | Closed by fix |
+| 6 | clear-text-logging | `tooling/demo-seed.mjs:256` | one-time secret print | 009 | Accepted residual risk | Auto-closed (line moved); superseded by alert 45, dismissed won't-fix (ORG-PR-056) |
+| 7 | clear-text-logging | `tooling/demo-seed.mjs:258` | `curl` example | 009 | Fixed defect | **Closed by fix** (verified: state `fixed` on GitHub) |
 | 8 | missing-rate-limiting | `api-key.routes.ts:50-79` | `POST …/api-keys` | 001 | Covered by endpoint-specific control | Dismissed — false positive |
 | 9 | missing-rate-limiting | `api-key.routes.ts:85-97` | `GET …/api-keys` | 003 | Covered by global control | Dismissed — false positive |
 | 10 | missing-rate-limiting | `api-key.routes.ts:103-116` | `DELETE …/api-keys/:apiKeyId` | 004 | Covered by global control | Dismissed — false positive |
@@ -403,3 +433,7 @@ Chronological record of triage iterations, classification changes, and evidence 
 **Iteration 7 — logging.** Traced all three sinks. Alert 5 resolved to `created.apiKey.name` (a display label) — false positive. Alert 7's duplicate secret print removed. Alert 6 confirmed as a real dataflow that is also the credential's only delivery channel; classified as accepted risk and given a loopback-target guard rather than being relabelled a false positive.
 
 **Iteration 8 — validation and reconciliation.** Full local validation run; all 41 alerts reconciled against the classification totals; group counts summed to 41 independently of the master table.
+
+**Iteration 9 — a flaky test surfaced by the remote gate.** The first remote CI run on the Sprint 22 commit (`9733b880`) failed while `pnpm validate` had passed locally. The failure was NOT caused by any Sprint 22 change: `audit.routes.test.ts > redacts sensitive top-level and nested metadata keys` seeded two-character sentinel values (`'pw'`, `'rt'`) and asserted their absence from `JSON.stringify(item).toLowerCase()`. That payload contains generated Crockford base32 ids, so any id containing `PW` or `RT` lowercased into a false "leak". Measured over 100,000 generated organization ids: `RT` appears in 2.37%, `PW` in 2.43%, either in **4.77%** — a pre-existing flake rate of at least one run in twenty, which local runs had simply been lucky enough to miss.
+
+Fixed by replacing every sentinel with a long, distinctive value (`nested-password-value`, `refresh-token-value`, …) and, while there, asserting the two sentinels that had been seeded but never checked (`apiKeySecret`, `invitationTokenHash`) — so the test now proves more than it did before. Re-ran the suite 15 consecutive times: 15/15 green. This is exactly the class of defect the sprint specification warns against ("avoid probabilistic tests that can fail nondeterministically"), and it mattered here because a gate that fails randomly cannot be made a required check.

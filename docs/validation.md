@@ -316,10 +316,27 @@ policy is documentation only and the CodeQL gate is advisory — check
 
 ### Branch protection
 
-`main` is governed by a repository ruleset rather than legacy branch
-protection. It requires a pull request, requires the CI, security, and CodeQL
-checks to pass, and enables code-scanning merge protection at the
-Critical/High threshold. Direct pushes to `main` are refused.
+`main` is governed by a repository ruleset (id `19769611`, "main branch
+protection") rather than legacy branch protection. Enforcement is `active` with
+**no bypass actors**. It:
+
+- requires a pull request (direct pushes to `main` are refused);
+- requires all five status checks — `Validate (offline)`,
+  `Integration (PostgreSQL + Redis)`, `Dependency audit (pnpm)`,
+  `Secret scan (Gitleaks)`, `Analyze (javascript-typescript)`;
+- enables code-scanning merge protection for CodeQL at
+  `high_or_higher` security alerts and `errors` for tool failures;
+- blocks branch deletion and non-fast-forward pushes.
+
+`required_approving_review_count` is **0**, deliberately: on a
+single-maintainer repository a non-zero count blocks every change, because an
+author cannot approve their own pull request. Zero still forces the
+pull-request path, which is what makes the status checks and merge protection
+apply. Human review is therefore the one part of this gate that is **not**
+technically enforced — raise this to 1 when a second maintainer joins.
+
+Working-model consequence: commit directly to a branch, open a pull request,
+let the five checks run, then merge. `git push origin main` will be rejected.
 
 Verify the live configuration — documentation can drift, the API cannot:
 

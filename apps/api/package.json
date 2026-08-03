@@ -17,7 +17,7 @@
     "@orgistry/db": "workspace:*",
     "@orgistry/shared": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.2.1",
+    "fastify": "^5.11.0",
     "ioredis": "^5.4.2",
     "nodemailer": "^9.0.3",
     "zod": "^3.24.1"
@@ -25,7 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.13.1",
     "@types/nodemailer": "^8.0.1",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"
   }

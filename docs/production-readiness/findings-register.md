@@ -169,11 +169,14 @@ ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged.** The repository remains not
 ready for staging or production. See
 [sprint-22-artifact-package.md](sprint-22-artifact-package.md).
 
-**Status update (Sprint 23, 2026-08-23):** deployable artifact — local
-implementation and validation complete; **remote Sprint 23 DoD evidence
-pending** (working tree uncommitted; the CI / Security / CodeQL /
-`Artifacts (build + smoke)` workflows must pass remotely after push).
-[ORG-PR-042](#org-pr-042) (P3) **Closed** (implementation evidence): every
+**Status update (Sprint 23, 2026-08-23):** deployable artifact — **Sprint 23
+DoD MET**: local implementation/validation complete, merged as PR #28 (7/7
+checks successful, implementation commit `37a586c`), post-merge `main`
+(`6019db8`) workflows all green (CI 32650121796 incl. the
+`Artifacts (build + smoke)` job / Security 32650121899 / CodeQL
+32650121792), and the artifact check is registered as a required check in
+ruleset 19769611 (API-verified — the gate is branch-enforced).
+[ORG-PR-042](#org-pr-042) (P3) **Closed**: every
 active image reference —
 both new production Dockerfiles, both `infra/` compose files, and the CI
 service containers — is pinned exact patch tag PLUS manifest-list digest; no
@@ -183,9 +186,9 @@ floating references remain, and the one Dependabot coverage gap (workflow
 repository now has non-root production container artifacts for the API
 (esbuild bundle of the existing entrypoints + lockfile-exact production
 node_modules) and web (static nginx), an explicit one-shot migration
-entrypoint, a production-like compose validation reference, and a CI
-build + smoke gate (locally proven; first remote run pending push) proving
-`NODE_ENV=production` boot, health/readiness,
+entrypoint, a production-like compose validation reference, and a
+branch-required CI build + smoke gate (green locally, on PR #28, and on
+`main` @ `6019db8`) proving `NODE_ENV=production` boot, health/readiness,
 secret hygiene, and clean shutdown from the packaged artifacts — but the
 finding's deployment half (a pipeline that promotes artifacts to a target
 environment, with migration orchestration and rollback) still does not exist.
@@ -197,8 +200,7 @@ manager, no rotation procedure, and no rehearsed `JWT_SECRET` rotation —
 documentation of an injection boundary is not secrets management. **Open P1
 production blockers: ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006 —
 unchanged.** The repository remains not ready for staging or production. See
-[sprint-23-artifact-package.md](sprint-23-artifact-package.md) (provisional
-pending remote evidence) and
+[sprint-23-artifact-package.md](sprint-23-artifact-package.md) (final) and
 [../deployment-artifacts.md](../deployment-artifacts.md).
 
 ## Summary table
@@ -290,8 +292,10 @@ Standards · Threats.
 - **Effort:** L. **Validation:** a tagged build deploys to a target environment reproducibly; container runs as non-root.
 - **Roadmap:** Phase 4 (Production infrastructure). **Standards:** SLSA build/provenance; SSDF PW.6/PO.3. **Threats:** T-DEP, T-OPS.
 - **Progress (Sprint 23, 2026-08-23): Open — materially advanced.** The
-  artifact half of this finding is implemented and locally validated, with a
-  CI gate added (first remote execution pending push):
+  artifact half of this finding is implemented, validated locally and
+  remotely (PR #28; `main` @ `6019db8` — CI run 32650121796), and
+  branch-enforced (`Artifacts (build + smoke)` is a required check in
+  ruleset 19769611):
   `apps/api/Dockerfile` (multi-stage; esbuild bundles of the EXISTING
   `src/server.ts` and `packages/db/scripts/migrate.ts` entrypoints +
   lockfile-exact hoisted production node_modules; non-root `node` user;

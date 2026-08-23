@@ -57,9 +57,13 @@ afterEach(async () => {
   smtp = undefined;
 });
 
-function mailer(port: number, timeoutMs = 5000) {
+/**
+ * `host` defaults to `localhost` because the TLS fixture certificate certifies
+ * that name; only the timeout case overrides it (see `startSilentListener`).
+ */
+function mailer(port: number, timeoutMs = 5000, host = 'localhost') {
   return createSmtpAccountMailer({
-    host: 'localhost',
+    host,
     port,
     username: CREDENTIALS.username,
     password: CREDENTIALS.password,
@@ -150,10 +154,17 @@ describe('SMTP failure modes never expose the credential', () => {
   it('connection timeout (unresponsive provider endpoint)', async () => {
     // A listener that accepts the socket and then says nothing: the configured
     // timeout is the only thing that can end the attempt.
+    //
+    // Connect to the listener's LITERAL address, not `localhost`. The listener
+    // binds IPv4 loopback only, while `localhost` resolves to `::1` first on a
+    // dual-stack Linux host — and nodemailer resolves the hostname itself and
+    // dials one literal IP, so Node's happy-eyeballs fallback never engages.
+    // Using `localhost` here silently turned this into a connection-REFUSED
+    // test on CI, which proves nothing about the timeout path.
     const silent = await startSilentListener();
     try {
       const error = await captureDeliveryFailure(() =>
-        mailer(silent.port, 300).deliver(message()),
+        mailer(silent.port, 300, silent.host).deliver(message()),
       );
 
       const serialized = serializeThrown(error);
@@ -165,8 +176,13 @@ describe('SMTP failure modes never expose the credential', () => {
   }, 10_000);
 });
 
-/** A TCP listener that accepts connections and never writes a single byte. */
+/**
+ * A TCP listener that accepts connections and never writes a single byte.
+ * Returns the address it actually bound so callers dial exactly that endpoint
+ * rather than a name that may resolve to a different address family.
+ */
 async function startSilentListener(): Promise<{
+  host: string;
   port: number;
   close: () => Promise<void>;
 }> {
@@ -181,6 +197,7 @@ async function startSilentListener(): Promise<{
     throw new Error('silent listener did not bind a TCP port');
   }
   return {
+    host: address.address,
     port: address.port,
     close: () =>
       new Promise<void>((resolve) => {

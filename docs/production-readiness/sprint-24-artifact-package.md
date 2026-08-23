@@ -6,11 +6,19 @@
 >
 > Repository implementation and local validation are complete. Exactly **one**
 > DoD gate is outstanding: post-change remote workflow validation
-> (**PENDING OPERATOR ACTION**, §19). The first remote attempt — PR #33, CI run
-> `32656512688` — failed on `Artifacts (build + smoke)` due to a Linux-only
-> permission defect in the smoke **test fixture** (not the application); that is
-> analysed and fixed in §17, but the fix is uncommitted, so the gate has not yet
-> been re-run. All five other required checks were green on that run.
+> (**PENDING OPERATOR ACTION**, §19). Two remote attempts have run on PR #33,
+> each exposing a **Linux-only test-fixture** portability defect — never an
+> application defect:
+>
+> - run `32656512688` — `Artifacts (build + smoke)` failed on secret-directory
+>   permissions. Fixed, and **confirmed green remotely** on the next run.
+> - run `32657860558` (`486bee8`) — `Artifacts (build + smoke)`, Integration,
+>   Dependency audit, Secret scan, and CodeQL all passed; `Validate (offline)`
+>   failed on **one** unit test (913/914) whose silent TCP listener bound IPv4
+>   while the client dialled `localhost`, which resolves to `::1` first on
+>   Linux. Fixed and locally re-validated (§17–§18).
+>
+> The second fix is uncommitted, so the gate has not been re-run against it.
 >
 > External SMTP provider validation was **not performed** — no provider
 > credentials, verified sending domain, or readable test mailbox exist here.
@@ -138,7 +146,7 @@ validated and nothing is claimed.
 | Fork-PR safety (no secret reachable) | PASS — no repository secrets, no environments, no `pull_request_target` |
 | Least-privilege workflow permissions preserved | PASS — workflows unmodified |
 | Gitleaks / CodeQL / artifact gate preserved | PASS — workflows unmodified |
-| Post-change remote status (CI, Security, CodeQL, Artifacts) | **PENDING OPERATOR ACTION** — first attempt (PR #33, run `32656512688`) had 5/6 green and failed `Artifacts (build + smoke)` on a Linux-only fixture-permission defect, now fixed locally but not yet pushed (§17, §19) |
+| Post-change remote status (CI, Security, CodeQL, Artifacts) | **PENDING OPERATOR ACTION** — run `32656512688` failed `Artifacts (build + smoke)`; run `32657860558` (`486bee8`) turned that gate **green** and failed `Validate (offline)` on one unit test. Both were Linux-only test-fixture defects; both are fixed locally, the second not yet pushed (§17, §19) |
 
 ### Result
 
@@ -146,10 +154,12 @@ validated and nothing is claimed.
 ACTION · 0 FAIL/MISSING.**
 
 **No Sprint 24 DoD condition has failed.** Sprint 24 is **NOT YET CLOSED —
-pending post-change remote workflow validation**. The first remote attempt
-exposed a genuine Linux portability defect in the smoke **test fixture**, which
-is fixed and re-validated locally (§17); pushing that fix and getting a green
-`Artifacts (build + smoke)` for the resulting commit is the remaining work.
+pending post-change remote workflow validation**. Two remote attempts each
+exposed a genuine Linux portability defect in a **test fixture** — the artifact
+smoke harness, then one SMTP unit test — both fixed and re-validated locally
+(§17–§18). The artifact gate is now green remotely; pushing the second fix and
+getting a green `Validate (offline)` for the resulting commit is the remaining
+work.
 Once CI, Security scans, CodeQL, and `Artifacts (build + smoke)` are green for
 that exact commit, this document can be finalized as the Sprint 24 closing
 artifact (§25).
@@ -579,7 +589,15 @@ sprint.
 `SMOKE OK: all artifact checks passed.` (2026-08-23, re-run after the Linux
 portability fix below).
 
-### Linux portability defect found by remote CI, and fixed
+### Remote CI history for this gate
+
+| Attempt | Commit / run | Result |
+|---|---|---|
+| 1 | PR #33, CI run `32656512688` | **FAILED** `Artifacts (build + smoke)` — Linux secret-directory permission defect in the smoke fixture (below). All five other required checks green. |
+| 2 | PR #33 @ `486bee8`, CI run `32657860558` | `Artifacts (build + smoke)` **PASSED** — the permission fix is confirmed remotely. Integration, Dependency audit, Secret scan, and CodeQL also passed. **FAILED** `Validate (offline)`: one unit test, a second Linux portability defect (§18). |
+| 3 | not yet run | Pending — the fix for attempt 2's failure is in the working tree, uncommitted. |
+
+### Defect 1 — Linux secret-directory permissions (fixed, remotely confirmed)
 
 The first remote run of this gate **failed** — PR #33, CI run `32656512688`,
 job `Artifacts (build + smoke)` — at the first Sprint 24 step:
@@ -664,6 +682,61 @@ via the `trap`) — no secret file is stored in the repository.
 
 ---
 
+### Defect 2 — SMTP timeout test bound IPv4, dialled `localhost` (fixed, not yet re-run remotely)
+
+CI run `32657860558` (`486bee8`) had `Artifacts (build + smoke)` green but
+`Validate (offline)` red: **913 of 914 unit tests passed**, with one failure in
+`apps/api/src/modules/mail/smtp-failure-redaction.test.ts` →
+*connection timeout (unresponsive provider endpoint)*. The runner reported
+`connect ECONNREFUSED ::1:<ephemeral-port>` where the test asserts the error
+contains `timeout`.
+
+**Root cause (confirmed by reproduction).** The fixture's silent listener binds
+IPv4 loopback only (`server.listen(0, '127.0.0.1', …)`), while the shared
+`mailer()` helper dialled `host: 'localhost'` — so the test was never
+endpoint-deterministic. On a dual-stack Linux host `localhost` resolves to
+`::1` first, and **nodemailer resolves the hostname itself rather than handing
+the name to `net.connect`** (`resolveHostname` in
+`nodemailer/lib/shared/index.js`), so Node's happy-eyeballs behavior does not
+apply the way it does to a plain `net.connect('localhost')`. The runner's
+client reached the empty IPv6 loopback and was refused instead of reaching the
+intentionally silent listener.
+
+This test is the one that surfaced it because its budget is 300 ms rather than
+the suite's usual 5 s; the sibling cases against the same IPv4-only fixture
+stayed green. The precise interaction between address ordering and that short
+budget was not pinned down and does not need to be — the fix removes the
+ambiguity entirely by dialling the address the listener actually bound.
+
+Demonstrated under Linux Node 22 against an IPv4-only silent listener:
+
+```text
+host=::1       -> connect ECONNREFUSED ::1:41599   # the CI failure
+host=127.0.0.1 -> Connection timeout               # the intended path
+```
+
+This was a **test-fixture address-family mismatch**. No SMTP application
+behavior, transport configuration, timeout logic, or redaction code was
+involved or changed.
+
+**Fix.** `startSilentListener` now returns the address it actually bound, and
+`mailer()` takes an optional `host` defaulting to `localhost`; only the timeout
+case passes the listener's literal address. The other five cases — rejected
+authentication, rejected sender, rejected recipient, connection refused, and
+untrusted certificate — deliberately keep `localhost`, because the TLS fixture
+certificate certifies that name. The assertion was **not** loosened to accept
+`ECONNREFUSED`; doing so would have destroyed the test's purpose.
+
+**Verified behavior, not just the assertion:** the listener accepts 1 socket
+(so the connection genuinely succeeds), the failure arrives at ~307 ms against
+a 300 ms budget, the message is `Connection timeout`, and `ECONNREFUSED` is
+absent. The suite passed 5 consecutive runs.
+
+**Remote status: pending.** This fix is uncommitted, so `Validate (offline)`
+has not been re-run against it.
+
+---
+
 ## 18. Local Validation Evidence
 
 All commands executed on 2026-08-23 against the working tree.
@@ -700,28 +773,25 @@ pnpm vitest run apps/api/src/lib/logging.test.ts
 
 ## 19. Remote Validation Evidence
 
-**PENDING OPERATOR ACTION — one remote run has happened and it FAILED; the
-fix is in the working tree and is not yet pushed.**
+**PENDING OPERATOR ACTION — two remote runs have happened; the fix for the
+second failure is in the working tree and is not yet pushed.**
 
-**First remote attempt — PR #33 (`sprint-24-runtime-secrets`), CI run
-`32656512688`: FAILED.** Five of the six required checks were green
-(`Validate (offline)`, `Integration (PostgreSQL + Redis)`,
-`Dependency audit (pnpm)`, `Secret scan (Gitleaks)`,
-`Analyze (javascript-typescript)`); `Artifacts (build + smoke)` failed on the
-Linux-only fixture-permission defect analysed in §17. That run is preserved
-here as historical evidence — it is **not** superseded evidence, because the
-remediation has not been pushed.
+| Run | Commit | Outcome |
+|---|---|---|
+| `32656512688` | PR #33 | **FAILED** `Artifacts (build + smoke)` (Linux secret-directory permissions). Five other required checks green. |
+| `32657860558` | PR #33 @ `486bee8` | `Artifacts (build + smoke)` **PASSED** — permission fix confirmed remotely. Integration, Dependency audit, Secret scan, CodeQL passed. **FAILED** `Validate (offline)`: 913/914 unit tests, one SMTP timeout fixture defect (§17, Defect 2). |
+| — | pending | The Defect 2 fix is uncommitted; no workflow has run against it. |
 
-**No remote evidence exists for the corrected harness.** The fix is uncommitted,
-so no workflow has run against it. Sprint 23's `main` @ `6019db8` must not be
-read as Sprint 24 validation either.
+Both runs are preserved as historical evidence. Sprint 23's `main` @ `6019db8`
+must not be read as Sprint 24 validation either.
 
 `main` is protected by ruleset `19769611` with no bypass actors, so a direct
 push to `main` is rejected — the changes must land through a pull request whose
 six required checks pass.
 
 **Step 1 — the branch already exists; stage and commit the fix (operator does
-this manually):**
+this manually). `git push` with no `-u` is correct: the upstream is already
+set from the earlier push.**
 
 ```sh
 git switch sprint-24-runtime-secrets   # already created for PR #33
@@ -795,11 +865,12 @@ Workflow definitions were reviewed and **not modified**: `ci.yml`,
 least-privilege `permissions:`, concurrency groups, `pull_request` (never
 `pull_request_target`) triggers, and credential-free jobs.
 
-Record the new run IDs and conclusions in this section once they exist, keeping
-the failed run `32656512688` recorded above. Until `Artifacts (build + smoke)`
-is green for the corrected commit, this gate stays PENDING OPERATOR ACTION and
-Sprint 24 stays open. **Do not describe the artifact gate as green until that
-run actually passes.**
+Record the new run ID and conclusions in the table above once they exist,
+keeping both prior runs recorded. `Artifacts (build + smoke)` is green as of
+`486bee8`; **`Validate (offline)` is not**, and must not be described as green
+until it actually passes for the corrected commit. Until all six required
+checks are green on one commit, this gate stays PENDING OPERATOR ACTION and
+Sprint 24 stays open.
 
 ---
 

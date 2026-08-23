@@ -215,6 +215,20 @@ Requirements: Docker with compose v2 and `curl`; no workspace install, **no
 real secrets and no email-provider credentials**. Ports 3000/8080/3010 must be
 free (stop `pnpm dev` first).
 
+### Loopback test fixtures: dial the address you bound
+
+A second Linux-only failure (PR #33, CI run 32657860558) came from the same
+class of defect in a unit test: a fixture bound a listener on `127.0.0.1` but
+the client connected to `localhost`, which resolves to `::1` first on a
+dual-stack Linux host. The connection was refused instead of reaching the
+listener, turning a timeout test into a connection-refused test.
+
+**Convention:** when a test starts a loopback listener, connect to the address
+`server.address()` reports, not to `localhost`. The exception is TLS fixtures —
+`mail/testing/tls-fixtures.ts` certifies `localhost`, so tests that must pass
+certificate hostname verification keep using that name and rely on the listener
+being reachable over IPv4. Both traps are invisible on macOS.
+
 ### Image pinning policy
 
 Every active image reference — Dockerfile base images, both `infra/` compose

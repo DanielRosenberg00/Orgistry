@@ -228,11 +228,13 @@ Phase 6: End-to-End Verification & Security Review
 > their original text.
 
 ### Phase 4 — Production infrastructure & deployment
-- **Sprint 23 — Deployable artifact. Local implementation & validation
-  complete (2026-08-23); remote Sprint 23 DoD evidence pending** (the working
-  tree is uncommitted — the CI / Security / CodeQL / `Artifacts (build +
-  smoke)` workflows must pass remotely after the human pushes before the
-  sprint can finally close). Delivered: production-shaped non-root container
+- **Sprint 23 — Deployable artifact. COMPLETE (2026-08-23; DoD met).**
+  Merged as PR #28 (7/7 checks successful, implementation commit `37a586c`);
+  post-merge `main` (`6019db8`) workflows all green (CI 32650121796 incl.
+  the `Artifacts (build + smoke)` job, Security 32650121899, CodeQL
+  32650121792); the artifact check is registered as a required check in
+  ruleset 19769611 (API-verified — branch-enforced). Delivered:
+  production-shaped non-root container
   artifacts for API (esbuild bundle of the existing entrypoints +
   lockfile-exact hoisted production node_modules;
   `node:22.23.2-bookworm-slim`) and web (Vite build on nginx-unprivileged,
@@ -251,13 +253,13 @@ Phase 6: End-to-End Verification & Security Review
   rescheduled here — they remain open Phase 4 work (ORG-PR-001 residual,
   006, 021, 022) to be scheduled at a later sprint boundary. Local exit
   evidence: `pnpm validate`, `pnpm validate:integration`, and
-  `pnpm artifact:smoke` exit 0. Artifact (provisional pending remote
-  evidence): [sprint-23-artifact-package.md](sprint-23-artifact-package.md);
+  `pnpm artifact:smoke` exit 0. Closing artifact:
+  [sprint-23-artifact-package.md](sprint-23-artifact-package.md);
   docs: [../deployment-artifacts.md](../deployment-artifacts.md).
-- **Sprint 24 — Runtime Secrets and External Email Validation** (reserved by
-  the binding Sprint 23 specification; **begins only if Sprint 23 remote
-  closure succeeds** — if Sprint 23 leaves an artifact/runtime gap, that
-  residual is closed first). Scope: runtime secret-injection
+- **Sprint 24 (next) — Runtime Secrets and External Email Validation**
+  (reserved by the binding Sprint 23 specification; its gateway condition —
+  successful Sprint 23 remote closure — is satisfied, so this sprint may
+  begin). Scope: runtime secret-injection
   implementation/integration, secret rotation procedures, JWT/access-token
   secret rotation planning, external production SMTP/provider validation
   (sender-domain requirements, SPF/DKIM/DMARC posture where applicable, real
@@ -292,7 +294,7 @@ Phase 6: End-to-End Verification & Security Review
 ## Critical path
 
 `Sprint 15 → Sprint 16 → Sprint 23 → Sprint 24 (runtime secrets & email
-validation, contingent on Sprint 23 remote closure) → the backups/DR work →
+validation) → the backups/DR work →
 the verification/external-review work → Launch`, with
 Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restore
 (ORG-PR-005, the backups/DR work) is the longest-pole reliability item and must

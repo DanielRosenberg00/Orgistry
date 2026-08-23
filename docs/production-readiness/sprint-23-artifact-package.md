@@ -1,15 +1,15 @@
 # Sprint 23 Artifact Package — Deployable Artifact and Pipeline
 
-> **STATUS: PROVISIONAL — pending remote validation evidence.** Local
-> implementation and local validation are complete; the Sprint 23 Definition
-> of Done additionally requires the remote workflows (CI — including the new
-> `Artifacts (build + smoke)` job — Security scans, CodeQL) to pass on the
-> pushed changes, and the artifact check to be registered as a required check
-> in the `main` ruleset. This document becomes the final closing artifact
-> only after that remote evidence is recorded here. Until then, Sprint 23 is
-> **not closed**.
+> **STATUS: FINAL — Sprint 23 Definition of Done MET (2026-08-23).** This is
+> the official Sprint 23 closing artifact. Local implementation, local
+> validation, PR remote validation (PR #28: 7/7 checks successful),
+> post-merge `main` validation (CI 32650121796 / Security 32650121899 /
+> CodeQL 32650121792 — all success on `6019db8`), and branch-required
+> enforcement of the `Artifacts (build + smoke)` check (ruleset 19769611,
+> API-verified) are all complete. Full evidence: §24.
 
-- **Execution date:** 2026-08-23 (local implementation & validation)
+- **Execution date:** 2026-08-23 (local implementation & validation; remote
+  closure the same day — merged as PR #28, `main` @ `6019db8`)
 - **Scope:** production-shaped deployable artifacts for the currently required
   runtime — API container, web container, explicit migration entrypoint,
   production-like validation runtime, deterministic smoke gate, CI enforcement,
@@ -183,14 +183,14 @@ images; a build or smoke failure fails the job. The existing `validate`,
 `integration`, Security-scans, and CodeQL workflows are unchanged (service
 images digest-pinned only). `actionlint` exits 0.
 
-**Branch enforcement (mandatory human closure action):** the `main` ruleset
-selects required status checks by explicit check name (Sprint 22 registered
-the CI/Security/CodeQL checks individually), so the new
-`Artifacts (build + smoke)` check does **not** gate merges automatically —
-it must be added to the ruleset's required checks after its first remote
-run. Until that registration is verified (e.g. `gh api
-/repos/DanielRosenberg00/Orgistry/rulesets`), this package does not claim
-the artifact gate is branch-enforced.
+**Branch enforcement (verified):** the `main` ruleset selects required
+status checks by explicit check name, so `Artifacts (build + smoke)` did not
+gate merges automatically; after its first remote run the human added it to
+ruleset `19769611` and verified via the GitHub API that the required list is
+now six checks — `Validate (offline)`, `Integration (PostgreSQL + Redis)`,
+`Artifacts (build + smoke)`, `Dependency audit (pnpm)`,
+`Secret scan (Gitleaks)`, `Analyze (javascript-typescript)`. The artifact
+gate is **branch-enforced on `main`**.
 
 ## 13. Smoke-Test Strategy and Results
 
@@ -222,12 +222,12 @@ All commands run locally on 2026-08-23, final working tree:
 | `git diff --check` | PASS | no whitespace errors |
 | `pnpm scan:deps` | PASS (exit 0) | after in-range transitive updates; only the documented acceptance remains ignored |
 | `pnpm scan:deps:local` | PASS (exit 0) | osv-scanner: "No issues found", GHSA-mh99-v99m-4gvg listed as configured acceptance |
-| `pnpm scan:secrets` | PASS | Gitleaks 37 commits, "no leaks found" (also `gitleaks dir` over the new fake-credential files: no leaks). History scanning cannot cover the still-uncommitted files — the remote post-commit scan is part of the final DoD evidence |
+| `pnpm scan:secrets` | PASS | Gitleaks 37 commits, "no leaks found" (also `gitleaks dir` over the new fake-credential files: no leaks). History scanning could not cover the then-uncommitted files; remote secret scanning subsequently covered them: PR #28 passed the `Secret scan (Gitleaks)` check (PR-level Security run id not recorded), and the post-merge `main` Security run 32650121899 completed successfully (§24) |
 | `actionlint` | PASS | exit 0 after `ci.yml` changes |
 | `pnpm build:api` | PASS | `dist/server.mjs` 327.5 kB, `dist/migrate.mjs` 2.0 kB; bundle boots standalone outside the workspace (fails exactly at config validation with no env — proves module resolution) |
 | `pnpm artifact:build` (via smoke) | PASS | both images build; `docker compose config` valid for both compose files |
 | `./tooling/artifact-smoke.sh` | PASS ("SMOKE OK", exit 0; run 3× total during hardening) | full check list in §13 |
-| Remote CI / Security / CodeQL / artifacts-job runs | BLOCKED | requires the human operator to commit and push (§ Human follow-up); no remote evidence exists for this working tree |
+| Remote CI / Security / CodeQL / artifacts-job runs | PASS (recorded after closure) | initially BLOCKED on the uncommitted tree; completed via PR #28 and post-merge `main` runs — full remote evidence in §24 |
 
 ## 15. Documentation Updates
 
@@ -255,8 +255,8 @@ unchanged), `production-scorecard.md`
 
 ## 16. Findings Closed
 
-Finding status here reflects implementation evidence and is distinct from
-Sprint DoD status (which is pending remote evidence — see the banner).
+Finding status reflects implementation evidence and is distinct from Sprint
+DoD status (now MET — see the banner and §24).
 
 - **ORG-PR-042 — CLOSED.** Every active image reference is exact-patch-tag +
   manifest-list-digest pinned (Dockerfiles, both compose files, CI services);
@@ -328,10 +328,14 @@ environment exists. Four P1 blockers remain open.
 
 ## 23. Recommended Next Sprint
 
-**If Sprint 23 remote closure succeeds, the next sprint is Sprint 24 —
-Runtime Secrets and External Email Validation** (reserved by the binding
-Sprint 23 specification). If remote closure exposes an artifact/runtime gap,
-that residual is closed before Sprint 24 begins. Focus: runtime secret-injection
+Sprint 23 remote closure succeeded (§24), so the binding gateway condition is
+satisfied: the next sprint is **Sprint 24 — Runtime Secrets and External
+Email Validation**, and it may begin. Readiness basis: the runtime artifact
+boundary Sprint 24 builds on now exists and is branch-enforced — a
+production-shaped API artifact that reads server secrets exclusively from the
+runtime environment at process start (the exact seam a secrets
+manager/rotation workflow plugs into), and a production-posture smtp mail
+driver whose external delivery is the validation target. Focus: runtime secret-injection
 implementation/integration, secret rotation procedures, JWT/access-token
 secret rotation planning (relates to ORG-PR-049), external production
 SMTP/provider validation — sender-domain requirements, SPF/DKIM/DMARC
@@ -341,3 +345,100 @@ ORG-PR-006**. It consumes what this sprint produced: the runtime
 secret-injection boundary and the production-shaped smtp-driver artifact.
 ORG-PR-001's residual deployment-environment/promotion work remains open and
 must be scheduled separately; that scheduling is not decided here.
+
+## 24. Remote Closure Evidence (final DoD)
+
+Recorded 2026-08-23, distinguishing the four evidence classes:
+
+**Local validation evidence** — §14 (unchanged: validate, integration,
+scans, actionlint, `pnpm artifact:smoke` all exit 0 on the pre-push tree).
+
+**PR validation evidence** — PR **#28** "feat(runtime): add deployable
+artifacts and CI smoke gate" (implementation commit `37a586c`) completed
+with **7 successful / 0 failing / 0 cancelled / 0 skipped / 0 pending**:
+`CI/Validate (offline)`, `CI/Integration (PostgreSQL + Redis)`,
+`CI/Artifacts (build + smoke)`, `Security scans/Dependency audit (pnpm)`,
+`Security scans/Secret scan (Gitleaks)`,
+`CodeQL/Analyze (javascript-typescript)`, `CodeQL`. Merged into `main`.
+
+**Post-merge `main` validation evidence** — merge commit **`6019db8`**;
+push-triggered workflows all succeeded:
+
+| Workflow | Run id | Result | Elapsed |
+| --- | --- | --- | --- |
+| CI | 32650121796 | success | 1m28s |
+| Security scans | 32650121899 | success | 18s |
+| CodeQL | 32650121792 | success | 2m0s |
+
+CI job-level results for run 32650121796: `Artifacts (build + smoke)`
+success · `Integration (PostgreSQL + Redis)` success · `Validate (offline)`
+success.
+
+**Branch-enforcement evidence** — ruleset `19769611` ("main branch
+protection"): the human added `Artifacts (build + smoke)` to the required
+status checks (previously five: Validate / Integration / Dependency audit /
+Secret scan / Analyze) and verified its presence through the GitHub API. The
+artifact gate is branch-required on `main`.
+
+## 25. Confidence Assessment
+
+Senior-engineering confidence per area, tied to what was actually exercised:
+
+- **Artifact build reproducibility — high.** Frozen-lockfile installs,
+  tag+digest-pinned bases, and deterministic bundling; built repeatedly on
+  two architectures (local arm64, CI x64) with identical results.
+- **Runtime boot correctness — high** for the exercised paths: packaged
+  artifact boots under `NODE_ENV=production` with guard-passing config, on
+  both local and CI runs, including one standalone boot outside any
+  workspace. Not exercised: long-running behavior, load.
+- **Health/readiness behavior — high.** `/health`, `/ready` success,
+  coarse-disclosure bodies, fail-closed readiness on Redis loss, and
+  recovery are all asserted from the packaged artifact locally and in CI,
+  and match the source-level test suites.
+- **Secret boundary — high for the enforced invariants** (no build-time
+  secrets, no `.env` in images, secrets absent from logs/web assets,
+  guard rejection proven from the artifact). No confidence is claimed for
+  real secret lifecycle management — that does not exist (ORG-PR-006).
+- **Non-root posture — high.** UIDs 1000/101 proven by execution; `/app`
+  write-refusal proven; no elevated startup privileges.
+- **Image policy — high.** Every active reference tag+digest-pinned;
+  every pinned reference actually pulled and run by the smoke gate locally
+  and remotely. Residual: workflow `services:` pins age outside Dependabot.
+- **CI enforcement — high.** The gate ran green remotely on PR and `main`
+  and is a required check in the ruleset (API-verified). Its
+  failure-detection behavior is inherited from the locally-proven smoke
+  script; a deliberate remote negative-path test was not performed.
+- **Deployment readiness — deliberately low/none.** Nothing in this sprint
+  exercised a real environment, registry, promotion, or rollback; no
+  confidence is claimed (ORG-PR-001 open).
+
+## 26. Sprint Changelog
+
+1. Repository/runtime inspection — established that nothing was runnable
+   outside the pnpm workspace (tsx + TS-source workspace exports).
+2. Artifact implementation — esbuild bundle of existing entrypoints, hoisted
+   prod node_modules, API/web Dockerfiles, `.dockerignore`, compose
+   reference, migration entrypoint.
+3. Smoke-test hardening — three defect-fix iterations (`.d.ts`/registry
+   tarball false positives in image hygiene; `requestId` log key;
+   pipefail/SIGPIPE on `compose logs | grep -q`).
+4. Image-policy closure — tag+digest pins across Dockerfiles, both compose
+   files, CI services; Dependabot docker ecosystem; ORG-PR-042 closed.
+5. Documentation synchronization — `deployment-artifacts.md` plus 15
+   existing docs; validation-unblocking in-range advisory updates
+   (fast-uri, js-yaml, nanoid, brace-expansion).
+6. Roadmap scope correction — reverted an unauthorized future-sprint
+   renumbering; restored the binding Sprint 24 (Runtime Secrets and
+   External Email Validation) preview.
+7. Completion-state correction — provisional package status; explicit
+   local-vs-remote DoD separation; branch-enforcement registration marked a
+   mandatory closure action.
+8. Future-sprint numbering normalization — de-numbered the unscheduled
+   Phase 5–6 placeholders ("Later sprint — …"); launch-checklist columns
+   moved to `TBD`; conditional Sprint 24 gateway wording.
+9. PR validation — PR #28, 7/7 checks successful.
+10. Branch-required artifact gate — `Artifacts (build + smoke)` registered
+    in ruleset 19769611 and API-verified.
+11. Post-merge `main` validation — CI/Security/CodeQL all green on
+    `6019db8`.
+12. Final artifact closure — this package finalized; Sprint 23 DoD met.

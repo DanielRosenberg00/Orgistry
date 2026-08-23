@@ -122,13 +122,15 @@ the P1/P2 work and the launch gate (see
 > production-ready*; the state remains **C — Ready to continue production
 > implementation** (not ready for staging, not ready for production).
 
-> **Status update (Sprint 23, 2026-08-23 — local implementation/validation
-> complete; remote Sprint 23 DoD evidence pending).** The deployable-artifact
+> **Status update (Sprint 23, 2026-08-23 — COMPLETE, DoD met: PR #28 merged,
+> `main` @ `6019db8` workflows green, artifact check branch-required in
+> ruleset 19769611).** The deployable-artifact
 > sprint raised Infrastructure 0→2: production-shaped non-root container
 > artifacts (API + web), an explicit one-shot migration entrypoint, a
-> production-like compose validation reference, and a CI build+smoke gate
-> (first remote run pending push) now exist
-> and are validated locally from the packaged artifacts (`pnpm artifact:smoke`).
+> production-like compose validation reference, and a branch-required CI
+> build+smoke gate (green locally, on PR #28, and on `main` — CI run
+> 32650121796) now exist
+> and are validated from the packaged artifacts (`pnpm artifact:smoke`).
 > ORG-PR-042 closed (every active image reference pinned tag+digest);
 > ORG-PR-001 and ORG-PR-006 advanced but open — there is still no deployment
 > environment, pipeline, IaC, registry publishing, secrets manager, or

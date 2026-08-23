@@ -367,14 +367,10 @@ protection") rather than legacy branch protection. Enforcement is `active` with
 **no bypass actors**. It:
 
 - requires a pull request (direct pushes to `main` are refused);
-- requires all five status checks — `Validate (offline)`,
-  `Integration (PostgreSQL + Redis)`, `Dependency audit (pnpm)`,
-  `Secret scan (Gitleaks)`, `Analyze (javascript-typescript)`;
-  **Sprint 23 pending action:** the ruleset selects checks by explicit name,
-  so the new `Artifacts (build + smoke)` job runs on every PR but does NOT
-  gate merges until it is added to this list — it **must** be registered as
-  the sixth required check (after its first remote run makes the check name
-  selectable) for the artifact gate to be branch-enforced;
+- requires all six status checks — `Validate (offline)`,
+  `Integration (PostgreSQL + Redis)`, `Artifacts (build + smoke)`
+  (registered at Sprint 23 closure and API-verified), `Dependency audit
+  (pnpm)`, `Secret scan (Gitleaks)`, `Analyze (javascript-typescript)`;
 - enables code-scanning merge protection for CodeQL at
   `high_or_higher` security alerts and `errors` for tool failures;
 - blocks branch deletion and non-fast-forward pushes.
@@ -387,8 +383,8 @@ apply. Human review is therefore the one part of this gate that is **not**
 technically enforced — raise this to 1 when a second maintainer joins.
 
 Working-model consequence: commit directly to a branch, open a pull request,
-let the checks run (five required today; six once the artifact check is
-registered), then merge. `git push origin main` will be rejected.
+let the six required checks run, then merge. `git push origin main` will be
+rejected.
 
 Verify the live configuration — documentation can drift, the API cannot:
 

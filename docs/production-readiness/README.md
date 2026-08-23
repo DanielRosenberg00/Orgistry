@@ -178,12 +178,13 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > **C — Ready to continue production implementation**. Recommended next:
 > **Sprint 23 — Deployable artifact & pipeline** (Phase 4).
 
-> **Sprint 23 update (2026-08-23) — deployable artifact. Local
-> implementation and validation complete; remote Sprint 23 DoD evidence
-> pending** (the working tree is uncommitted; the CI / Security / CodeQL /
-> `Artifacts (build + smoke)` workflows must pass remotely after push, and
-> the new artifact check must be registered in the `main` ruleset, before the
-> sprint finally closes). Implemented: production-shaped
+> **Sprint 23 update (2026-08-23) — deployable artifact. COMPLETE — Sprint
+> 23 DoD MET:** merged as PR #28 (7/7 checks successful, implementation
+> commit `37a586c`); post-merge `main` (`6019db8`) workflows all green (CI
+> 32650121796, Security 32650121899, CodeQL 32650121792); and
+> `Artifacts (build + smoke)` is registered as a required check in ruleset
+> 19769611 (API-verified — the artifact gate is branch-enforced).
+> Implemented: production-shaped
 > non-root container artifacts for the API (esbuild bundle of the existing
 > `server.ts`/`migrate.ts` entrypoints + lockfile-exact hoisted production
 > node_modules on `node:22.23.2-bookworm-slim`) and the web demo (Vite build
@@ -191,8 +192,9 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > entrypoint (`node dist/migrate.mjs` — migrations never run at API boot); a
 > production-like compose validation reference
 > (`infra/compose.production-like.yml`, fake guard-passing config only); and
-> a deterministic smoke gate (`tooling/artifact-smoke.sh`, added as the CI
-> `artifacts` job — not yet executed remotely) proving production-mode boot,
+> a deterministic smoke gate (`tooling/artifact-smoke.sh`, the CI
+> `artifacts` job — green locally, on PR #28, and on `main`) proving
+> production-mode boot,
 > health/readiness (incl. fail-closed on a
 > Redis stop), non-root UIDs, read-only application tree, artifact hygiene,
 > secret absence from logs and web assets, config-guard rejection of dev
@@ -203,16 +205,15 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > **ORG-PR-006 remains open** (runtime injection boundary enforced; no
 > secrets manager, no rotation). `pnpm validate`, `pnpm validate:integration`,
 > and `pnpm artifact:smoke` exit 0 (2026-08-23). See
-> [sprint-23-artifact-package.md](sprint-23-artifact-package.md)
-> (provisional pending remote evidence) and
+> [sprint-23-artifact-package.md](sprint-23-artifact-package.md) (final
+> closing artifact) and
 > [../deployment-artifacts.md](../deployment-artifacts.md). Four P1 blockers
 > remain open (ORG-PR-001/002/005/006); the repository is still **not ready
 > for staging or production** — the state remains **C — Ready to continue
-> production implementation**. If Sprint 23 remote closure succeeds, the
-> next sprint is **Sprint 24 — Runtime Secrets and External Email
-> Validation** (reserved by the binding Sprint 23 specification;
-> ORG-PR-002, ORG-PR-006); if remote closure exposes an artifact/runtime
-> gap, that residual is closed first.
+> production implementation**. Sprint 23 remote closure succeeded, so the
+> gateway condition is met — recommended next: **Sprint 24 — Runtime
+> Secrets and External Email Validation** (binding Sprint 23 specification;
+> ORG-PR-002, ORG-PR-006).
 
 ## Audit context
 

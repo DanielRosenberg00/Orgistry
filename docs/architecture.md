@@ -32,13 +32,16 @@ packages/
   shared/     Low-level primitives: prefixed IDs, request IDs, cursors, env loader
   auth-core/  Security primitives: Argon2id, JWT, opaque-token hash, redaction
   db/         Drizzle schema, migrations, client factory, guarded test reset
-infra/        Docker Compose: PostgreSQL, Redis, Mailpit
-tooling/      Validation helpers (schema-drift check, demo seed)
+infra/        Docker Compose: local dev stack + production-like artifact reference
+tooling/      Validation helpers (schema-drift check, demo seed, artifact smoke)
 docs/         Authoritative + historical documentation
 ```
 
 Internal `@orgistry/*` packages are consumed as **TypeScript source** — no build
-step. `tsx`, Vite, Vitest, and `tsc` pick up edits directly.
+step in development. `tsx`, Vite, Vitest, and `tsc` pick up edits directly.
+(The Sprint 23 production API artifact bundles this source with esbuild —
+`pnpm build:api` — precisely because the packages are otherwise not runnable
+by plain Node; see [deployment-artifacts.md](deployment-artifacts.md).)
 
 ## App and package responsibilities
 

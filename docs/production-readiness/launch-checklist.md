@@ -4,7 +4,10 @@ Traceable, staged checklist derived from [findings-register.md](findings-registe
 and [production-roadmap.md](production-roadmap.md). Every item links a finding and
 a roadmap sprint. Status at the Sprint 14 audit baseline was **Open** for all
 items (no production work was performed during the audit itself); the Status
-column now carries later per-item updates (e.g. Sprint 15). Owner types:
+column now carries later per-item updates (e.g. Sprint 15). A Sprint-column
+value of `TBD` marks work mapped to the roadmap's unnumbered later-phase
+placeholders; it receives a sprint number when actually scheduled. Owner
+types:
 **Eng** (engineering), **SecEng** (security), **Ops** (operations/SRE),
 **Legal**, **Product**.
 
@@ -17,22 +20,22 @@ column now carries later per-item updates (e.g. Sprint 15). Owner types:
 | LC-1.3 | Resolve or remove unused `COOKIE_SECRET` | ORG-PR-047 | 15 | config change + test | Eng | **Closed (S15):** removed as unused; test proves it is neither required nor exposed |
 | LC-1.4 | SHA-pin CI actions + add `permissions:` block | ORG-PR-019 | 21 | workflow diff | SecEng | **Closed (S21):** all `uses:` are verified full commit SHAs; workflow-level `contents: read` with `security-events: write` scoped to the CodeQL job only; `concurrency` groups; actionlint exit 0 |
 | LC-1.5 | Add dependency/secret/SAST scanning to CI | ORG-PR-020 | 21/22 | CI runs scanners | SecEng | **Closed (S22):** all three workflows green remotely on `c33a150f` (runs 30205303375 / 30205303370 / 30205303373); the Gitleaks job proved to FAIL on a seeded synthetic secret (run 30207672121, `generic-api-key`, redacted, temporary branch deleted and never merged); CodeQL's 41 baseline alerts fully triaged with individual dispositions; `main` ruleset makes the checks required |
-| LC-1.6 | Build deployable non-root artifacts + pipeline to staging | ORG-PR-001 | 23 | tagged build deploys to staging | Eng/Ops | Open |
-| LC-1.7 | Security headers + `trustProxy` + DB timeouts | ORG-PR-011, 010, 021 | 18/23 | header/proxy/timeout tests | Eng | Open — advanced (Sprint 19): security headers on every response (`apps/api/src/plugins/security-headers.ts`) and typed `TRUST_PROXY` shipped with tests (ORG-PR-010/011 closed); DB/pool/statement timeouts (ORG-PR-021) remain for Sprint 23 |
+| LC-1.6 | Build deployable non-root artifacts + pipeline to staging | ORG-PR-001 | 23 | tagged build deploys to staging | Eng/Ops | Open — advanced (Sprint 23): non-root API/web artifacts, one-shot migration entrypoint, production-like compose reference, and the CI `artifacts` build+smoke gate exist ([../deployment-artifacts.md](../deployment-artifacts.md)); the pipeline-to-staging half remains open, to be scheduled separately (see roadmap Phase 4) |
+| LC-1.7 | Security headers + `trustProxy` + DB timeouts | ORG-PR-011, 010, 021 | 18/23 | header/proxy/timeout tests | Eng | Open — advanced (Sprint 19): security headers on every response (`apps/api/src/plugins/security-headers.ts`) and typed `TRUST_PROXY` shipped with tests (ORG-PR-010/011 closed); DB/pool/statement timeouts (ORG-PR-021) remain open (not addressed in Sprint 23; scheduling TBD) |
 
 ## Stage 2 — Mandatory before production data
 
 | ID | Action | Findings | Sprint | Evidence to close | Owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| LC-2.1 | **Backups + PITR configured** | ORG-PR-005 | 24 | backup job runs; PITR verified | Ops | Open |
-| LC-2.2 | **Backup restore drill executed & passing** (mandatory) | ORG-PR-005, 028 | 24 | restore reconstructs DB to a timestamp + passes readiness/integration | Ops | Open |
+| LC-2.1 | **Backups + PITR configured** | ORG-PR-005 | TBD | backup job runs; PITR verified | Ops | Open |
+| LC-2.2 | **Backup restore drill executed & passing** (mandatory) | ORG-PR-005, 028 | TBD | restore reconstructs DB to a timestamp + passes readiness/integration | Ops | Open |
 | LC-2.3 | Secrets manager + rotation runbook | ORG-PR-006 | 23 | no committed secrets in non-local env; rehearsed rotation | Ops/SecEng | Open |
 | LC-2.4 | Least-privilege DB roles (runtime vs migration) | ORG-PR-022 | 23 | runtime role cannot DDL | Ops | Open |
 | LC-2.5 | Production email provider live | ORG-PR-002 | 16 | external-inbox delivery in staging | Eng | Open — advanced (S16): adapter + fail-closed config shipped; external delivery still pending credentials/staging |
-| LC-2.6 | Retention/expiry jobs + audit-read/org indexes | ORG-PR-015, 016, 014 | 24/20 | jobs observable; `EXPLAIN` index use | Eng/Ops | Open — advanced (S20): the audit-read org index shipped (`ix_security_events_org_created_id`, ORG-PR-014 closed with index-existence + EXPLAIN evidence); retention jobs still await a scheduler (ORG-PR-015/016) |
+| LC-2.6 | Retention/expiry jobs + audit-read/org indexes | ORG-PR-015, 016, 014 | TBD/20 | jobs observable; `EXPLAIN` index use | Eng/Ops | Open — advanced (S20): the audit-read org index shipped (`ix_security_events_org_created_id`, ORG-PR-014 closed with index-existence + EXPLAIN evidence); retention jobs still await a scheduler (ORG-PR-015/016) |
 | LC-2.7 | Role-transition policy enforced (per DG-2) | ORG-PR-017 | 20 | allow/block promotion tests | Eng | **Done (S20)** — in-transaction Owner-authority guard on role change AND removal; full allowed/forbidden matrix in route + live-DB suites |
 | LC-2.8 | Atomic quota enforcement + concurrency tests | ORG-PR-029, 044 | 20 | concurrent-create cannot exceed ceiling | Eng | **Done (S20)** — org+kind advisory-lock serialization on every quota-protected create/accept/complete; five real-PostgreSQL races prove exact ceilings and fail if the lock is removed |
-| LC-2.9 | Data-subject deletion/export path (per DG-3) | ORG-PR-025 | 24 | deletion/export integration tests | Eng/Legal | Open |
+| LC-2.9 | Data-subject deletion/export path (per DG-3) | ORG-PR-025 | TBD | deletion/export integration tests | Eng/Legal | Open |
 
 ## Stage 3 — Mandatory before public launch
 
@@ -41,23 +44,23 @@ column now carries later per-item updates (e.g. Sprint 15). Owner types:
 | LC-3.1 | Password recovery flow | ORG-PR-004 | 17 | reset integration tests (expiry/reuse/enum) | Eng | **Done (S17)** — route + live-DB suites cover expiry, reuse, concurrency, enumeration, revocation |
 | LC-3.2 | Email verification + register de-enumeration | ORG-PR-024, 030 | 16/17/18 | verification tests; no register oracle | Eng | **Done (S18)** — verification lifecycle (S16) + verification-first registration (S18): the register oracle is removed (contract-identical generic acceptance for all account states, proven by an equality-matrix test); a residual timing side channel is documented in the findings register |
 | LC-3.3 | Global/edge rate limiting + bound pre-auth writes + throttle inspect | ORG-PR-012, 013, 032 | 18 | limiter tests; load test bounds writes | SecEng | **Done (Sprint 19)** — global per-trusted-IP limiter, `invitations/inspect` per-IP + per-token-digest throttling, per-actor mutation buckets, and failed-auth `security_events` writes bounded per source IP (DB-backed storm test `api-key.failed-auth.integration.test.ts`) |
-| LC-3.4 | Rate-limit fail-closed option + alerting | ORG-PR-009 | 18/25 | fail-closed test + alert | SecEng/Ops | Open — advanced (Sprint 19): fail-closed implemented, tested, and production-default (`RATE_LIMIT_FAILURE_MODE`; guard refuses `open` in production); the alerting half awaits ORG-PR-007 (Sprint 25) |
-| LC-3.5 | Observability: metrics/tracing/dashboards/alerts | ORG-PR-007 | 25 | dashboard + synthetic-failure alert | Ops | Open |
-| LC-3.6 | Incident process + production runbooks + ops docs | ORG-PR-008, 027 | 25 | tabletop passes; docs published | Ops | Open |
-| LC-3.7 | External security review / pentest + DAST | ORG-PR-018, 020 | 26 | report with no unresolved high | SecEng | Open |
-| LC-3.8 | Failure-injection + E2E + live SMTP CI | ORG-PR-026, 041, 044 | 26 | suites green | Eng | Open |
+| LC-3.4 | Rate-limit fail-closed option + alerting | ORG-PR-009 | 18/TBD | fail-closed test + alert | SecEng/Ops | Open — advanced (Sprint 19): fail-closed implemented, tested, and production-default (`RATE_LIMIT_FAILURE_MODE`; guard refuses `open` in production); the alerting half awaits ORG-PR-007 (the observability work) |
+| LC-3.5 | Observability: metrics/tracing/dashboards/alerts | ORG-PR-007 | TBD | dashboard + synthetic-failure alert | Ops | Open |
+| LC-3.6 | Incident process + production runbooks + ops docs | ORG-PR-008, 027 | TBD | tabletop passes; docs published | Ops | Open |
+| LC-3.7 | External security review / pentest + DAST | ORG-PR-018, 020 | TBD | report with no unresolved high | SecEng | Open |
+| LC-3.8 | Failure-injection + E2E + live SMTP CI | ORG-PR-026, 041, 044 | TBD | suites green | Eng | Open |
 | LC-3.9 | Frontend hardening (error boundary, CSP, confirmations, a11y) | ORG-PR-023, 035, 036 | FE | component tests + CSP present | Eng | Open |
-| LC-3.10 | Legal/privacy review (regime, retention, subprocessors, breach) | ORG-PR-025, 043 | 15/24 | legal sign-off | Legal | Open |
+| LC-3.10 | Legal/privacy review (regime, retention, subprocessors, breach) | ORG-PR-025, 043 | 15/TBD | legal sign-off | Legal | Open |
 
 ## Stage 4 — Mandatory shortly after launch
 
 | ID | Action | Findings | Sprint | Evidence to close | Owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| LC-4.1 | PII retention enforcement in event metadata | ORG-PR-043, 015 | 24 | aged PII removed/anonymized | Eng/Legal | Open |
+| LC-4.1 | PII retention enforcement in event metadata | ORG-PR-043, 015 | TBD | aged PII removed/anonymized | Eng/Legal | Open |
 | LC-4.2 | JWT `kid`/rotation path | ORG-PR-049, 006 | 23+ | overlapping-key rotation test | SecEng | Open |
 | LC-4.3 | Best-effort writes isolated | ORG-PR-034 | 18 | throwing bookkeeping write doesn't fail request | Eng | Open |
 | LC-4.4 | Multi-tab refresh grace window | ORG-PR-050 | 18 | benign double-refresh keeps session | Eng | Open |
-| LC-4.5 | Refresh subsystem doc refresh (stale docs) | ORG-PR-046 | 26 | docs match source | Eng | Open |
+| LC-4.5 | Refresh subsystem doc refresh (stale docs) | ORG-PR-046 | TBD | docs match source | Eng | Open |
 
 ## Stage 5 — Optional maturity improvements
 

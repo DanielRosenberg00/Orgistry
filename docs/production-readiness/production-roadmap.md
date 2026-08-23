@@ -228,25 +228,58 @@ Phase 6: End-to-End Verification & Security Review
 > their original text.
 
 ### Phase 4 — Production infrastructure & deployment
-- **Sprint 23 (next) — Deployable artifact & pipeline.** Per-app non-root Dockerfiles,
-  minimal IaC for the target profile, build→migrate→deploy pipeline with rollback,
-  secrets manager + rotation, least-privilege DB roles, pool/statement/lock
-  timeouts. Closes ORG-PR-001, 006, 021, 022, 042. Deps: Phase 1–3. Exit: a
-  tagged build deploys reproducibly to staging; secret rotation rehearsed.
+- **Sprint 23 — Deployable artifact. Local implementation & validation
+  complete (2026-08-23); remote Sprint 23 DoD evidence pending** (the working
+  tree is uncommitted — the CI / Security / CodeQL / `Artifacts (build +
+  smoke)` workflows must pass remotely after the human pushes before the
+  sprint can finally close). Delivered: production-shaped non-root container
+  artifacts for API (esbuild bundle of the existing entrypoints +
+  lockfile-exact hoisted production node_modules;
+  `node:22.23.2-bookworm-slim`) and web (Vite build on nginx-unprivileged,
+  SPA fallback); explicit one-shot migration entrypoint
+  (`node dist/migrate.mjs` — never at API boot); production-like compose
+  validation reference with fake guard-passing config; deterministic smoke
+  gate (`tooling/artifact-smoke.sh`) added as the CI `artifacts` job;
+  tag+digest pinning across ALL active image references; runtime
+  secret-injection boundary enforced (no build-time secrets, no `.env` in
+  images, secrets absent from logs/web assets). **Closed ORG-PR-042
+  (implementation evidence). Left open, materially advanced: ORG-PR-001
+  (artifacts + CI gate exist; no deployment pipeline/environment),
+  ORG-PR-006 (injection boundary only; no manager/rotation).** The
+  deployment-automation, secrets-manager, least-privilege-DB-role, and
+  timeout items of the former combined entry were NOT executed and are not
+  rescheduled here — they remain open Phase 4 work (ORG-PR-001 residual,
+  006, 021, 022) to be scheduled at a later sprint boundary. Local exit
+  evidence: `pnpm validate`, `pnpm validate:integration`, and
+  `pnpm artifact:smoke` exit 0. Artifact (provisional pending remote
+  evidence): [sprint-23-artifact-package.md](sprint-23-artifact-package.md);
+  docs: [../deployment-artifacts.md](../deployment-artifacts.md).
+- **Sprint 24 — Runtime Secrets and External Email Validation** (reserved by
+  the binding Sprint 23 specification; **begins only if Sprint 23 remote
+  closure succeeds** — if Sprint 23 leaves an artifact/runtime gap, that
+  residual is closed first). Scope: runtime secret-injection
+  implementation/integration, secret rotation procedures, JWT/access-token
+  secret rotation planning, external production SMTP/provider validation
+  (sender-domain requirements, SPF/DKIM/DMARC posture where applicable, real
+  inbox delivery, email failure behavior), and the related operational
+  documentation. Primary findings: **ORG-PR-002, ORG-PR-006** (relates to
+  ORG-PR-049). The later Phase 5–6 work below keeps its content, ordering,
+  dependencies, and exit criteria but carries no assigned sprint numbers
+  yet — numbers are assigned when each item is actually scheduled.
 
 ### Phase 5 — Reliability, recovery & operations
-- **Sprint 24 — Backups, DR & background jobs.** Automated encrypted backups +
+- **Later sprint — Backups, DR & background jobs.** Automated encrypted backups +
   PITR, **tested restore drill**, migration-recovery rehearsal, scheduler/worker,
   retention/expiry jobs, retention enforcement, account deletion/export.
   Closes ORG-PR-005, 015, 016, 025, 028, 043. Exit: restore drill reconstructs DB
   to a timestamp and passes checks; jobs observable & idempotent.
-- **Sprint 25 — Observability & incident readiness.** Metrics + tracing +
+- **Later sprint — Observability & incident readiness.** Metrics + tracing +
   dashboards + alerts, production runbooks, incident process, ops documentation.
   Closes ORG-PR-007, 008, 027; supports ORG-PR-009 alerting. Exit: dashboard +
   synthetic-failure alert; tabletop against one runbook.
 
 ### Phase 6 — End-to-end verification & security review
-- **Sprint 26 — Verification & external review.** Failure-injection integration
+- **Later sprint — Verification & external review.** Failure-injection integration
   tests, browser E2E, live SMTP CI assertion, external pentest + DAST, standards
   re-map. Closes ORG-PR-026, 041; verifies 044; addresses external-verification
   items. Exit: E2E + failure-injection green; pentest findings triaged.
@@ -258,9 +291,12 @@ Phase 6: End-to-End Verification & Security Review
 
 ## Critical path
 
-`Sprint 15 → Sprint 16 → Sprint 23 → Sprint 24 → Sprint 26 → Launch`, with
+`Sprint 15 → Sprint 16 → Sprint 23 → Sprint 24 (runtime secrets & email
+validation, contingent on Sprint 23 remote closure) → the backups/DR work →
+the verification/external-review work → Launch`, with
 Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restore
-(Sprint 24) is the longest-pole reliability item and must precede production data.
+(ORG-PR-005, the backups/DR work) is the longest-pole reliability item and must
+precede production data.
 
 ## Parallelizable work
 
@@ -268,8 +304,8 @@ Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restor
   (frontend) run independent of the critical path.
 - **Sprint 18** and **Sprint 19** (both Phase 3) can run concurrently by different
   owners.
-- **Sprint 25** (observability) can begin once infra (Sprint 23) exists, in
-  parallel with Sprint 24.
+- **The observability work** (ORG-PR-007/008) can begin once infra
+  (Sprint 23) exists, in parallel with the backups/DR work.
 
 ## Decision gates
 
@@ -286,11 +322,12 @@ Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restor
 
 ## Dependency notes
 
-- **Infrastructure dependency:** everything in Phases 4–6 depends on Sprint 22 (deployable artifact).
+- **Infrastructure dependency:** everything in Phases 4–6 depends on Sprint 23 (deployable artifact).
 - **External service dependency:** a real email provider (Sprint 16) gates
   recovery/verification.
 - **Legal dependency:** ORG-PR-025/043 scope is blocked on DG-3 legal review.
-- **Security-review dependency:** launch is blocked on Sprint 25's external review.
+- **Security-review dependency:** launch is blocked on the external
+  security review (the Phase 6 verification/external-review work).
 
 ## Production launch gate
 

@@ -31,9 +31,9 @@ average — do not read a high domain score as launch clearance.
 | Application security | 2 | Yes | Safe error handler, no DTO leaks, in-mem token | No headers/proxy/global limit | ORG-PR-010, 011, 012, 013 | High |
 | Frontend | 1 | No (target: demo) | Exemplary token/secret handling | No error boundary/CSP | ORG-PR-023, 035, 036 | High |
 | Testing | 2 | Partly | Strong negative/isolation coverage + real-DB quota/authz concurrency races (S20) | No failure-injection/E2E | ORG-PR-026 | High |
-| CI/CD | 3 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22) | No release pipeline | ORG-PR-001 | High |
-| Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); images patch-pinned; two documented advisory acceptances | Digest pinning deferred (ORG-PR-042→001 track); no provenance/signing | ORG-PR-042, 001 | High |
-| Infrastructure | 0 | Yes | (local Compose only) | No deploy artifact/IaC | ORG-PR-001, 022 | High |
+| CI/CD | 3 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22); deployable-artifact build+smoke gate in CI (S23) | No release pipeline | ORG-PR-001 | High |
+| Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); every active image reference tag+digest-pinned (S23, ORG-PR-042 closed); two documented advisory acceptances | No provenance/signing; no registry publishing | ORG-PR-001 | High |
+| Infrastructure | 2 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23) | No deployment environment, pipeline, or IaC; no least-privilege DB roles | ORG-PR-001, 022 | High |
 | Reliability | 1 | Yes | Graceful shutdown; readiness probes | No backups/DR; fail-open | ORG-PR-005, 009 | High |
 | Backup & recovery | 0 | Yes | (none) | No backup/PITR/restore drill | ORG-PR-005, 028 | High |
 | Observability | 1 | Yes | Structured logs + request IDs | No metrics/tracing/alerts | ORG-PR-007 | High |
@@ -45,9 +45,10 @@ average — do not read a high domain score as launch clearance.
 
 - **Authorization/tenant isolation/documentation (level 3)** are genuine strengths
   and must not regress during remediation. They are *not* launch clearance.
-- **Infrastructure / backup & recovery (level 0)** and **reliability /
-  observability / operations (level 1)** are the domains gating any real
-  deployment — all downstream of the Phase 4/5 roadmap work.
+- **Backup & recovery (level 0)**, **infrastructure (level 2 since S23 —
+  artifacts exist, deployment does not)**, and **reliability / observability /
+  operations (level 1)** are the domains gating any real deployment — all
+  downstream of the Phase 4/5 roadmap work.
 - **Authentication and application security (level 2)** carry the security-relevant
   P1/P2s that Phase 2/3 close.
 
@@ -120,3 +121,18 @@ the P1/P2 work and the launch gate (see
 > (ORG-PR-001, 002, 005, 006).** The overriding rule still yields *not
 > production-ready*; the state remains **C — Ready to continue production
 > implementation** (not ready for staging, not ready for production).
+
+> **Status update (Sprint 23, 2026-08-23 — local implementation/validation
+> complete; remote Sprint 23 DoD evidence pending).** The deployable-artifact
+> sprint raised Infrastructure 0→2: production-shaped non-root container
+> artifacts (API + web), an explicit one-shot migration entrypoint, a
+> production-like compose validation reference, and a CI build+smoke gate
+> (first remote run pending push) now exist
+> and are validated locally from the packaged artifacts (`pnpm artifact:smoke`).
+> ORG-PR-042 closed (every active image reference pinned tag+digest);
+> ORG-PR-001 and ORG-PR-006 advanced but open — there is still no deployment
+> environment, pipeline, IaC, registry publishing, secrets manager, or
+> rotation procedure. **4 P1 blockers remain open (ORG-PR-001, 002, 005,
+> 006).** The overriding rule still yields *not production-ready*; the state
+> remains **C — Ready to continue production implementation** (not ready for
+> staging, not ready for production).

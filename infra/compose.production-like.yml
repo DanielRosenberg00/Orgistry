@@ -1,0 +1,136 @@
+# Production-like runtime reference for Orgistry (Sprint 23, ORG-PR-001).
+#
+# PURPOSE — a local/CI VALIDATION topology that proves the production-shaped
+# artifacts (apps/api/Dockerfile, apps/web-demo/Dockerfile) build, boot under
+# NODE_ENV=production, migrate, and pass health/readiness. It is NOT staging,
+# NOT production, and NOT a deployment recommendation:
+#
+#   - PostgreSQL and Redis run here only so the artifacts can be validated;
+#     a real deployment provides managed/external stateful services.
+#   - Mailpit stands in for the SMTP endpoint so the production config guard
+#     (MAIL_DRIVER=smtp + credentials) can be satisfied with fake values.
+#     Account-email DELIVERY is not exercised: the production smtp driver
+#     speaks implicit TLS, which Mailpit does not terminate here. A real
+#     deployment replaces this with a real email provider (ORG-PR-002, open).
+#   - Every credential below is a FAKE, checked-in, non-production value that
+#     exists only to satisfy boot-time validation. A real deployment injects
+#     real secrets at runtime (JWT_SECRET, SMTP_PASSWORD, database
+#     credentials) from the operator's secret store — never from this file
+#     and never at image-build time (ORG-PR-006 remains open).
+#
+# Startup order: postgres healthy -> migrate (one-shot, exits 0) -> api.
+# Migrations are an explicit step, never an API-boot side effect.
+#
+# Image policy (ORG-PR-042): exact patch tag + manifest-list digest, matching
+# infra/docker-compose.yml. Update procedure: docs/validation.md.
+name: orgistry-production-like
+
+services:
+  postgres:
+    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    environment:
+      POSTGRES_USER: orgistry
+      # Fake local-validation credential (this database lives and dies with
+      # this compose project); a real deployment uses a managed database.
+      POSTGRES_PASSWORD: orgistry-smoke-db-not-a-real-credential
+      POSTGRES_DB: orgistry
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U orgistry']
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7.4.10-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # Local SMTP stand-in only (see header). No ports are published; nothing in
+  # the smoke path delivers mail through it.
+  mailpit:
+    image: axllent/mailpit:v1.30.5@sha256:b868afa176bfd6cce2323ea316cd99ccad77915e51e595748f6d786700ecf109
+
+  # One-shot migration runner: the SAME API image, different entrypoint.
+  # Exits 0 after applying the baseline; the api service waits for it.
+  migrate:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: orgistry-api:production-like
+    command: ['node', 'dist/migrate.mjs']
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://orgistry:orgistry-smoke-db-not-a-real-credential@postgres:5432/orgistry
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: orgistry-api:production-like
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      LOG_LEVEL: info
+      DATABASE_URL: postgres://orgistry:orgistry-smoke-db-not-a-real-credential@postgres:5432/orgistry
+      REDIS_URL: redis://redis:6379
+      # OPERATOR-PROVIDED SECRET in a real deployment. This fake value only
+      # satisfies the production guard (>=32 chars, no placeholder markers);
+      # the smoke test asserts it never appears in logs.
+      JWT_SECRET: orgistry-smoke-jwt-not-a-real-secret-orgistry-smoke-jwt
+      COOKIE_SECURE: 'true'
+      # Production mail posture with fake credentials; delivery unexercised.
+      MAIL_DRIVER: smtp
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_USERNAME: orgistry-smoke-mailer
+      # OPERATOR-PROVIDED SECRET in a real deployment.
+      SMTP_PASSWORD: orgistry-smoke-smtp-not-a-real-credential
+      MAIL_FROM_EMAIL: no-reply@smoke.orgistry.dev
+      MAIL_FROM_NAME: Orgistry
+      # Fake public origins (the guard requires https + non-localhost; browser
+      # flows against them are out of smoke scope).
+      WEB_DEMO_URL: https://web.production-like.orgistry.dev
+      CORS_ORIGINS: https://web.production-like.orgistry.dev
+      TRUST_PROXY: 'false'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The runtime image is debian-slim without curl/wget; Node's fetch is
+      # the probe. /health is liveness-only (no dependency checks).
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web-demo/Dockerfile
+      args:
+        # Public frontend configuration (compiled into the browser bundle —
+        # non-secret by definition). Points at the API port published above.
+        VITE_API_BASE_URL: http://localhost:3000
+    image: orgistry-web:production-like
+    ports:
+      - '8080:8080'
+    depends_on:
+      api:
+        condition: service_healthy

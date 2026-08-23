@@ -73,8 +73,8 @@ packages/
   shared/     Primitives: prefixed IDs, request IDs, cursors, env loader
   auth-core/  Security primitives: Argon2id, JWT, opaque-token hashing
   db/         Drizzle schema, migrations, client, guarded test reset
-infra/        Docker Compose: PostgreSQL, Redis, Mailpit
-tooling/      Schema-drift check, demo seed
+infra/        Docker Compose: local dev stack + production-like artifact reference
+tooling/      Schema-drift check, demo seed, artifact smoke test
 ```
 
 The **API is the only authority** for authorization, entitlements, quotas, and
@@ -221,6 +221,9 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   permission, and entitlement.
 - [Validation matrix](docs/validation.md) — what to run, what it proves, how to
   read failures.
+- [Deployable artifacts](docs/deployment-artifacts.md) — the production-shaped
+  API/web container artifacts, migration policy, runtime environment contract,
+  secret boundary, image pinning policy, and the smoke-test gate (Sprint 23).
 - [Local infrastructure runbook](docs/runbook.md) — services, ports, env, resets,
   port-conflict handling.
 - [Troubleshooting](docs/troubleshooting.md) — symptom-driven fixes.
@@ -268,7 +271,10 @@ delivery (a production-shaped SMTP adapter exists but has never sent through a
 real provider; verification is advisory), workers/
 queues, PostgreSQL RLS, custom roles, resource-level/ABAC permissions, audit
 retention enforcement / export / SIEM, write-enabled external API, API key
-rotation, full browser E2E tests, and production deployment automation. The UI is
+rotation, full browser E2E tests, and deployment automation to a real
+environment (production-shaped container artifacts and a CI smoke gate exist
+since Sprint 23, but there is no staging/production environment, registry
+publishing, or deploy pipeline). The UI is
 demo-quality, quotas accept small race windows, and non-sensitive rate limiting
 fails open on a Redis outage (sensitive endpoints fail closed in production;
 there is no alerting on that state yet). The complete, honest list is

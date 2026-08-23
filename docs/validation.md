@@ -29,6 +29,8 @@ There are two tiers:
 | `pnpm scan:deps` | scan (network) | Dependency audit via `pnpm audit` — fails on unaccepted high/critical advisories (prod and dev audited separately). |
 | `pnpm scan:deps:local` | scan | Same policy via [osv-scanner](https://google.github.io/osv-scanner/) against `pnpm-lock.yaml` (`brew install osv-scanner`); use when the registry audit endpoint is unreachable. |
 | `pnpm scan:secrets` | scan | Gitleaks full git-history secret scan (`brew install gitleaks`) — fails on any suspected live secret; run before pushing. |
+| `pnpm artifact:build` | artifact (Docker) | Production API + web images build from their Dockerfiles. |
+| **`pnpm artifact:smoke`** | **artifact (Docker)** | **Builds the production artifacts and runs the full smoke gate against the production-like compose reference (see [Artifact validation](#artifact-validation)).** |
 
 ## Offline validation: `pnpm validate`
 
@@ -169,6 +171,45 @@ If `TEST_DATABASE_URL`/`DATABASE_URL` or `REDIS_URL` are unset, the integration
 suites **skip with a printed warning** rather than silently passing. A green run
 with skips is not a validated run — check the output.
 
+## Artifact validation
+
+Sprint 23 (ORG-PR-001). `pnpm artifact:smoke` runs
+`tooling/artifact-smoke.sh`: it builds the production-shaped API and web
+images (`apps/api/Dockerfile`, `apps/web-demo/Dockerfile`) and validates them
+end to end against `infra/compose.production-like.yml` — a validation
+topology, not a deployment (see
+[deployment-artifacts.md](deployment-artifacts.md)). The script asserts:
+one-shot migrations, `NODE_ENV=production` boot with fake guard-passing
+config, `/health` + coarse `/ready` (including fail-closed readiness on a
+Redis stop and recovery), web production serving + SPA fallback + baked-in
+public API base URL, non-root runtimes, read-only application tree, artifact
+hygiene (no `.env`/git/TypeScript source), secret absence from logs and web
+assets, config-guard rejection of a development secret, clean SIGTERM exit,
+and full teardown. Requirements: Docker with compose v2 and `curl`; no
+workspace install, no real secrets. Ports 3000/8080 must be free (stop
+`pnpm dev` first).
+
+### Image pinning policy
+
+Every active image reference — Dockerfile base images, both `infra/` compose
+files, and the CI workflow service containers — is pinned **exact patch tag
+plus manifest-list digest** (`name:X.Y.Z@sha256:…`, ORG-PR-042). The tag
+documents intent; the digest makes the reference immune to tag re-pushes. No
+`latest`, no floating majors.
+
+Updating a pin (Dependabot proposes bumps for Dockerfiles and compose files;
+workflow `services:` images are **not** covered by Dependabot and must be
+bumped manually in the same change):
+
+1. Pick the new exact patch tag from the upstream release notes.
+2. Resolve its manifest-list digest:
+   `docker buildx imagetools inspect <image>:<tag>` (the top-level `Digest:`
+   line — the multi-arch list digest, valid on both arm64 and amd64).
+3. Update every reference to the same `tag@digest` (grep for the image name
+   across `apps/*/Dockerfile`, `infra/*.yml`, `.github/workflows/ci.yml`).
+4. Run `pnpm artifact:smoke` (and `pnpm infra:up` if the dev stack images
+   changed) to prove the pinned images still work.
+
 ## Mailpit / email
 
 The SMTP conversation is exercised by automated tests against an **in-process
@@ -190,15 +231,20 @@ pinned to a full commit SHA, every workflow declares explicit least-privilege
 permissions, and nothing publishes or deploys — see
 [CI security policy](#ci-security-policy)).
 
-`.github/workflows/ci.yml` mirrors this matrix as two jobs:
+`.github/workflows/ci.yml` mirrors this matrix as three jobs:
 
 - **Validate (offline)** — install (frozen lockfile), typecheck, lint, unit
   tests, web tests, web build, schema drift check, whitespace check.
   Equivalent to `pnpm validate`.
 - **Integration (PostgreSQL + Redis)** — spins up `postgres:16.14-alpine` and
-  `redis:7.4.10-alpine` service containers (exact patch tags, matching
+  `redis:7.4.10-alpine` service containers (tag+digest pinned, matching
   `infra/docker-compose.yml`), creates the test database, applies the
   migration baseline, and runs `pnpm validate:integration`.
+- **Artifacts (build + smoke)** — runs `tooling/artifact-smoke.sh`: builds the
+  production API and web images and validates them against the
+  production-like compose reference (see
+  [Artifact validation](#artifact-validation)). Needs no production secrets;
+  publishes and pushes nothing. Equivalent to `pnpm artifact:smoke`.
 
 Mailpit is intentionally omitted from CI (see above).
 
@@ -324,6 +370,11 @@ protection") rather than legacy branch protection. Enforcement is `active` with
 - requires all five status checks — `Validate (offline)`,
   `Integration (PostgreSQL + Redis)`, `Dependency audit (pnpm)`,
   `Secret scan (Gitleaks)`, `Analyze (javascript-typescript)`;
+  **Sprint 23 pending action:** the ruleset selects checks by explicit name,
+  so the new `Artifacts (build + smoke)` job runs on every PR but does NOT
+  gate merges until it is added to this list — it **must** be registered as
+  the sixth required check (after its first remote run makes the check name
+  selectable) for the artifact gate to be branch-enforced;
 - enables code-scanning merge protection for CodeQL at
   `high_or_higher` security alerts and `errors` for tool failures;
 - blocks branch deletion and non-fast-forward pushes.
@@ -336,7 +387,8 @@ apply. Human review is therefore the one part of this gate that is **not**
 technically enforced — raise this to 1 when a second maintainer joins.
 
 Working-model consequence: commit directly to a branch, open a pull request,
-let the five checks run, then merge. `git push origin main` will be rejected.
+let the checks run (five required today; six once the artifact check is
+registered), then merge. `git push origin main` will be rejected.
 
 Verify the live configuration — documentation can drift, the API cannot:
 

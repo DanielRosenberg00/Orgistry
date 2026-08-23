@@ -54,7 +54,7 @@ not at the individual task identifier level.
 | Governance — Policy & Compliance | ~1 | known-limitations, honest scope | no privacy/retention policy (legal) — ORG-PR-025/043 |
 | Design — Threat Assessment | ~1→2 | this threat model (new) | no prior model; keep current |
 | Design — Security Architecture | ~2 | permission/entitlement/quota separation, tenant model | RLS absent (defense-in-depth, deferred) |
-| Implementation — Secure Build | ~1 | reproducible via lockfile | no pipeline/artifacts — ORG-PR-001 |
+| Implementation — Secure Build | ~1→2 | reproducible via lockfile; CI-built non-root container artifacts + smoke gate (S23) | no release pipeline/provenance — ORG-PR-001 |
 | Implementation — Secure Deployment | ~0→1 | none | no deploy/secrets automation — ORG-PR-001/006 |
 | Verification — Security Testing | ~2 | strong functional/negative tests; SAST (CodeQL) running remotely with triaged findings (S22) | no DAST/E2E/pentest — ORG-PR-026 |
 | Operations — Incident Mgmt | ~0 | none | no incident process — ORG-PR-008 |
@@ -66,9 +66,9 @@ not at the individual task identifier level.
 | --- | --- | --- | --- | --- |
 | Scripted/consistent build | Partially | `pnpm build:web`; reproducible via lockfile | no server build/artifact | ORG-PR-001 |
 | Version-controlled source | Satisfied | git; PR-triggered CI; `main` ruleset requires a PR and the CI/Security/CodeQL checks (Sprint 22) | ruleset lives in GitHub config, not in the repository tree | — |
-| Build service (not local) | Not satisfied | build runs in CI but produces no release artifact | no release pipeline | ORG-PR-001 |
+| Build service (not local) | Partially | CI builds and smoke-tests the container artifacts (S23) but publishes/releases nothing | no release pipeline or registry | ORG-PR-001 |
 | Provenance generated | Not satisfied | none | no provenance/attestation | ORG-PR-001 |
-| Provenance/dependencies signed | Not satisfied | none | no signing/SBOM; images patch-tag- not digest-pinned | ORG-PR-042, 001 |
+| Provenance/dependencies signed | Not satisfied | images tag+digest-pinned (S23, ORG-PR-042 closed) | no signing/SBOM/provenance | ORG-PR-001 |
 
 Indicative build-integrity maturity: a scripted, version-controlled build with **no
 provenance or signing** (roughly the lowest SLSA tier). Higher tiers require a

@@ -67,7 +67,8 @@ and negative-path enforcement evidence** — the audit/Gitleaks/CodeQL
 workflows and Dependabot are configured and locally validated where a local
 equivalent exists, but the CI security boundary is not yet proven enforced.
 **ORG-PR-042 remains open** — exact patch tags shipped; digest pinning is
-deferred to the ORG-PR-001 artifact track. Full detail:
+deferred to the ORG-PR-001 artifact track (subsequently **closed in Sprint
+23**: every active image reference is tag+digest pinned). Full detail:
 [sprint-21-artifact-package.md](sprint-21-artifact-package.md).
 
 **Sprint 22 update (2026-07-26) — CodeQL alert triage & CI gate closure.**
@@ -233,9 +234,10 @@ transitives updated, and Dependabot (npm / github-actions / docker-compose) +
 audit gates + Gitleaks + `osv-scanner` are configured with two narrowly
 documented advisory acceptances; as of Sprint 22 the scanners execute on
 GitHub-hosted CI and are enforced as required checks (ORG-PR-020 closed).
-**Gaps:** Docker images are exact-patch-tag pinned but not digest-pinned
-(ORG-PR-042 open, deferred to the ORG-PR-001 artifact track); no
-SBOM/provenance/signing.
+**Gaps:** no SBOM/provenance/signing and no registry publishing (images are
+exact-patch-tag + manifest-list-digest pinned since Sprint 23 — ORG-PR-042
+closed; the residual is the Dependabot-uncovered workflow `services:` images,
+bumped manually per [../validation.md](../validation.md#image-pinning-policy)).
 
 ## CI/CD & release readiness
 
@@ -247,17 +249,24 @@ permissions (ORG-PR-019 closed, Sprint 21); all three run remotely and are
 required checks on `main` via a repository ruleset, with the secret gate
 proved to fail on a seeded finding (ORG-PR-020 closed, Sprint 22).
 **Gaps:** ORG-PR-041 (SMTP untested), ORG-PR-001 (no release/deploy pipeline,
-no artifacts, no tags, no versioning). The minimum release pipeline for the
-target is defined in [production-roadmap.md](production-roadmap.md).
+no registry publishing, no tags, no versioning — the artifacts themselves and
+a CI build+smoke gate exist since Sprint 23: `ci.yml` `artifacts` job runs
+`tooling/artifact-smoke.sh` against the production-shaped images). The minimum
+release pipeline for the target is defined in
+[production-roadmap.md](production-roadmap.md).
 
 ## Infrastructure & deployment
 
-No app Dockerfiles, IaC, or environment provisioning (ORG-PR-001). The recommended
+App Dockerfiles EXIST since Sprint 23 (non-root API + web artifacts, explicit
+migration entrypoint, production-like compose validation reference, CI smoke
+gate — see [../deployment-artifacts.md](../deployment-artifacts.md)); IaC and
+environment provisioning still do not (ORG-PR-001 open for the deployment
+half). The recommended
 simplest architecture (reverse proxy + TLS + 2 API replicas + managed Postgres/
 Redis + real SMTP + scheduler + secrets manager, **not Kubernetes**) is in
 [production-target.md](production-target.md). Depends on: security headers/proxy
-config (ORG-PR-010/011), timeouts (ORG-PR-021), least-privilege DB roles
-(ORG-PR-022), floating-tag pinning (ORG-PR-042).
+config (ORG-PR-010/011, closed), timeouts (ORG-PR-021), least-privilege DB
+roles (ORG-PR-022); image pinning (ORG-PR-042) is closed.
 
 ## Reliability, backup & DR
 

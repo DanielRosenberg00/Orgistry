@@ -96,8 +96,14 @@ These are intentional non-goals, not bugs:
   no Content-Security-Policy hardening; that remains open.
 - **No organization lifecycle endpoints** (archive/suspend) and **no project
   hard-delete or restore** — deletes are soft.
-- **No object storage** and **no production deployment automation** (no
-  Terraform, Helm, Kubernetes manifests, or release pipeline).
+- **No object storage** and **no deployment automation to a real
+  environment.** Sprint 23 added production-shaped container artifacts (API +
+  web, non-root, tag+digest-pinned bases), an explicit migration entrypoint, a
+  production-like compose validation reference, and a CI build/smoke gate (see
+  [deployment-artifacts.md](deployment-artifacts.md)) — but there is still no
+  staging or production environment, no Terraform/Helm/Kubernetes, no
+  container-registry publishing, no image signing/provenance, and no release
+  or deploy pipeline (ORG-PR-001's deployment half remains open).
 - **No production secret management.** There is no secrets manager, no secret
   rotation procedure, and no JWT `kid`/versioned-secret rotation path (rotating
   `JWT_SECRET` invalidates all live access tokens). The Sprint 15 production
@@ -152,11 +158,12 @@ These are intentional non-goals, not bugs:
   client-only SPA with no RSC usage; the fix is a major upgrade) and
   brace-expansion GHSA-mh99-v99m-4gvg (DoS in a dev-only eslint transitive
   with no compatible fixed release).
-- **Infrastructure images are patch-tag-pinned, not digest-pinned.** Local/CI
-  images (`postgres:16.14-alpine`, `redis:7.4.10-alpine`,
-  `axllent/mailpit:v1.30.5`) are exact tags, but a registry tag can in
-  principle be re-pushed. Digest pinning is deferred to the production
-  artifact track (ORG-PR-001/042).
+- **Infrastructure images are tag+digest-pinned (Sprint 23, ORG-PR-042
+  closed).** Every active image reference — Dockerfile bases, both compose
+  files, CI service containers — is pinned `tag@sha256-digest`, immune to tag
+  re-pushes. Residual: workflow `services:` images are outside Dependabot's
+  coverage and are bumped manually (procedure in
+  [validation.md](validation.md#image-pinning-policy)).
 
 ## Accepted runtime compromises
 

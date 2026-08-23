@@ -197,6 +197,20 @@ naming the path but not the contents, and neither image's config declares a
 secret-bearing variable. The fake secret files are created in a temporary
 directory by the script and deleted on exit — none is committed.
 
+**Fixture permissions are load-bearing on Linux — do not remove them.** The
+harness explicitly `chmod`s the temporary secret directory to `0755` and its
+files to `0444` after creating them. `mktemp -d` yields mode `0700` owned by
+the invoking user (uid 1001 on a GitHub runner), while the API artifact runs as
+the non-root `node` user (uid 1000); on Linux a bind mount passes the host
+inode through unchanged, so without the `chmod` the runtime cannot traverse the
+directory, config validation fails closed, and the container exits before
+serving `/health`. Docker Desktop on macOS remaps bind-mount ownership to the
+container user and hides this entirely, so **a change to this block that is
+tested only on macOS can still break Linux CI** — that is exactly how it was
+first caught (PR #33, CI run 32656512688). If a `_FILE` boot check fails, the
+harness now prints the container status and exit code, the host fixture modes,
+and the container logs with fake secret values masked.
+
 Requirements: Docker with compose v2 and `curl`; no workspace install, **no
 real secrets and no email-provider credentials**. Ports 3000/8080/3010 must be
 free (stop `pnpm dev` first).

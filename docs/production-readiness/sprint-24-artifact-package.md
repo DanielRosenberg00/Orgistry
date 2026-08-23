@@ -4,11 +4,13 @@
 > validation. This is the current (provisional) evidence package; it becomes
 > the closing artifact once those workflows are green.**
 >
-> **No Sprint 24 DoD condition has failed and no repository work remains.**
 > Repository implementation and local validation are complete. Exactly **one**
-> DoD gate is outstanding: the changes are uncommitted, so CI, Security scans,
-> CodeQL, and `Artifacts (build + smoke)` have not run against them
-> (**PENDING OPERATOR ACTION**, §19).
+> DoD gate is outstanding: post-change remote workflow validation
+> (**PENDING OPERATOR ACTION**, §19). The first remote attempt — PR #33, CI run
+> `32656512688` — failed on `Artifacts (build + smoke)` due to a Linux-only
+> permission defect in the smoke **test fixture** (not the application); that is
+> analysed and fixed in §17, but the fix is uncommitted, so the gate has not yet
+> been re-run. All five other required checks were green on that run.
 >
 > External SMTP provider validation was **not performed** — no provider
 > credentials, verified sending domain, or readable test mailbox exist here.
@@ -136,18 +138,20 @@ validated and nothing is claimed.
 | Fork-PR safety (no secret reachable) | PASS — no repository secrets, no environments, no `pull_request_target` |
 | Least-privilege workflow permissions preserved | PASS — workflows unmodified |
 | Gitleaks / CodeQL / artifact gate preserved | PASS — workflows unmodified |
-| Post-change remote status (CI, Security, CodeQL, Artifacts) | **PENDING OPERATOR ACTION** (§19) |
+| Post-change remote status (CI, Security, CodeQL, Artifacts) | **PENDING OPERATOR ACTION** — first attempt (PR #33, run `32656512688`) had 5/6 green and failed `Artifacts (build + smoke)` on a Linux-only fixture-permission defect, now fixed locally but not yet pushed (§17, §19) |
 
 ### Result
 
 **33 PASS · 2 SATISFIED BY EXPLICIT EXTERNAL BLOCKER · 1 PENDING OPERATOR
 ACTION · 0 FAIL/MISSING.**
 
-**No Sprint 24 DoD condition has failed, and no repository work remains.**
-Sprint 24 is **NOT YET CLOSED — pending post-change remote workflow
-validation**. That single gate is the operator's commit/push/PR; once CI,
-Security scans, CodeQL, and `Artifacts (build + smoke)` are green for the exact
-Sprint 24 commit, this document can be finalized as the Sprint 24 closing
+**No Sprint 24 DoD condition has failed.** Sprint 24 is **NOT YET CLOSED —
+pending post-change remote workflow validation**. The first remote attempt
+exposed a genuine Linux portability defect in the smoke **test fixture**, which
+is fixed and re-validated locally (§17); pushing that fix and getting a green
+`Artifacts (build + smoke)` for the resulting commit is the remaining work.
+Once CI, Security scans, CodeQL, and `Artifacts (build + smoke)` are green for
+that exact commit, this document can be finalized as the Sprint 24 closing
 artifact (§25).
 
 ### What is NOT a Sprint 24 DoD condition
@@ -571,8 +575,67 @@ sprint.
 
 ## 17. Artifact Smoke Evidence
 
-**Manually validated** — `bash tooling/artifact-smoke.sh` ran to
-`SMOKE OK: all artifact checks passed.` on 2026-08-23 against the working tree.
+**Manually validated** — `bash tooling/artifact-smoke.sh` exits 0 with
+`SMOKE OK: all artifact checks passed.` (2026-08-23, re-run after the Linux
+portability fix below).
+
+### Linux portability defect found by remote CI, and fixed
+
+The first remote run of this gate **failed** — PR #33, CI run `32656512688`,
+job `Artifacts (build + smoke)` — at the first Sprint 24 step:
+
+```text
+== Artifact boots with runtime secrets mounted as files (_FILE)
+SMOKE FAIL: http://localhost:3010/health did not return 200 within 30s
+```
+
+Every other check in that run passed, and every other required workflow was
+green. The defect was in the **test fixture**, not in the application.
+
+**Root cause (confirmed by reproduction, not inferred).** `mktemp -d` creates
+the directory mode **0700** owned by the invoking user — uid 1001 (`runner`) on
+a GitHub Actions runner. The API artifact runs as the non-root `node` user, uid
+**1000**. On Linux a bind mount passes the host inode through unchanged, so uid
+1000 could not **traverse** the directory; both secret files were unreadable,
+`loadConfig` refused to boot, and the container exited before `/health` existed.
+Reproduced by mounting a Docker volume populated with that exact ownership and
+mode, which produced the CI symptom verbatim:
+
+```text
+Failed to start API: ConfigValidationError: Invalid configuration:
+  - JWT_SECRET_FILE: the secret file "…/jwt_secret" does not exist or is not
+    accessible to this process
+```
+
+Note that the application behaved **correctly**: it failed closed and its error
+named the variable and path without echoing any content.
+
+**Why it passed locally.** Docker Desktop on macOS remaps bind-mount ownership
+to the requesting container user — a 0700 host directory owned by `501:20` is
+presented to the container as `1000:1000` and reads fine. Verified in both
+directions on this machine, so a macOS-only test can never catch this class of
+defect.
+
+**Fix.** `tooling/artifact-smoke.sh` now sets explicit fixture permissions
+after creating the temporary files — directory `0755` (traversal only) and
+files `0444` (read-only for everyone) — with a comment recording why they must
+not be deleted as "unnecessary" by someone testing only on Docker Desktop.
+`chown` is not usable: the harness runs unprivileged and cannot give files to
+uid 1000. Verified under genuine Linux semantics: with the files still owned by
+uid 1001 and the runtime still uid 1000, `/health` returns 200.
+
+The API artifact remains non-root, the mounted files remain read-only, the
+application's secret-file safety rules are unchanged, and no assertion was
+removed or weakened.
+
+**Diagnostics added.** A boot failure in this standalone check now prints the
+container status and exit code, the host fixture's modes, and the container's
+logs with every fake secret value masked, before failing. On a passing run it
+prints nothing. One assertion was also tightened: the unsafe-file-secret check
+now matches the production guard's own message
+(`JWT_SECRET is a known development-only default`) instead of the bare string
+`JWT_SECRET`, which a permission error mentioning `JWT_SECRET_FILE` could have
+satisfied — so a mount failure can no longer masquerade as a guard rejection.
 
 Sprint 24 additions, all passing:
 
@@ -637,30 +700,40 @@ pnpm vitest run apps/api/src/lib/logging.test.ts
 
 ## 19. Remote Validation Evidence
 
-**PENDING OPERATOR ACTION — no Sprint 24 remote evidence exists.** This is one
-of the two unsatisfied DoD gates.
+**PENDING OPERATOR ACTION — one remote run has happened and it FAILED; the
+fix is in the working tree and is not yet pushed.**
 
-The sprint's repository-safety rules prohibit committing and pushing, so these
-changes have never reached GitHub and no workflow has run against them. The
-latest remote evidence in this repository is Sprint 23's (`main` @ `6019db8`),
-which predates every change here and **must not be read as Sprint 24
-validation**.
+**First remote attempt — PR #33 (`sprint-24-runtime-secrets`), CI run
+`32656512688`: FAILED.** Five of the six required checks were green
+(`Validate (offline)`, `Integration (PostgreSQL + Redis)`,
+`Dependency audit (pnpm)`, `Secret scan (Gitleaks)`,
+`Analyze (javascript-typescript)`); `Artifacts (build + smoke)` failed on the
+Linux-only fixture-permission defect analysed in §17. That run is preserved
+here as historical evidence — it is **not** superseded evidence, because the
+remediation has not been pushed.
+
+**No remote evidence exists for the corrected harness.** The fix is uncommitted,
+so no workflow has run against it. Sprint 23's `main` @ `6019db8` must not be
+read as Sprint 24 validation either.
 
 `main` is protected by ruleset `19769611` with no bypass actors, so a direct
 push to `main` is rejected — the changes must land through a pull request whose
 six required checks pass.
 
-**Step 1 — branch, stage, and commit (operator does this manually):**
+**Step 1 — the branch already exists; stage and commit the fix (operator does
+this manually):**
 
 ```sh
-git switch -c sprint-24-runtime-secrets
+git switch sprint-24-runtime-secrets   # already created for PR #33
+git diff                               # review the harness fix
 git add -A
-git status                 # review the staged set before committing
-git commit                 # write the message in your editor
-git push -u origin sprint-24-runtime-secrets
+git status                             # review the staged set before committing
+git commit                             # write the message in your editor
+git push                               # updates the existing PR #33
 ```
 
-**Step 2 — open the pull request (required by the ruleset):**
+**Step 2 — PR #33 is already open**, so `gh pr create` is not needed. If a
+fresh PR is ever required instead:
 
 ```sh
 gh pr create --base main --head sprint-24-runtime-secrets \
@@ -668,7 +741,7 @@ gh pr create --base main --head sprint-24-runtime-secrets \
   --body-file -    # or --web to compose in the browser
 ```
 
-**Step 3 — watch the checks for the exact commit:**
+**Step 3 — watch the checks for the NEW head commit:**
 
 ```sh
 SHA="$(git rev-parse HEAD)"
@@ -722,8 +795,11 @@ Workflow definitions were reviewed and **not modified**: `ci.yml`,
 least-privilege `permissions:`, concurrency groups, `pull_request` (never
 `pull_request_target`) triggers, and credential-free jobs.
 
-Record the resulting run IDs and conclusions in this section once they exist.
-Until then this gate stays PENDING OPERATOR ACTION and Sprint 24 stays open.
+Record the new run IDs and conclusions in this section once they exist, keeping
+the failed run `32656512688` recorded above. Until `Artifacts (build + smoke)`
+is green for the corrected commit, this gate stays PENDING OPERATOR ACTION and
+Sprint 24 stays open. **Do not describe the artifact gate as green until that
+run actually passes.**
 
 ---
 

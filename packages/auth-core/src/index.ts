@@ -12,8 +12,10 @@ export { hashPassword, verifyPassword } from './password';
 export {
   signAccessToken,
   verifyAccessToken,
+  verifyAccessTokenWithRotation,
   AccessTokenError,
   type AccessTokenClaims,
+  type AccessTokenVerificationSecrets,
   type SignAccessTokenParams,
 } from './access-token';
 export { generateOpaqueToken, hashOpaqueToken } from './opaque-token';

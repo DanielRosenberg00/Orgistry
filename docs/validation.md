@@ -185,9 +185,21 @@ Redis stop and recovery), web production serving + SPA fallback + baked-in
 public API base URL, non-root runtimes, read-only application tree, artifact
 hygiene (no `.env`/git/TypeScript source), secret absence from logs and web
 assets, config-guard rejection of a development secret, clean SIGTERM exit,
-and full teardown. Requirements: Docker with compose v2 and `curl`; no
-workspace install, no real secrets. Ports 3000/8080 must be free (stop
-`pnpm dev` first).
+and full teardown.
+
+Sprint 24 (ORG-PR-006) added the runtime secret-source checks to the same
+script: the artifact boots with secrets supplied as mounted **files**
+(`JWT_SECRET_FILE`, `SMTP_PASSWORD_FILE`), the file-loaded secrets never appear
+in its logs, an **unsafe** file-loaded secret is still rejected by the
+production guard (proving resolution happens before validation), an ambiguous
+env+file pair for one variable is refused, a missing secret file fails closed
+naming the path but not the contents, and neither image's config declares a
+secret-bearing variable. The fake secret files are created in a temporary
+directory by the script and deleted on exit — none is committed.
+
+Requirements: Docker with compose v2 and `curl`; no workspace install, **no
+real secrets and no email-provider credentials**. Ports 3000/8080/3010 must be
+free (stop `pnpm dev` first).
 
 ### Image pinning policy
 
@@ -217,12 +229,21 @@ fake SMTP server** (`apps/api/src/modules/mail/*.test.ts`) — including the
 production driver's real implicit-TLS handshake and authentication exchange
 (the protocol implementation is nodemailer since the Sprint 16 refinement),
 header-injection rejection, and the email-verification lifecycle end to end
-(unit + DB-backed integration suites, using the in-memory mailer). What is NOT automated: delivery to the
+(unit + DB-backed integration suites, using the in-memory mailer). Sprint 24
+added `smtp-failure-redaction.test.ts`, which proves the SMTP password survives
+in neither the message, the stack, nor any own property of the error thrown by
+rejected authentication, a rejected sender, a rejected recipient, a refused
+connection, an untrusted certificate, or a connection timeout.
+
+What is NOT automated: delivery to the
 **live Mailpit container** (verified manually via the
 [demo walkthrough](./demo-walkthrough.md); CI does not start Mailpit) and
-delivery through a **real external provider** (never performed — no
-credentials; see [known limitations](./known-limitations.md) and
-[email-and-verification.md](./email-and-verification.md)).
+delivery through a **real external provider** to a real inbox (never performed
+— no provider credentials, no verified sending domain, no test mailbox; see
+[known limitations](./known-limitations.md),
+[email-and-verification.md](./email-and-verification.md), and the closure
+procedure in
+[rotation-runbook.md](./rotation-runbook.md#validate-external-email-delivery)).
 
 ## CI
 
@@ -421,6 +442,17 @@ these when editing workflows:
 - **No CI workflow publishes, deploys, or writes repository contents.**
   Dependency-update PRs (Dependabot) require human review; auto-merge is not
   configured and must not be enabled.
+- **Routine CI never consumes a real credential.** No workflow reads a
+  production runtime secret, an email-provider credential, or a
+  secrets-manager credential; the repository has no configured Actions
+  environments and no repository secrets. The three jobs run on fake,
+  checked-in or generated values only. External email validation is a
+  **manual, documented** procedure
+  ([rotation-runbook.md](rotation-runbook.md#validate-external-email-delivery)),
+  deliberately not a workflow: a provider-credentialed job would add a secret
+  surface for no automation benefit at this stage. If one is ever added it must
+  be manually dispatched, environment-scoped, unreachable from fork pull
+  requests, minimally permissioned, and silent about secret values.
 
 ### Updating pinned actions
 

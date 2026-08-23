@@ -318,7 +318,14 @@ unchanged.
   flow; see [auth-foundation.md](auth-foundation.md)); a bounded timing
   residual remains on the register request path.
 - External SMTP delivery remains unvalidated (ORG-PR-002); locally, recovery
-  emails are observable in Mailpit.
+  emails are observable in Mailpit. Sprint 24 added the credential-source and
+  redaction halves — SMTP credentials resolve through the runtime secret
+  boundary ([runtime-secrets.md](runtime-secrets.md)) and no failure mode
+  leaks the password — but not delivery evidence.
+- A password change and a completed password recovery each revoke every session
+  and refresh token of that user in-transaction; that is the supported
+  per-user invalidation path. Platform-wide invalidation has no API — see
+  [rotation-runbook.md](rotation-runbook.md#emergency-invalidate-sessions).
 
 ## Running the tests
 

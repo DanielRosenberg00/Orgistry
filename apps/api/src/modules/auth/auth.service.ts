@@ -5,7 +5,7 @@ import {
   hashPassword,
   normalizeEmail,
   signAccessToken,
-  verifyAccessToken,
+  verifyAccessTokenWithRotation,
   verifyPassword,
 } from '@orgistry/auth-core';
 import { ERROR_CODES } from '@orgistry/contracts';
@@ -85,6 +85,13 @@ export interface AuthServiceOptions {
   repo: AuthRepository;
   /** Symmetric JWT signing secret (from `config.auth.jwtSecret`). */
   jwtSecret: string;
+  /**
+   * Retiring JWT secret (from `config.auth.previousJwtSecret`, Sprint 24).
+   * ADDITIONALLY accepted when verifying, never used to sign — this is what
+   * keeps a `JWT_SECRET` rotation from invalidating access tokens already in
+   * flight. Absent outside a rotation window.
+   */
+  previousJwtSecret?: string;
   accessTokenTtlSeconds: number;
   sessionTtlSeconds: number;
   refreshTokenTtlSeconds: number;
@@ -223,6 +230,7 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
   const {
     repo,
     jwtSecret,
+    previousJwtSecret,
     accessTokenTtlSeconds,
     sessionTtlSeconds,
     refreshTokenTtlSeconds,
@@ -365,7 +373,14 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
   ): Promise<{ user: UserRow; session: SessionRow }> {
     let claims;
     try {
-      claims = await verifyAccessToken(accessToken, jwtSecret);
+      // Accepts the current signing secret always, and the retiring one only
+      // while a rotation window is configured (Sprint 24). Everything after
+      // this point — user, session, revocation, expiry — is unchanged: which
+      // key verified a token grants it no additional trust.
+      claims = await verifyAccessTokenWithRotation(accessToken, {
+        current: jwtSecret,
+        previous: previousJwtSecret,
+      });
     } catch (error) {
       if (error instanceof AccessTokenError) {
         await writeSecurityEvent({

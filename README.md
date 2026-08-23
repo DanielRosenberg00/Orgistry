@@ -200,7 +200,14 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   race proofs, the DB-enforced one-active-personal-workspace invariant,
   permission-aligned read paths, and the `security_events` org/time index
   (see [docs/production-readiness/sprint-20-artifact-package.md](docs/production-readiness/sprint-20-artifact-package.md));
-  the project remains not ready for staging or production.
+  Sprint 24 shipped the runtime secret boundary — direct-env or mounted
+  `<NAME>_FILE` secrets resolved before validation (so a file-backed secret
+  cannot bypass a production guard), graceful access-token key rotation via an
+  optional `JWT_PREVIOUS_SECRET` verification window, SMTP-failure credential
+  redaction proofs, and manual rotation/incident runbooks (see
+  [runtime secrets](docs/runtime-secrets.md) and
+  [rotation runbook](docs/rotation-runbook.md)) — with external email delivery
+  still unvalidated; the project remains not ready for staging or production.
 
 **Authoritative (current):**
 
@@ -224,6 +231,12 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
 - [Deployable artifacts](docs/deployment-artifacts.md) — the production-shaped
   API/web container artifacts, migration policy, runtime environment contract,
   secret boundary, image pinning policy, and the smoke-test gate (Sprint 23).
+- [Runtime secrets](docs/runtime-secrets.md) — where secrets come from at
+  runtime (env or mounted file), the validation ordering invariant, the secret
+  inventory, redaction guarantees, and restart behavior (Sprint 24).
+- [Rotation & secret operations runbook](docs/rotation-runbook.md) — routine and
+  emergency JWT rotation, session invalidation, SMTP/database credential
+  rotation, external email validation, sender-domain setup, provider incidents.
 - [Local infrastructure runbook](docs/runbook.md) — services, ports, env, resets,
   port-conflict handling.
 - [Troubleshooting](docs/troubleshooting.md) — symptom-driven fixes.

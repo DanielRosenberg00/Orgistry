@@ -178,6 +178,8 @@ requires production-safe values as noted. Classification:
 | `DATABASE_URL` | **required, secret** (embeds DB credentials) | operator-provided PostgreSQL |
 | `REDIS_URL` | required in practice, secret if credentialed | defaults to localhost, which is wrong inside a container — set it |
 | `JWT_SECRET` | **required, secret** | guard: ≥32 chars, no known dev values/placeholders (`openssl rand -hex 32`) |
+| `JWT_PREVIOUS_SECRET` | optional, **secret** | set only during a rotation window; same guard as `JWT_SECRET`; must differ from it; remove to complete the cutover |
+| `<NAME>_FILE` | optional, **non-secret path** | mounted-secret alternative for `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `JWT_PREVIOUS_SECRET`, `SMTP_USERNAME`, `SMTP_PASSWORD`; setting both forms of one variable is refused |
 | `COOKIE_SECURE` | required in production, non-secret | must be `true`; guard-enforced |
 | `WEB_DEMO_URL` | required in production, non-secret | https, non-localhost; embedded in emailed links; guard-enforced |
 | `CORS_ORIGINS` | required in practice, non-secret | comma-separated browser origins |
@@ -203,22 +205,49 @@ build context, no workspace root exists inside the image (so
 
 Enforced invariants (checked by `tooling/artifact-smoke.sh` where testable):
 
-- real server secrets never enter Docker build arguments or image layers;
+- real server secrets never enter Docker build arguments or image layers, and
+  neither image's config declares a secret-bearing variable;
 - `.env` files never enter the build context or artifacts;
-- server secrets are read only from the runtime environment at process start;
+- server secrets are read only at process start, from one of exactly two
+  runtime sources: a direct environment value, or a mounted secret **file**
+  (`<NAME>_FILE`, Sprint 24 — see below);
 - frontend `VITE_*` values are public by definition; server secret values
   never appear in the static web assets;
-- the fake smoke credentials never appear in API logs;
-- the production config guard rejects development/placeholder secrets at boot
-  (the smoke test proves the packaged artifact still does this, and that the
-  rejection message does not echo the secret value).
+- the fake smoke credentials never appear in API logs — for both the
+  env-injected and the file-injected form;
+- the production config guard rejects development/placeholder secrets at boot,
+  **whichever source they came from** (the smoke test proves the packaged
+  artifact still does this for a direct value and for a file-loaded value, and
+  that neither rejection message echoes the secret).
+
+### Mounted secret files (Sprint 24)
+
+Six variables accept a `<NAME>_FILE` path instead of a direct value —
+`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `JWT_PREVIOUS_SECRET`,
+`SMTP_USERNAME`, `SMTP_PASSWORD` — so a deployment can mount an orchestrator
+secret rather than exporting it into the process environment:
+
+```yaml
+environment:
+  JWT_SECRET_FILE: /run/secrets/jwt_secret
+  SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+```
+
+Setting both forms of one variable is refused at boot; the file is read once at
+process start (there is no hot reload); one terminal newline is stripped; and
+an empty, missing, or unreadable file fails validation with the path but never
+the contents. Resolution happens *before* schema validation, so file-backed
+values are held to exactly the same production rules. Contract:
+[runtime-secrets.md](runtime-secrets.md).
 
 Every credential in `infra/compose.production-like.yml` is a checked-in
-obvious fake (`*-not-a-real-*`) that exists to satisfy boot validation. **How
-operators store, inject, and rotate real secrets is unsolved** — there is no
-secrets-manager integration and no rotation procedure. The runtime
-environment-injection boundary defined here is the seam a future provider
-plugs into; it does not close ORG-PR-006.
+obvious fake (`*-not-a-real-*`) using the direct-environment form; the smoke
+test exercises the file form with temporary files it creates and deletes, so
+no secret file is ever committed. **Where operators store secrets is still
+unsolved** — there is no secrets-manager integration and no automated
+rotation. Sprint 24 defined the injection sources and the manual rotation
+procedures ([rotation-runbook.md](rotation-runbook.md)); ORG-PR-006 remains
+open.
 
 ## Image policy (ORG-PR-042)
 
@@ -245,8 +274,14 @@ real email provider, and injects real secrets at runtime.
 
 `tooling/artifact-smoke.sh` (local: `pnpm artifact:smoke`; CI: the
 `artifacts` job in `.github/workflows/ci.yml`) is the deterministic gate; its
-header enumerates the twelve checks. What it deliberately does **not**
-validate: account-email delivery (the implicit-TLS smtp driver cannot
-negotiate with plain Mailpit — consistent with ORG-PR-002 remaining open),
-browser flows against the web artifact, and any real-infrastructure concern
-(TLS, DNS, backups, monitoring).
+header enumerates the checks, extended in Sprint 24 with the mounted-secret
+file path (boot from `_FILE` secrets, rejection of an unsafe file-loaded
+secret, rejection of an ambiguous env+file pair, a missing-file failure naming
+the path, absence of file-loaded secrets from the logs, and no secret-bearing
+variable in either image config). It needs **no real SMTP or provider
+credentials** and creates its own temporary fake secret files.
+
+What it deliberately does **not** validate: account-email delivery (the
+implicit-TLS smtp driver cannot negotiate with plain Mailpit — consistent with
+ORG-PR-002 remaining open), browser flows against the web artifact, and any
+real-infrastructure concern (TLS, DNS, backups, monitoring).

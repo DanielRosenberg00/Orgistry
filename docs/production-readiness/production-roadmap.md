@@ -256,16 +256,58 @@ Phase 6: End-to-End Verification & Security Review
   `pnpm artifact:smoke` exit 0. Closing artifact:
   [sprint-23-artifact-package.md](sprint-23-artifact-package.md);
   docs: [../deployment-artifacts.md](../deployment-artifacts.md).
-- **Sprint 24 (next) — Runtime Secrets and External Email Validation**
-  (reserved by the binding Sprint 23 specification; its gateway condition —
-  successful Sprint 23 remote closure — is satisfied, so this sprint may
-  begin). Scope: runtime secret-injection
-  implementation/integration, secret rotation procedures, JWT/access-token
-  secret rotation planning, external production SMTP/provider validation
-  (sender-domain requirements, SPF/DKIM/DMARC posture where applicable, real
-  inbox delivery, email failure behavior), and the related operational
-  documentation. Primary findings: **ORG-PR-002, ORG-PR-006** (relates to
-  ORG-PR-049). The later Phase 5–6 work below keeps its content, ordering,
+- **Sprint 24 (NOT YET CLOSED — pending post-change remote workflow
+  validation; repository work executed 2026-08-23) — Runtime Secrets and
+  External Email Validation.** No DoD condition failed and no repository work
+  remains; the single outstanding gate is that the changes are uncommitted, so
+  CI, Security scans, CodeQL, and `Artifacts (build + smoke)` have not run
+  against them. Real external SMTP validation was **not performed** — the
+  specification permits that condition to be met by a precisely documented
+  blocker, which it is, so it is not a failed deliverable (it does keep
+  ORG-PR-002 open). Delivered: a runtime secret-source boundary
+  (`packages/config/src/secret-source.ts`) giving six secret variables an
+  optional mounted-file source (`<NAME>_FILE`) alongside the direct
+  environment value, resolved BEFORE schema validation and onto the canonical
+  variable name so file-backed secrets cannot bypass a production guard;
+  graceful access-token key rotation (optional `JWT_PREVIOUS_SECRET`, accepted
+  at verification only, test-proven at the primitive and HTTP-route level);
+  SMTP credentials on the same boundary with failure-mode credential-redaction
+  proofs; six new artifact-smoke checks over the mounted-secret path; and two
+  operational documents ([../runtime-secrets.md](../runtime-secrets.md),
+  [../rotation-runbook.md](../rotation-runbook.md)). **Not delivered — the
+  external-email half could not be executed:** no email-provider credentials,
+  no verified sending domain, and no readable test mailbox exist in this
+  environment, so there is no provider-acceptance, inbox-receipt, or
+  SPF/DKIM/DMARC evidence. **No finding closed. Left open, materially
+  advanced: ORG-PR-002** (every repository-side prerequisite within Sprint 24's
+  scope done; blocked on external provider/domain/mailbox access) **and
+  ORG-PR-006** (runtime sources + rotation mechanics + runbooks exist, but a
+  **genuine capability gap remains** — no secrets manager or platform secret
+  store, no least-privilege secret access control, no secret-access
+  auditability, no automated rotation or expiry tracking, no hot reload, and no
+  rehearsed rotation, the last of which needs ORG-PR-001's environment; these
+  are finding-closure and production-maturity gaps, **not** Sprint 24 DoD
+  items).
+  ORG-PR-049 also materially advanced. Local exit evidence: `pnpm validate`,
+  `pnpm validate:integration`, `pnpm scan:deps`, `pnpm scan:deps:local`,
+  `pnpm scan:secrets`, `actionlint`, and `tooling/artifact-smoke.sh` all pass;
+  remote validation PENDING OPERATOR ACTION. Current (provisional) evidence
+  package: [sprint-24-artifact-package.md](sprint-24-artifact-package.md) — it
+  becomes the closing artifact once the remote gate is green.
+  **Remaining work to close Sprint 24:** commit/push/PR the working tree and
+  confirm CI, Security scans, CodeQL, and `Artifacts (build + smoke)` green for
+  that exact commit. That is the whole list — neither ORG-PR-002 nor
+  ORG-PR-006 has to close first.
+- **Sprint 25 (ANTICIPATED — NOT AUTHORIZED TO START) — Backup, PITR, Restore,
+  and Retention Foundation** (ORG-PR-005, with retention groundwork tracked by
+  ORG-PR-015/016). Scope unchanged, and it remains the expected next sprint
+  *after* Sprint 24 closes; it must **not** begin while Sprint 24's remote gate
+  is outstanding. Two workstreams run alongside it rather than inside it: the
+  operator-blocked **ORG-PR-002** external-email validation
+  ([../rotation-runbook.md](../rotation-runbook.md#validate-external-email-delivery))
+  and **ORG-PR-006**'s residual secrets-management capability. Neither is
+  closed, and neither is a precondition for finalizing the Sprint 24 artifact.
+  The later Phase 5–6 work below keeps its content, ordering,
   dependencies, and exit criteria but carries no assigned sprint numbers
   yet — numbers are assigned when each item is actually scheduled.
 

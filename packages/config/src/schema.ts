@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { z } from 'zod';
+import { enforceJwtRotationConfig } from './auth-policy';
 import { enforceMailerConfigCompleteness } from './mail-policy';
 import { enforceProductionConfigSafety } from './production-policy';
 
@@ -18,6 +19,14 @@ import { enforceProductionConfigSafety } from './production-policy';
  * the production safety guard (`production-policy.ts`): under
  * `NODE_ENV=production`, development-default/weak secrets and
  * `COOKIE_SECURE=false` are rejected at load time.
+ *
+ * Sprint 24 adds two things around — never inside — this schema:
+ *  - a runtime secret SOURCE stage (`secret-source.ts`) that resolves
+ *    `<NAME>_FILE` mounted secrets into their canonical variable BEFORE this
+ *    schema parses anything, so file-backed values get byte-identical
+ *    validation to direct environment values;
+ *  - `JWT_PREVIOUS_SECRET`, an optional second verification key enabling
+ *    graceful access-token secret rotation (`auth-policy.ts`).
  */
 
 const booleanFromEnv = z
@@ -247,6 +256,17 @@ const rawEnvSchema = z.object({
   // the stricter policy in `production-policy.ts` (min 32 chars, no known
   // dev defaults, no placeholder-style or degenerate values).
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  // Optional PREVIOUS access-token signing secret (Sprint 24, ORG-PR-006).
+  // Nothing is ever signed with it; verification accepts it IN ADDITION to
+  // JWT_SECRET so tokens issued before a rotation stay valid for the rest of
+  // their (short) lifetime. Unset it to complete the cutover — or immediately,
+  // to force every outstanding access token to fail. Held to the same floor
+  // here and the same production strength rules as the current secret; must
+  // not equal it (`auth-policy.ts`).
+  JWT_PREVIOUS_SECRET: z
+    .string()
+    .min(16, 'JWT_PREVIOUS_SECRET must be at least 16 characters')
+    .optional(),
   // `true` in production-like environments, `false` on localhost over HTTP.
   // Default is the raw env string 'false'; the transform yields the boolean.
   // Drives the refresh cookie's `Secure` attribute. Under
@@ -577,12 +597,14 @@ const rawEnvSchema = z.object({
 });
 
 /**
- * The full environment schema: raw field validation, the driver-conditional
- * mailer completeness rules, and the production safety guard. Both guards are
- * part of the schema itself (not a separate validation path) so every
- * `loadConfig` caller — including API boot — gets them unconditionally.
+ * The full environment schema: raw field validation, the access-token key
+ * rotation rules, the driver-conditional mailer completeness rules, and the
+ * production safety guard. Every guard is part of the schema itself (not a
+ * separate validation path) so every `loadConfig` caller — including API boot
+ * — gets them unconditionally, whatever source each secret came from.
  */
 export const envSchema = rawEnvSchema
+  .superRefine(enforceJwtRotationConfig)
   .superRefine(enforceMailerConfigCompleteness)
   .superRefine(enforceProductionConfigSafety);
 

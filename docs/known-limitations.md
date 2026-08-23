@@ -54,9 +54,15 @@ These are intentional non-goals, not bugs:
   other mechanisms rely on nodemailer, untested here) — verified by automated
   tests against an in-process server, plus live delivery to the local Mailpit
   container. **No delivery through a real external provider to a real inbox
-  has been performed** (no provider credentials exist in this repository or
-  its validation environments), so real-provider compatibility is asserted,
-  not evidenced; ORG-PR-002 stays open until it is. The driver offers no
+  has been performed** (no provider credentials, no verified sending domain,
+  and no test mailbox exist in this repository or its validation environments
+  — re-confirmed in Sprint 24), so real-provider compatibility is asserted,
+  not evidenced, and **no SPF/DKIM/DMARC posture has been validated**;
+  ORG-PR-002 stays open until it is. Provider *acceptance* and real *inbox
+  receipt* are tracked as separate evidence and neither is inferred from the
+  other. The exact procedure to obtain both is in
+  [rotation-runbook.md](rotation-runbook.md#validate-external-email-delivery).
+  The driver offers no
   STARTTLS upgrade — a provider endpoint must accept implicit-TLS
   connections (conventionally port 465). Also intentionally absent: bounce
   processing, complaint processing, suppression lists, marketing/bulk email,
@@ -104,15 +110,26 @@ These are intentional non-goals, not bugs:
   staging or production environment, no Terraform/Helm/Kubernetes, no
   container-registry publishing, no image signing/provenance, and no release
   or deploy pipeline (ORG-PR-001's deployment half remains open).
-- **No production secret management.** There is no secrets manager, no secret
-  rotation procedure, and no JWT `kid`/versioned-secret rotation path (rotating
-  `JWT_SECRET` invalidates all live access tokens). The Sprint 15 production
-  config guard ([production-config-guard.md](production-config-guard.md))
-  refuses known-bad and obviously weak secrets under `NODE_ENV=production`,
-  but **config validation does not prove real entropy** — a determined operator
-  can still supply a weak-but-passing value. External email delivery is
-  unvalidated, and no backup/PITR/restore system exists. The project remains
-  **not ready for staging or production** (see the
+- **No production secret management.** Sprint 24 delivered the runtime
+  *source* and *rotation* halves — secrets come from a direct environment value
+  or a mounted `<NAME>_FILE` secret resolved before validation, access-token
+  keys rotate gracefully through an optional `JWT_PREVIOUS_SECRET` verification
+  window, and manual rotation/incident procedures are written down
+  ([runtime-secrets.md](runtime-secrets.md),
+  [rotation-runbook.md](rotation-runbook.md)). Still missing: **any secrets
+  manager or platform secret-store integration**, automated rotation, rotation
+  scheduling or expiry tracking, secret-access auditing, hot reload (every
+  rotation is a process restart), a `kid`/versioned-key JWT scheme
+  (ORG-PR-049), and dual-credential support for `DATABASE_URL`/`REDIS_URL` (the
+  old credential must stay valid until every process restarts). The Sprint 15
+  production config guard
+  ([production-config-guard.md](production-config-guard.md)) refuses known-bad
+  and obviously weak secrets under `NODE_ENV=production`, but **config
+  validation does not prove real entropy** — a determined operator can still
+  supply a weak-but-passing value. Platform-wide session invalidation has no
+  API and is operator SQL only. External email delivery is unvalidated, and no
+  backup/PITR/restore system exists. The project remains **not ready for
+  staging or production** (see the
   [production-readiness audit](production-readiness/README.md)).
 
 ## Testing and validation limitations

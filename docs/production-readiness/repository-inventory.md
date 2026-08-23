@@ -40,7 +40,7 @@ except generated/derived artifacts and test-only harness files (reason given).
 | --- | --- | --- | --- | --- |
 | `apps/api` | Fastify HTTP API — the authority | `apps/api/src` | Partial | Strong domain logic; missing headers/proxy/timeouts (ORG-PR-010/011/021), no deploy artifact (ORG-PR-001). |
 | `apps/web-demo` | React/Vite thin admin consumer | `apps/web-demo/src` | Demo-only | By design; robustness gaps (ORG-PR-023/035/036). |
-| `packages/config` | Zod-validated runtime config | `packages/config/src` | Partial | Sprint 14 baseline: no production guards (ORG-PR-003), unused `COOKIE_SECRET` (ORG-PR-047). Current state: both resolved in Sprint 15 — production guard added, `COOKIE_SECRET` removed. |
+| `packages/config` | Zod-validated runtime config | `packages/config/src` | Partial | Sprint 14 baseline: no production guards (ORG-PR-003), unused `COOKIE_SECRET` (ORG-PR-047). Current state: both resolved in Sprint 15 — production guard added, `COOKIE_SECRET` removed. Sprint 24 added the runtime secret-source stage (`secret-source.ts`, `<NAME>_FILE` resolved before validation) and the access-token key rotation rules (`auth-policy.ts`). |
 | `packages/contracts` | Frozen API contracts (envelopes, codes, DTOs) | `packages/contracts/src` | Production-capable | No DTO leaks; well tested. |
 | `packages/shared` | Primitives: IDs, cursors, request-id, env loader | `packages/shared/src` | Production-capable | Cursor unsigned but not a tenant vector. |
 | `packages/auth-core` | Argon2id, JWT (jose), opaque-token hashing, redaction | `packages/auth-core/src` | Production-capable | HS256 no `kid` (ORG-PR-049). |
@@ -124,8 +124,12 @@ Migrate-from-scratch is tested (`packages/db/src/migrate.integration.test.ts`).
 CORS, DB/Redis/Mailpit, auth secrets/TTLs, cookie/CSRF, rate-limit buckets, API-key
 throttle). `.env.example` documents local defaults. At the Sprint 14 audit
 baseline there were **no production guards** (ORG-PR-003); Sprint 15 added them
-(`packages/config/src/production-policy.ts`). Frontend build-time `VITE_*` keys
-in `apps/web-demo/src/config.ts`.
+(`packages/config/src/production-policy.ts`). Sprint 24 added a resolution stage
+ahead of the schema (`packages/config/src/secret-source.ts`): six secret
+variables also accept a `<NAME>_FILE` mounted-secret path, resolved onto the
+canonical variable name before validation, plus the optional
+`JWT_PREVIOUS_SECRET` rotation key (`packages/config/src/auth-policy.ts`).
+Frontend build-time `VITE_*` keys in `apps/web-demo/src/config.ts`.
 
 ## Scripts inventory
 

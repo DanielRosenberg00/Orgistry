@@ -27,7 +27,15 @@ holds:
   `changeme`, `dev-only`, `replace-me`, `placeholder`, `example-secret`,
   `default-secret` — matched case-insensitively);
 - `JWT_SECRET` is a single repeated character (e.g. `aaaa…`);
+- `JWT_PREVIOUS_SECRET` (Sprint 24, optional) fails any of the same four rules
+  — a retiring key still verifies live tokens, so a weak one is exactly as
+  forgeable as a weak current key;
 - `COOKIE_SECURE` is `false` (explicitly or by default).
+
+Sprint 24 also added one rule that applies in **every** mode
+(`packages/config/src/auth-policy.ts`): `JWT_PREVIOUS_SECRET` must not equal
+`JWT_SECRET`. An equal pair is a rotation that never happened, and accepting it
+would let an operator believe a cutover window is open when it is not.
 
 Sprint 16 extended the same guard with the account-mailer rules (see
 [email-and-verification.md](email-and-verification.md)); in production it
@@ -59,14 +67,25 @@ credentials) still applies, so `cp .env.example .env` keeps working locally.
 | --- | --- |
 | Policy (constants + helpers) | `packages/config/src/production-policy.ts` |
 | Driver-conditional mailer completeness | `packages/config/src/mail-policy.ts` |
+| Access-token key rotation rules (all modes) | `packages/config/src/auth-policy.ts` |
+| Runtime secret source resolution (Sprint 24) | `packages/config/src/secret-source.ts` |
 | Schema wiring (`superRefine`) | `packages/config/src/schema.ts` — `envSchema` |
 | Loading boundary | `packages/config/src/index.ts` — `loadConfig` / `getConfig` |
-| Tests | `packages/config/src/config.test.ts` — `production configuration guard`, `mailer configuration`, and `production mailer guard` suites |
+| Tests | `packages/config/src/config.test.ts` — `production configuration guard`, `mailer configuration`, `production mailer guard`, and `access-token secret rotation config` suites; `packages/config/src/secret-source.test.ts` |
 
 The guard is a Zod `superRefine` on `envSchema` itself, not a separate
 validation pass. `loadConfig` has exactly one parse call
 (`envSchema.safeParse`), so **every** consumer gets the guard with no opt-out
 and there is no second config authority to drift.
+
+**Sprint 24 ordering invariant.** `loadConfig` now runs one stage *before* the
+parse: `resolveSecretSources` reads any `<NAME>_FILE` mounted secret and writes
+the value to its **canonical** variable name. The parse — and therefore this
+guard — then sees exactly one value per variable and cannot tell which source
+it came from, so **a file-backed secret can never bypass a production guard**.
+Ambiguous (`NAME` and `NAME_FILE` both set), empty, and unreadable secret files
+fail at that stage through the same `ConfigValidationError`. Full contract:
+[runtime-secrets.md](runtime-secrets.md#validation-ordering-security-invariant).
 
 ## Why unsafe config prevents API boot
 
@@ -163,7 +182,11 @@ operator's `.env` is now silently ignored (unknown keys are stripped).
   guard: a generated `JWT_SECRET` (≥ 32 random bytes) and
   `COOKIE_SECURE=true`. The guard is the contract that deployment tooling
   must satisfy; it is not replaced by it.
-- **ORG-PR-006 (secrets manager + rotation)** remains open. That work will
-  change *where* secrets come from (manager instead of `.env`) and *how* they
-  rotate; the values it supplies must still pass this guard. Rejecting weak
-  secrets here is not secrets management.
+- **ORG-PR-006 (secrets manager + rotation)** remains open. Sprint 24 delivered
+  the runtime *source* half (direct env or mounted `_FILE`, resolved before
+  validation) and graceful access-token key rotation
+  ([runtime-secrets.md](runtime-secrets.md),
+  [rotation-runbook.md](rotation-runbook.md)); there is still no secrets
+  manager, no automated rotation, and no hot reload. Whatever supplies the
+  values must still pass this guard. Rejecting weak secrets here is not secrets
+  management.

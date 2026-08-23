@@ -237,6 +237,9 @@ function addProductionIssue(
  *
  * - `JWT_SECRET` values that are known development defaults, placeholder-like,
  *   degenerate, or shorter than {@link PRODUCTION_SECRET_MIN_LENGTH};
+ * - `JWT_PREVIOUS_SECRET` values (when set) failing exactly the same rules —
+ *   a retired key still verifies live tokens, so a weak one is exactly as
+ *   forgeable as a weak current key;
  * - `COOKIE_SECURE=false` (the refresh cookie must only travel over HTTPS,
  *   including behind a TLS-terminating reverse proxy);
  * - `MAIL_DRIVER` values other than `smtp` (production must never silently
@@ -255,6 +258,7 @@ export function enforceProductionConfigSafety(
   env: {
     NODE_ENV: string;
     JWT_SECRET: string;
+    JWT_PREVIOUS_SECRET?: string;
     COOKIE_SECURE: boolean;
     MAIL_DRIVER: 'mailpit' | 'smtp' | 'memory';
     MAIL_FROM_EMAIL: string;
@@ -285,6 +289,17 @@ export function enforceProductionConfigSafety(
     env.JWT_SECRET,
   )) {
     addProductionIssue(ctx, 'JWT_SECRET', message);
+  }
+
+  // A configured previous key is a live verification key for the whole
+  // rotation window, so it is held to the current key's standard exactly.
+  if (env.JWT_PREVIOUS_SECRET !== undefined) {
+    for (const message of collectProductionSecretIssues(
+      'JWT_PREVIOUS_SECRET',
+      env.JWT_PREVIOUS_SECRET,
+    )) {
+      addProductionIssue(ctx, 'JWT_PREVIOUS_SECRET', message);
+    }
   }
 
   if (!env.COOKIE_SECURE) {

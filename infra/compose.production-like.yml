@@ -17,6 +17,11 @@
 #     real secrets at runtime (JWT_SECRET, SMTP_PASSWORD, database
 #     credentials) from the operator's secret store — never from this file
 #     and never at image-build time (ORG-PR-006 remains open).
+#   - This file uses the DIRECT environment form of each secret. The same
+#     artifact also accepts mounted secret FILES (`JWT_SECRET_FILE`,
+#     `SMTP_PASSWORD_FILE`, ...); tooling/artifact-smoke.sh exercises that
+#     path with temporary files rather than checking secret files into the
+#     repository. See docs/runtime-secrets.md.
 #
 # Startup order: postgres healthy -> migrate (one-shot, exits 0) -> api.
 # Migrations are an explicit step, never an API-boot side effect.

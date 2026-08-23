@@ -237,6 +237,17 @@ These must not change without a deliberate redesign:
 - **Refresh credential is cookie-only.** It never appears in a JSON body, log,
   or security event. Persistence stores only its SHA-256 hash
   (`refresh_tokens.token_hash`); the raw token is never stored.
+- **No secret backs the refresh credential.** The token is opaque, unsigned,
+  and unencrypted; the cookie is deliberately unsigned; there is no session or
+  refresh signing secret in the configuration. Its integrity model is entirely
+  the high-entropy value plus server-side hash lookup, rotation, and reuse
+  detection. Consequences (Sprint 24): rotating `JWT_SECRET` does **not** log
+  anyone out — `POST /v1/auth/refresh` reads only the cookie — and sessions
+  cannot be invalidated by rotating anything. Invalidation is a database
+  operation; see
+  [rotation-runbook.md](rotation-runbook.md#emergency-invalidate-sessions) for
+  the per-session, per-user, per-family, and platform-wide mechanisms (the last
+  has no API and is operator SQL only).
 - **Cookie attributes are centralized.** `HttpOnly`, `SameSite=Lax`, path-scoped,
   `Secure` driven by config, `Max-Age` = refresh TTL. Set and clear read the same
   attributes from `config.auth.refreshCookie`, so they cannot drift.

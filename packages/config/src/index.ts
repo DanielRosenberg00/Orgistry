@@ -4,9 +4,22 @@ import {
   type Env,
   type TrustProxySetting,
 } from './schema';
+import { resolveSecretSources, type SecretFileReader } from './secret-source';
 
 export { envSchema, parseTrustProxy, TRUST_PROXY_MAX_HOPS } from './schema';
 export type { Env, TrustProxySetting } from './schema';
+export {
+  FILE_BACKED_SECRET_NAMES,
+  SECRET_FILE_SUFFIX,
+  SecretFileError,
+  readSecretFileFromDisk,
+  resolveSecretSources,
+} from './secret-source';
+export type {
+  FileBackedSecretName,
+  SecretFileReader,
+  SecretResolution,
+} from './secret-source';
 
 /**
  * Structured, validated runtime configuration. This is the shape application
@@ -94,7 +107,14 @@ export interface Config {
     readonly completionTtlSeconds: number;
   };
   readonly auth: {
+    /** CURRENT access-token signing secret. Every issued token uses this. */
     readonly jwtSecret: string;
+    /**
+     * PREVIOUS access-token signing secret (Sprint 24). Present only during a
+     * rotation window; verification accepts it in addition to `jwtSecret`, and
+     * nothing is ever signed with it. Absent = only the current key verifies.
+     */
+    readonly previousJwtSecret?: string;
     readonly cookieSecure: boolean;
     readonly accessTokenTtlSeconds: number;
     readonly sessionTtlSeconds: number;
@@ -311,6 +331,7 @@ function toConfig(env: Env): Config {
     },
     auth: {
       jwtSecret: env.JWT_SECRET,
+      previousJwtSecret: env.JWT_PREVIOUS_SECRET,
       cookieSecure: env.COOKIE_SECURE,
       accessTokenTtlSeconds: env.AUTH_ACCESS_TOKEN_TTL_SECONDS,
       sessionTtlSeconds: env.AUTH_SESSION_TTL_SECONDS,
@@ -414,16 +435,50 @@ export class ConfigValidationError extends Error {
   }
 }
 
+export interface LoadConfigOptions {
+  /**
+   * Reader used for `<NAME>_FILE` mounted secrets. Defaults to reading the
+   * configured path from disk; tests inject a fake so resolution can be
+   * exercised without a filesystem. Never called for an environment that
+   * configures no secret files.
+   */
+  readSecretFile?: SecretFileReader;
+}
+
 /**
  * Validate a raw environment source and return structured config.
  *
- * Pure with respect to its input — pass an explicit record in tests. Throws
- * `ConfigValidationError` (never a raw ZodError) on invalid input.
+ * Two ordered stages, and the order is a security invariant:
+ *
+ *   1. **Resolve** — `<NAME>_FILE` mounted secrets are read and written to
+ *      their canonical variable (`secret-source.ts`). Ambiguous, unreadable,
+ *      or empty secret files fail here.
+ *   2. **Validate** — the resolved record goes through `envSchema`, which
+ *      applies the rotation, mailer-completeness, and production safety
+ *      guards.
+ *
+ * Because resolution precedes validation and normalizes onto the canonical
+ * name, a file-backed secret receives byte-identical validation to a direct
+ * environment value and can never bypass a production guard.
+ *
+ * Pure with respect to its input except for reading the secret files the
+ * input names — pass an explicit record (and, for file cases, an explicit
+ * reader) in tests. Throws `ConfigValidationError` (never a raw ZodError or a
+ * filesystem error) on invalid input.
  */
 export function loadConfig(
   source: Record<string, string | undefined> = process.env,
+  options: LoadConfigOptions = {},
 ): Config {
-  const result = envSchema.safeParse(source);
+  const resolved = resolveSecretSources(source, options.readSecretFile);
+  if (resolved.issues.length > 0) {
+    // Report every source problem at once and stop: parsing a record whose
+    // secret origins are unresolved would only add misleading "required"
+    // issues on top of the real cause.
+    throw new ConfigValidationError(resolved.issues);
+  }
+
+  const result = envSchema.safeParse(resolved.env);
   if (!result.success) {
     const issues = result.error.issues.map(
       (issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`,

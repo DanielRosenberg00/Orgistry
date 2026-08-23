@@ -63,6 +63,12 @@ export interface AuthTestContext {
 }
 
 export interface BuildAuthTestAppOptions {
+  /**
+   * Retiring access-token secret (Sprint 24). Set only by the rotation suite:
+   * the app then verifies tokens signed with either this or the config secret,
+   * exactly as a process running mid-rotation does.
+   */
+  previousJwtSecret?: string;
   rateLimiter?: RateLimiter;
   /** Store-outage behavior shared by every auth-family service under test. */
   rateLimitFailureMode?: RateLimitFailureMode;
@@ -149,6 +155,7 @@ export async function buildAuthTestApp(
   const service = createAuthService({
     repo,
     jwtSecret: config.auth.jwtSecret,
+    previousJwtSecret: options.previousJwtSecret,
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,

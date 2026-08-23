@@ -214,6 +214,65 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > gateway condition is met — recommended next: **Sprint 24 — Runtime
 > Secrets and External Email Validation** (binding Sprint 23 specification;
 > ORG-PR-002, ORG-PR-006).
+>
+> **Sprint 24 status (2026-08-23) — runtime secrets and external email
+> validation. COMPLETE — Sprint 24 DoD MET.** All required remote checks are
+> green for implementation commit `de6780f` on PR #33: CI `32663739832`,
+> CodeQL `32663739811`, Security scans `32663739952` (7/7 checks pass).
+> Implemented: a single runtime secret-source boundary
+> (`packages/config/src/secret-source.ts`) giving `DATABASE_URL`, `REDIS_URL`,
+> `JWT_SECRET`, `JWT_PREVIOUS_SECRET`, `SMTP_USERNAME`, and `SMTP_PASSWORD` an
+> optional mounted-file source (`<NAME>_FILE`) alongside the direct environment
+> value, with deterministic semantics (both-set fails closed; one terminal line
+> ending stripped; empty, missing, directory, and unreadable files rejected
+> without ever echoing contents); resolution ordered **before** schema
+> validation and normalized onto the canonical variable name, so a file-backed
+> secret receives byte-identical production validation and **cannot bypass a
+> production guard** (test-proven, and re-proven against the packaged
+> artifact); graceful access-token key rotation via an optional
+> `JWT_PREVIOUS_SECRET` accepted at verification only (signing stays
+> current-key-only, the two keys must differ, both are held to the production
+> strength rules, an unrelated older key is rejected, expiry and authorization
+> semantics are unchanged, and removing the previous key completes the cutover
+> — proven at both the primitive and HTTP-route level); credential-redaction
+> proofs across startup, config-validation, secret-file, SMTP-failure, and
+> 401-envelope paths; six artifact-smoke checks covering the mounted-secret
+> path with temporary files the harness creates and deletes; and two
+> operational documents (`../runtime-secrets.md`, `../rotation-runbook.md`).
+> Verified rather than assumed: **there is no refresh/session signing secret**
+> — refresh tokens are opaque, unsigned, hash-only, and the cookie is
+> deliberately unsigned — so rotating `JWT_SECRET` logs nobody out and sessions
+> can only be invalidated in the database (no platform-wide API exists).
+> Two remote runs failed first, each on a **Linux-only portability defect in a
+> validation fixture** — never in the application, and neither fixed by
+> weakening the production security model; the chain (`74f50e4` →`486bee8` →
+> `de6780f`) is preserved in the artifact as evidence that CI worked.
+> **No finding was closed, which is the specification-permitted outcome, not a
+> sprint failure. ORG-PR-002 remains OPEN — materially advanced**: every
+> repository-side prerequisite within Sprint 24's scope is done; the blocker is
+> external provider, domain, and mailbox access, so no provider-acceptance,
+> inbox-receipt, or SPF/DKIM/DMARC evidence exists and none is claimed —
+> **Orgistry has no evidence that production email works**. **ORG-PR-006
+> remains OPEN — materially advanced, with a genuine remaining capability
+> gap**: runtime sources, rotation mechanics, and runbooks exist, but a secrets
+> manager or platform secret store, least-privilege secret access control,
+> secret-access auditability, automated rotation and expiry tracking, hot
+> reload, and a rehearsed rotation against a real runtime (which needs
+> ORG-PR-001's environment) are all still unbuilt; `<NAME>_FILE` support plus
+> manual runbooks is a foundation, not secrets management. `pnpm validate`,
+> `pnpm validate:integration`, `pnpm scan:deps`, `pnpm scan:deps:local`,
+> `pnpm scan:secrets`, `actionlint`, and `tooling/artifact-smoke.sh` all pass
+> locally on the validated tree. See
+> [sprint-24-artifact-package.md](sprint-24-artifact-package.md) — the official
+> Sprint 24 closing artifact; its DoD reconciliation records **34 PASS / 2
+> satisfied by explicit external blocker / 0 pending / 0 fail-missing**.
+> Four P1 blockers remain open (ORG-PR-001/002/005/006, plus ORG-PR-015 at P2);
+> the repository is still **not ready for staging or production** — the state
+> remains **C — Ready to continue production implementation**. Recommended
+> next: **Sprint 25 — Backup, PITR, Restore, and Retention Foundation**
+> (ORG-PR-005, with retention groundwork under ORG-PR-015). ORG-PR-002's
+> external-email validation and ORG-PR-006's residual secrets-management
+> capability remain outstanding workstreams alongside it, not inside it.
 
 ## Audit context
 
@@ -252,6 +311,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-22-artifact-package.md](sprint-22-artifact-package.md) | The Sprint 22 closing artifact (CodeQL alert triage, gate policy + ruleset enforcement, ORG-PR-020 closure). |
 | [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) | Per-alert triage of all 41 baseline CodeQL High alerts: evidence, root-cause groups, classifications, dispositions. |
 | [sprint-23-artifact-package.md](sprint-23-artifact-package.md) | The Sprint 23 closing artifact (deployable API/web artifacts, migration entrypoint, smoke gate, image policy; ORG-PR-042 closure). |
+| [sprint-24-artifact-package.md](sprint-24-artifact-package.md) | The official Sprint 24 closing artifact (runtime secret sources, JWT key rotation, redaction proofs, external-email evidence state, CI defect history; DoD MET, ORG-PR-002/006 remain open). |
 
 ## Source-of-truth hierarchy
 

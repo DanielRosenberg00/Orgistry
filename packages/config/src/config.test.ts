@@ -506,3 +506,74 @@ describe('production mailer guard (NODE_ENV=production, Sprint 16)', () => {
     expect(issues.join('\n')).not.toContain(rejectedSecret);
   });
 });
+
+describe('access-token secret rotation config (Sprint 24)', () => {
+  // Public unit-test fixtures shaped like generated secrets; never real.
+  const RETIRING_SECRET = 'test-suite-jwt-secret-PREVIOUS-not-real-not-real';
+
+  it('leaves the previous secret absent by default', () => {
+    expect(loadConfig(baseEnv()).auth.previousJwtSecret).toBeUndefined();
+  });
+
+  it('exposes a configured previous secret alongside the current one', () => {
+    const config = loadConfig({
+      ...baseEnv(),
+      JWT_PREVIOUS_SECRET: RETIRING_SECRET,
+    });
+
+    expect(config.auth.jwtSecret).toBe('test-jwt-secret-value-1234');
+    expect(config.auth.previousJwtSecret).toBe(RETIRING_SECRET);
+  });
+
+  it('rejects a previous secret equal to the current one, in every mode', () => {
+    // A no-op "rotation" is refused everywhere, not just in production.
+    const currentSecret = 'test-suite-jwt-secret-CURRENT-not-real-not-real';
+    for (const env of [baseEnv(), productionEnv()]) {
+      const issues = loadIssues({
+        ...env,
+        JWT_SECRET: currentSecret,
+        JWT_PREVIOUS_SECRET: currentSecret,
+      });
+      expect(issues.join('\n')).toContain(
+        'JWT_PREVIOUS_SECRET must not equal JWT_SECRET',
+      );
+    }
+  });
+
+  it('applies the base length floor to the previous secret', () => {
+    const issues = loadIssues({ ...baseEnv(), JWT_PREVIOUS_SECRET: 'too-short' });
+    expect(issues.join('\n')).toContain(
+      'JWT_PREVIOUS_SECRET must be at least 16 characters',
+    );
+  });
+
+  it('holds the previous secret to the production rules of the current one', () => {
+    const rejections: [string, string][] = [
+      ['dev-only-jwt-secret-change-me', 'known development-only default'],
+      ['still-a-short-secret-123456789', 'at least 32 characters'],
+      ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'single repeated character'],
+      ['please-replace-me-0123456789abcdefghij', 'placeholder marker'],
+    ];
+
+    for (const [secret, expectedMessage] of rejections) {
+      const issues = loadIssues({
+        ...productionEnv(),
+        JWT_PREVIOUS_SECRET: secret,
+      });
+      const previousSecretIssues = issues.filter((issue) =>
+        issue.startsWith('JWT_PREVIOUS_SECRET'),
+      );
+      expect(previousSecretIssues.join('\n')).toContain(expectedMessage);
+      expect(issues.join('\n')).not.toContain(secret);
+    }
+  });
+
+  it('accepts a valid rotation pair in production', () => {
+    const config = loadConfig({
+      ...productionEnv(),
+      JWT_PREVIOUS_SECRET: RETIRING_SECRET,
+    });
+
+    expect(config.auth.previousJwtSecret).toBe(RETIRING_SECRET);
+  });
+});

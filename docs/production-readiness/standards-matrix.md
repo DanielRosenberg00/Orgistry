@@ -29,7 +29,7 @@ are drawn only from: **Satisfied**, **Partially satisfied**, **Not satisfied**,
 | Session management | Satisfied | rotation+reuse detection, HttpOnly/SameSite, revocation | unsigned cookie; multi-tab logout | P4 | ORG-PR-047, 050 |
 | Access control (object/function level) | Partially satisfied | permission-first, repo org-scoping, uniform 404 | Admin→Owner; 2 read paths skip gate | P2/P4 | ORG-PR-017, 053 |
 | Validation & injection | Partially satisfied | Zod on all inputs; parameterized queries | drizzle advisory in range | P2 | ORG-PR-018 |
-| Cryptography & secret management | Partially satisfied | jose HS256 allowlist; hash-only secrets | dev-default secrets in prod; no rotation/manager | P1 | ORG-PR-003, 006, 049 |
+| Cryptography & secret management | Partially satisfied | jose HS256 allowlist; hash-only secrets; production secret guards (S15); runtime env/file secret sources validated before the guard and graceful access-token key rotation (S24) | no secrets manager, no least-privilege secret access, no automated/rehearsed rotation, no `kid`/versioned keys | P1 | ORG-PR-003 (closed), 006, 049 |
 | Logging & monitoring | Partially satisfied (S19) | request IDs (inbound id sanitized, S19), sanitized event metadata, centralized pino redaction backstop (S19) | no metrics/alerts | P2 | ORG-PR-007; 033 closed (S19) |
 | Data protection & privacy | Not satisfied | soft-delete only | no export/delete; PII retained | P2/P3 | ORG-PR-025, 043 |
 | Business logic / anti-automation | Partially satisfied (S19) | per-surface auth limits; global per-trusted-IP limit + per-actor mutation buckets (S19); sensitive buckets fail closed in production (S19) | quota TOCTOU; limiter-outage alerting pending ORG-PR-007 | P2/P3 | ORG-PR-029; 012/032 closed, 009 materially advanced (S19) |
@@ -43,7 +43,7 @@ not at the individual task identifier level.
 | Practice group | Class | Evidence | Gap | Findings |
 | --- | --- | --- | --- | --- |
 | Prepare the Organization | Partially satisfied | strong docs/DX; validation matrix | no ops/incident process | ORG-PR-008, 027 |
-| Protect the Software | Partially satisfied | lockfile, `onlyBuiltDependencies`, SHA-pinned actions, secret scanning enforced as a required check (S22) | no secrets manager; no SBOM/signing | ORG-PR-006, 001 |
+| Protect the Software | Partially satisfied | lockfile, `onlyBuiltDependencies`, SHA-pinned actions, secret scanning enforced as a required check (S22), runtime-only secret injection with no build-time secret dependency (S23/S24) | no secrets manager; no SBOM/signing | ORG-PR-006, 001 |
 | Produce Well-Secured Software | Partially satisfied | strict TS incl. `noUncheckedIndexedAccess` (Sprint 21), ESLint, broad tests, code review culture; CodeQL executing remotely with all 41 baseline alerts triaged and dispositioned (Sprint 22) | no failure-injection; no DAST | ORG-PR-026 |
 | Respond to Vulnerabilities | Largely satisfied (Sprint 22) | audit gates + Gitleaks + Dependabot + CodeQL running remotely and enforced as required checks; secret gate proved to fail on a seeded finding; documented CodeQL alert policy with evidence-bearing dispositions; advisories remediated with two documented acceptances | no VDP / security.txt; no coordinated-disclosure process | ORG-PR-008 |
 
@@ -55,7 +55,7 @@ not at the individual task identifier level.
 | Design — Threat Assessment | ~1→2 | this threat model (new) | no prior model; keep current |
 | Design — Security Architecture | ~2 | permission/entitlement/quota separation, tenant model | RLS absent (defense-in-depth, deferred) |
 | Implementation — Secure Build | ~1→2 | reproducible via lockfile; CI-built non-root container artifacts + smoke gate (S23) | no release pipeline/provenance — ORG-PR-001 |
-| Implementation — Secure Deployment | ~0→1 | none | no deploy/secrets automation — ORG-PR-001/006 |
+| Implementation — Secure Deployment | ~0→1 | production-shaped artifacts + smoke gate (S23); runtime secret sources + manual rotation runbooks (S24) | no deploy automation, no secrets manager, no automated rotation — ORG-PR-001/006 |
 | Verification — Security Testing | ~2 | strong functional/negative tests; SAST (CodeQL) running remotely with triaged findings (S22) | no DAST/E2E/pentest — ORG-PR-026 |
 | Operations — Incident Mgmt | ~0 | none | no incident process — ORG-PR-008 |
 | Operations — Environment Mgmt | ~1 | local runbook | no prod runbook/backup — ORG-PR-005/027 |

@@ -19,6 +19,22 @@ omits production concerns (see [known limitations](./known-limitations.md)).
 - **Access tokens.** Short-lived **JWTs** (default 15 min), signed with
   `JWT_SECRET`, presented as `Authorization: Bearer`. The web demo holds them in
   memory only — never `localStorage`/`sessionStorage`.
+- **Access-token key rotation (Sprint 24).** An optional `JWT_PREVIOUS_SECRET`
+  is accepted **at verification only** — tokens are always signed with the
+  current key alone — so a signing-secret rotation does not interrupt tokens
+  already in flight. The two keys must differ, both are held to the same
+  production strength rules, a token signed with any other key is rejected, and
+  expiry/claim/session/authorization semantics are unchanged. Removing the
+  previous key immediately invalidates every token signed with it: that is the
+  emergency path, deliberately distinct from graceful rotation. See
+  [runtime-secrets.md](runtime-secrets.md#access-token-secret-rotation) and
+  [rotation-runbook.md](rotation-runbook.md).
+- **Runtime secret sources (Sprint 24).** Secrets are read once at process
+  start from a direct environment value or a mounted `<NAME>_FILE` secret.
+  Resolution happens *before* validation and normalizes onto the canonical
+  variable name, so a file-backed secret cannot bypass the production guard;
+  setting both forms of one variable fails closed. No secret is read at image
+  build time or embedded in the frontend bundle.
 - **Refresh cookie.** The refresh credential is a high-entropy **opaque** string,
   stored **hash-only**, delivered exclusively through an **HttpOnly,
   SameSite=Lax** cookie scoped to the auth path. It never appears in a response
@@ -361,7 +377,11 @@ The full design and evidence live in
 
 This model omits, by design: OAuth/MFA/passkeys, externally validated
 production email delivery (the production SMTP adapter exists but has never
-sent through a real provider), verification **enforcement** (the flag is
+sent through a real provider, and no sender domain or SPF/DKIM/DMARC posture
+has been validated), any secrets manager or automated secret rotation (Sprint
+24 delivered runtime secret sources plus manual rotation procedures — not a
+manager), a platform-wide session-invalidation API (operator SQL only),
+verification **enforcement** (the flag is
 advisory), cleanup/retention jobs for consumed or expired token and
 pending-registration rows, database RLS, audit retention enforcement/export,
 custom roles, and resource-level permissions. Quota checks are serialized

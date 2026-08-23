@@ -203,16 +203,53 @@ unchanged.** The repository remains not ready for staging or production. See
 [sprint-23-artifact-package.md](sprint-23-artifact-package.md) (final) and
 [../deployment-artifacts.md](../deployment-artifacts.md).
 
+**Status update (Sprint 24, 2026-08-23):** **Sprint 24 is COMPLETE and its DoD
+is MET** (all required remote checks green for implementation commit `de6780f`
+on PR #33: CI `32663739832`, CodeQL `32663739811`, Security scans
+`32663739952`) — and **no finding was closed.** That combination is the
+specification-permitted outcome, not a contradiction: sprint completion and
+finding closure are separate, and the sprint's external-email condition was
+explicitly allowed to be met by a precisely documented blocker.
+[ORG-PR-006](#org-pr-006) (P1) **remains Open, materially advanced**: a runtime
+secret-source boundary now resolves `<NAME>_FILE` mounted secrets for
+`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `JWT_PREVIOUS_SECRET`,
+`SMTP_USERNAME`, and `SMTP_PASSWORD` **before** schema validation and onto the
+canonical variable name — so file-backed secrets get byte-identical production
+validation and cannot bypass a guard — and graceful access-token key rotation
+exists (optional `JWT_PREVIOUS_SECRET`, verification-only, test-proven at the
+primitive and route level), together with redaction proofs and written manual
+rotation/emergency runbooks. It stays open because there is still no
+secrets-manager or platform-store integration, no least-privilege secret
+access control, no automated rotation or expiry tracking, no hot reload, and —
+decisively — no *rehearsed* rotation, which needs a deployment environment
+(ORG-PR-001). [ORG-PR-002](#org-pr-002) (P1) **remains Open, materially
+advanced**: SMTP credentials now flow through the same runtime secret boundary
+with identical validation, every representative provider failure mode is proven
+not to leak the credential, the six account-email families are enumerated with
+explicit evidence classes, and a precise operator validation procedure exists —
+but **no send through a real external provider to a real inbox was performed**
+and **no SPF/DKIM/DMARC posture was validated**, because this environment has
+no provider credentials, no verified sending domain, and no readable test
+mailbox (repository secrets empty; zero GitHub Actions environments).
+[ORG-PR-049](#org-pr-049) (P4) is **materially advanced** — graceful rotation
+now works, though no `kid`/versioned-key scheme was introduced. **Open P1
+production blockers: ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006 —
+unchanged** (ORG-PR-015 also remains open). The repository remains not ready
+for staging or production. See
+[sprint-24-artifact-package.md](sprint-24-artifact-package.md),
+[../runtime-secrets.md](../runtime-secrets.md), and
+[../rotation-runbook.md](../rotation-runbook.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
 | --- | --- | --- | --- | --- | --- |
 | [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Open; materially advanced (Sprint 23): non-root artifacts + CI build/smoke gate exist; deployment pipeline to a target environment does not** | Infrastructure | Production blocker | P1 | High |
-| [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16): adapter + guard exist, external delivery unvalidated** | Email/Infra | Production blocker | P1 | High |
+| [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16 adapter + guard; Sprint 24 runtime credential source, failure-mode redaction proofs, family matrix, operator validation procedure): external delivery, inbox receipt, and sender-domain authentication all still unvalidated** | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
 | [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
 | [ORG-PR-005](#org-pr-005) | No database backup / PITR / tested restore | Backup & DR | Production blocker | P1 | High |
-| [ORG-PR-006](#org-pr-006) | No secrets management or rotation procedure — **Open; boundary advanced (Sprint 23): runtime-only injection seam enforced by the artifacts; no manager, no rotation** | Secrets/Ops | Production blocker | P1 | High |
+| [ORG-PR-006](#org-pr-006) | No secrets management or rotation procedure — **Open; materially advanced (Sprint 24): runtime env/file secret sources validated before production guards, graceful JWT key rotation, redaction proofs, manual rotation runbooks; no secrets manager, no automated rotation, no rehearsed rotation** | Secrets/Ops | Production blocker | P1 | High |
 | [ORG-PR-007](#org-pr-007) | No observability (metrics/tracing/dashboards/alerts) | Observability | Operational gap | P2 | High |
 | [ORG-PR-008](#org-pr-008) | No incident response / production runbook / on-call | Operations | Operational gap | P2 | High |
 | [ORG-PR-009](#org-pr-009) | Rate limiting fails open on Redis outage — **Materially advanced (Sprint 19): sensitive buckets fail closed in production; alerting residual → ORG-PR-007** | Auth/App security | Security risk | P2 | High |
@@ -255,7 +292,7 @@ unchanged.** The repository remains not ready for staging or production. See
 | [ORG-PR-046](#org-pr-046) | Stale/contradictory subsystem documentation | Documentation | Developer-experience issue | P4 | High |
 | [ORG-PR-047](#org-pr-047) | `COOKIE_SECRET` required but never used (unsigned cookies) — **Closed (Sprint 15)** | Config | Maintainability issue | P4 | High |
 | [ORG-PR-048](#org-pr-048) | `email_verification_tokens` dead schema shipped — **Closed (Sprint 16)** | Database | Maintainability issue | P4 | High |
-| [ORG-PR-049](#org-pr-049) | HS256 symmetric JWT with no `kid`/rotation path | Cryptography | Optional enhancement | P4 | High |
+| [ORG-PR-049](#org-pr-049) | HS256 symmetric JWT with no `kid`/rotation path — **Open; materially advanced (Sprint 24): graceful two-key rotation window implemented and test-proven; no `kid`/versioned-key scheme** | Cryptography | Optional enhancement | P4 | High |
 | [ORG-PR-050](#org-pr-050) | Concurrent legitimate refresh revokes family + session (multi-tab logout) | Auth | Reliability risk | P4 | High |
 | [ORG-PR-051](#org-pr-051) | Redundant unique index duplicates PK on `role_permissions` | Database | Optional enhancement | P4 | High |
 | [ORG-PR-052](#org-pr-052) | Minor API disclosures (`/ready` deps, inbound `x-request-id`, no shutdown timeout) — **Closed (Sprint 19)** | API | Maintainability issue | P4 | Medium |
@@ -352,6 +389,38 @@ Standards · Threats.
 - **Remediation:** Implement a production mailer adapter; wire via config; verify delivery. The clean interface abstraction (`InvitationMailer`) makes this swap-in only.
 - **Dependencies:** Blocks ORG-PR-004, ORG-PR-024, ORG-PR-045. **Effort:** M. **Validation:** live send to an external inbox in staging; CI SMTP assertion (ORG-PR-041).
 - **Roadmap:** Phase 2 (Account lifecycle) / Phase 4. **Standards:** ASVS V2 recovery prerequisites. **Threats:** T-INV.
+- **Progress (Sprint 24, 2026-08-23): Open — materially advanced; every
+  repository-side prerequisite within scope is now done.** Delivered:
+  `SMTP_USERNAME`/`SMTP_PASSWORD` resolve through the runtime secret boundary
+  (direct env or `<NAME>_FILE`), and a file-backed credential receives
+  byte-identical production validation — placeholder and known-development
+  values are refused either way (`packages/config/src/secret-source.test.ts`).
+  `apps/api/src/modules/mail/smtp-failure-redaction.test.ts` proves the SMTP
+  password appears in neither the message, the stack, nor any own property of
+  the error thrown by rejected authentication, a rejected sender, a rejected
+  recipient, a refused connection, an untrusted certificate, or a real
+  connection timeout — so a caller logging `{ err }` cannot print it. The six
+  account-email families that actually exist (registration completion,
+  existing-account guidance, password recovery, email verification,
+  email-change verification, organization invitation) are enumerated with
+  per-family evidence classes in
+  [../email-and-verification.md](../email-and-verification.md), and a precise
+  operator validation procedure — configuration, per-family triggers, header
+  and link checks, DNS validation, and what to record — is in
+  [../rotation-runbook.md](../rotation-runbook.md#validate-external-email-delivery).
+  The mailer remains provider-agnostic (no SDK, no provider branch).
+  **Exact closure blocker:** no email-provider credentials, no verified sending
+  domain, and no readable test mailbox exist in this repository or any of its
+  validation environments — re-confirmed in Sprint 24 (`gh secret list` empty;
+  `environments` `total_count: 0`). Consequently there is **no provider
+  acceptance evidence, no inbox-receipt evidence, no received sender-identity
+  evidence, and no SPF/DKIM/DMARC evidence**, and none is claimed; provider
+  acceptance and inbox receipt are tracked as separate facts and neither is
+  inferred from the local fake-server or Mailpit evidence. Closure requires all
+  of: a real external send, provider acceptance, real inbox receipt for the
+  relevant families, verified sender identity, documented provider/domain
+  verification state, and SPF/DKIM/DMARC verdicts from a received
+  `Authentication-Results` header.
 
 <a id="org-pr-003"></a>
 ### ORG-PR-003 — Dev-default secrets accepted & `COOKIE_SECURE` unenforced in production
@@ -415,6 +484,51 @@ Standards · Threats.
   integration, no routine or emergency rotation procedure, no rehearsed
   `JWT_SECRET` rotation, and no `kid`/versioned-secret path (ORG-PR-049).
   The finding's validation criterion is untouched.
+- **Progress (Sprint 24, 2026-08-23): Open — materially advanced.**
+  *Runtime sources.* `packages/config/src/secret-source.ts` adds one narrow
+  resolution boundary giving `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`,
+  `JWT_PREVIOUS_SECRET`, `SMTP_USERNAME`, and `SMTP_PASSWORD` an optional
+  mounted-file source (`<NAME>_FILE`) alongside the direct environment value.
+  Semantics are deterministic and test-proven: both forms set → refused
+  (ambiguous); only one → that source; neither → the schema decides; blank
+  counts as unset; exactly one terminal line ending is stripped and interior
+  whitespace preserved; empty, missing, directory, and unreadable files are
+  refused with the path but never the contents; unrelated `*_FILE` variables
+  are ignored. *Ordering invariant.* Resolution runs before
+  `envSchema.safeParse` and writes onto the CANONICAL variable name, so a
+  file-backed secret receives byte-identical production validation — a
+  file-loaded `dev-only-jwt-secret-change-me`, a sub-32-character secret, and a
+  placeholder `SMTP_PASSWORD` are rejected exactly as direct values are
+  (`packages/config/src/secret-source.test.ts`), and the packaged artifact
+  re-proves it (`tooling/artifact-smoke.sh`). *Graceful JWT rotation.*
+  `verifyAccessTokenWithRotation` accepts an optional `JWT_PREVIOUS_SECRET` at
+  verification only; signing stays current-key-only; the two keys must differ
+  (refused in every mode); both are held to the same production strength rules;
+  an unrelated older key is rejected; expiry, claims, session binding, and
+  authorization are unchanged; removing the previous key completes the cutover
+  — proven at the primitive level (`access-token.test.ts`) and through the HTTP
+  boundary (`jwt-secret-rotation.routes.test.ts`). *Redaction.* Startup,
+  config-validation, secret-file, SMTP-failure, 401-envelope, container-log,
+  and web-asset paths all have explicit secret-absence evidence. *Runbooks.*
+  [../rotation-runbook.md](../rotation-runbook.md) documents routine rotation
+  (open window → verify → wait one access-token lifetime → remove previous →
+  restart), emergency rotation (previous key deliberately omitted so the leaked
+  key dies at restart), session invalidation, SMTP rotation, and database/Redis
+  rotation; [../runtime-secrets.md](../runtime-secrets.md) carries the
+  inventory and contracts. *Verified, not assumed:* there is **no
+  refresh/session signing secret** — refresh tokens are opaque, unsigned,
+  hash-only, and the cookie is deliberately unsigned — so none was invented for
+  the inventory, rotating `JWT_SECRET` logs nobody out, and session
+  invalidation is a database operation with no platform-wide API.
+  **Why still open:** the expected behavior is "secrets sourced from a manager
+  (or the platform's secret store) … and least-privilege access", and the
+  validation criterion is a *rehearsed* rotation. Missing: any
+  secrets-manager/platform-store integration, least-privilege secret access
+  control, automated rotation or expiry tracking, secret-access auditing, hot
+  reload (every rotation is a restart), a `kid`/versioned-key scheme
+  (ORG-PR-049), dual-credential support for `DATABASE_URL`/`REDIS_URL`, and a
+  rehearsal against a real deployment — which cannot happen until ORG-PR-001
+  provides one. File-based injection plus runbooks is not secrets management.
 
 <a id="org-pr-007"></a>
 ### ORG-PR-007 — No observability (metrics/tracing/dashboards/alerts)
@@ -1112,6 +1226,16 @@ Standards · Threats.
 - **Risk:** Disruptive secret rotation; no path if a verifier is externalized.
 - **Remediation:** Add `kid`/versioned secrets or move to asymmetric signing.
 - **Dependencies:** relates to ORG-PR-006. **Effort:** M. **Validation:** rotation test with overlapping keys. **Roadmap:** Phase 3 / later. **Standards:** ASVS V6.4. **Threats:** T-TOKEN-FORGE.
+- **Progress (Sprint 24, 2026-08-23): Open — materially advanced.** The
+  finding's stated validation — "rotation test with overlapping keys" — now
+  exists: an optional `JWT_PREVIOUS_SECRET` is accepted at verification only
+  (`packages/auth-core/src/access-token.ts —
+  verifyAccessTokenWithRotation`), with overlapping-key tests at the primitive
+  level and through `GET /v1/auth/me`, so rotating the signing secret no longer
+  invalidates live access tokens. The finding's literal remediation — a `kid`
+  claim or asymmetric EdDSA/RS256 — was deliberately **not** implemented: it
+  changes the token format and is only required if verification ever leaves the
+  issuer, which it has not. Kept open on that basis.
 
 <a id="org-pr-050"></a>
 ### ORG-PR-050 — Concurrent legitimate refresh revokes family + session

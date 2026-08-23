@@ -90,7 +90,7 @@ established requirement.
 | **Latency** | p95 < 300 ms for API reads at A2 scale | Requires the audit-read index (ORG-PR-014) and pool/statement timeouts (ORG-PR-021). |
 | **RPO** | ≤ 1 hour (PITR) before production data; daily snapshot acceptable for controlled evaluation | Larger/regulated targets push RPO toward minutes + cross-region replicas. |
 | **RTO** | ≤ 4 hours, via rehearsed restore | Must be rehearsed (ORG-PR-005); larger target → automated failover. |
-| **Email delivery** | Authenticated TLS SMTP/API provider with verified domain | Blocking for invitations/recovery (ORG-PR-002). |
+| **Email delivery** | Authenticated TLS SMTP/API provider with verified domain (SPF/DKIM/DMARC published) | Blocking for invitations/recovery (ORG-PR-002). The adapter and credential plumbing exist; no provider send, inbox receipt, or domain authentication has ever been validated. |
 | **Billing** | **None** (fixed demo plans) | Out of scope; the entitlement/quota seam is designed to accept billing later without reworking authorization. |
 | **Operator model** | Small team, business-hours on-call, runbook-driven | Larger target → dedicated on-call + SLOs/error budgets. |
 | **Compliance exposure** | Moderate PII → data-subject rights (export/delete), retention, breach process (**legal review required**) | GDPR/CCPA-like obligations if serving EU/CA users; special categories or payment data would add PCI/other regimes. |
@@ -103,7 +103,15 @@ established requirement.
   (ORG-PR-001), production config guards (ORG-PR-003), secrets/rotation guidance
   (ORG-PR-006), a real mailer adapter (ORG-PR-002), and operations docs
   (ORG-PR-027). Availability/backup/DR become the operator's responsibility, but
-  Orgistry must make them *possible and documented*.
+  Orgistry must make them *possible and documented*. Sprint 23 shipped the
+  artifact; Sprint 15 the config guards; Sprint 24 the runtime secret
+  injection sources (direct env or mounted `<NAME>_FILE`), graceful
+  access-token key rotation, and the rotation/incident guidance
+  ([../runtime-secrets.md](../runtime-secrets.md),
+  [../rotation-runbook.md](../rotation-runbook.md)) — which is guidance and
+  mechanics for a self-hosting operator, **not** a managed secret store, and
+  does not close ORG-PR-006. The mailer adapter exists but has never delivered
+  through a real provider (ORG-PR-002).
 - **Hosted SaaS (secondary):** Orgistry (the operator) additionally owns
   observability (ORG-PR-007), incident response (ORG-PR-008), retention/privacy
   enforcement (ORG-PR-015/025/043), and abuse controls (ORG-PR-009/012/013). The

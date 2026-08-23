@@ -191,6 +191,9 @@ async function main(): Promise<void> {
   const authService = createAuthService({
     repo: createDbAuthRepository(dbClient.db),
     jwtSecret: config.auth.jwtSecret,
+    // Set only during a JWT secret rotation window: tokens signed with the
+    // retiring key keep verifying until it is unset (docs/rotation-runbook.md).
+    previousJwtSecret: config.auth.previousJwtSecret,
     accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
     sessionTtlSeconds: config.auth.sessionTtlSeconds,
     refreshTokenTtlSeconds: config.auth.refreshTokenTtlSeconds,

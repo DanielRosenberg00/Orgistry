@@ -48,9 +48,14 @@ const SENSITIVE_KEYS: readonly string[] = [
   // Generic secrets and configuration/environment shapes.
   'secret',
   'jwtSecret',
+  'previousJwtSecret',
   'smtpPassword',
   'SMTP_PASSWORD',
   'JWT_SECRET',
+  'JWT_PREVIOUS_SECRET',
+  // `<NAME>_FILE` variables hold PATHS, not secrets, and are deliberately
+  // NOT redacted: an operator debugging a failed secret mount needs to see
+  // which path was attempted (see packages/config/src/secret-source.ts).
 ];
 
 /** Containers whose nested fields are plausibly logged with sensitive keys. */

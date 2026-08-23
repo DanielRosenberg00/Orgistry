@@ -36,13 +36,18 @@ real body of work with security and correctness implications.
   pipeline, registry publishing, infra-as-code, or environment provisioning
   exists. *Would add:* IaC (Terraform/Helm) and a deploy workflow. *Done
   when:* a tagged build deploys to a target environment reproducibly.
-- **Secrets management.** Secrets are local-only `.env` placeholders (though as
-  of Sprint 15 the config loader refuses dev-default/weak secrets under
-  `NODE_ENV=production` — see
+- **Secrets management.** Secrets are injected at process start from a direct
+  environment value or a mounted `<NAME>_FILE` secret, resolved before
+  validation so a file-backed value cannot bypass the production config guard;
+  `JWT_SECRET` rotates gracefully through an optional verification-only
+  `JWT_PREVIOUS_SECRET`, and rotation/incident procedures are documented
+  (Sprint 24 — see [runtime-secrets.md](runtime-secrets.md) and
+  [rotation-runbook.md](rotation-runbook.md); guard:
   [production-config-guard.md](production-config-guard.md)). *Would add:*
-  integration with a secrets manager and a documented rotation procedure for
-  `JWT_SECRET`. *Done when:* no secret is sourced from a
-  committed file in any non-local environment.
+  integration with an actual secrets manager, least-privilege secret access,
+  and automated rotation — every rotation today is manual and requires a
+  process restart. *Done when:* secrets come from a manager and a rotation has
+  been rehearsed against a real deployment.
 - **Hardened quota concurrency.** Quota checks read-then-write without a global
   lock, leaving small race windows at the ceiling. *Would add:* transactional
   reservation or row-level locking on the quota path. *Done when:* concurrent

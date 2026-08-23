@@ -105,3 +105,50 @@ export async function verifyAccessToken(
     exp: payload.exp,
   };
 }
+
+/**
+ * The signing keys in play during a secret rotation (Sprint 24, ORG-PR-006).
+ * Only `current` ever signs; `previous` only ever verifies.
+ */
+export interface AccessTokenVerificationSecrets {
+  /** The secret every newly issued token is signed with. */
+  current: string;
+  /**
+   * The secret being retired. When present, tokens signed with it are still
+   * accepted, so rotating `JWT_SECRET` does not invalidate access tokens
+   * already in flight. Omit it to complete (or skip) the cutover — every token
+   * signed with the old key then fails immediately.
+   */
+  previous?: string;
+}
+
+/**
+ * Verify an access token against the current key, then — only if a previous
+ * key is configured — against that one.
+ *
+ * Identical to {@link verifyAccessToken} in every other respect: same claim
+ * checks, same expiry handling (an expired token fails under BOTH keys), same
+ * generic `AccessTokenError`. When no key accepts the token, the error raised
+ * is the CURRENT key's, so diagnostics describe the key tokens are supposed to
+ * be signed with rather than the one being retired.
+ */
+export async function verifyAccessTokenWithRotation(
+  token: string,
+  secrets: AccessTokenVerificationSecrets,
+): Promise<AccessTokenClaims> {
+  try {
+    return await verifyAccessToken(token, secrets.current);
+  } catch (currentKeyError) {
+    if (
+      secrets.previous === undefined ||
+      !(currentKeyError instanceof AccessTokenError)
+    ) {
+      throw currentKeyError;
+    }
+    try {
+      return await verifyAccessToken(token, secrets.previous);
+    } catch {
+      throw currentKeyError;
+    }
+  }
+}

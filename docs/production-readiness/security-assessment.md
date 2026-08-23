@@ -224,6 +224,29 @@ audit/security metadata sanitized by a denylist+allowlist with depth/size caps.
 ORG-PR-047 (unused cookie secret), ORG-PR-049 (no `kid`), ORG-PR-043 (email PII in
 metadata).
 
+**Sprint 24 update (2026-08-23).** ORG-PR-003 and ORG-PR-047 were already
+closed (Sprint 15). ORG-PR-006 and ORG-PR-049 are **materially advanced but
+open**: secrets now resolve at runtime from either a direct environment value
+or a mounted `<NAME>_FILE` secret, with resolution ordered **before** schema
+validation and normalized onto the canonical variable name — so a file-backed
+secret receives byte-identical production validation and cannot bypass a guard
+(test-proven, and re-proven against the packaged artifact). Access-token keys
+rotate gracefully through an optional `JWT_PREVIOUS_SECRET` accepted at
+verification only; signing stays current-key-only, the keys must differ, both
+are held to the production strength rules, and expiry/authorization semantics
+are unchanged. Credential redaction now has explicit evidence on the startup,
+config-validation, secret-file, SMTP-failure (auth/sender/recipient/connection/
+TLS/timeout), 401-envelope, container-log, and web-asset paths. Confirmed by
+inspection rather than assumed: **no refresh/session signing secret exists** —
+refresh tokens are opaque, unsigned, hash-only, and the cookie is deliberately
+unsigned — so rotating `JWT_SECRET` logs nobody out and session invalidation is
+a database operation with no platform-wide API. Still absent, and why both
+findings stay open: no secrets manager or platform store, no least-privilege
+secret access control, no automated rotation or expiry tracking, no hot reload,
+no `kid`/versioned-key scheme, and no rehearsed rotation against a real
+deployment. See [../runtime-secrets.md](../runtime-secrets.md) and
+[../rotation-runbook.md](../rotation-runbook.md).
+
 ## Dependencies & supply chain
 
 **Strengths:** `pnpm-lock.yaml` + `--frozen-lockfile`; `onlyBuiltDependencies`

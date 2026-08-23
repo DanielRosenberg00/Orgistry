@@ -138,3 +138,36 @@ the P1/P2 work and the launch gate (see
 > 006).** The overriding rule still yields *not production-ready*; the state
 > remains **C — Ready to continue production implementation** (not ready for
 > staging, not ready for production).
+
+> **Status update (Sprint 24, 2026-08-23 — COMPLETE; Sprint 24 DoD MET.** All
+> required remote checks are green for implementation commit `de6780f` on PR
+> #33: CI `32663739832`, CodeQL `32663739811`, Security scans `32663739952`.**)**
+> The runtime-secrets half landed: secrets resolve
+> at process start from a direct environment value or a mounted `<NAME>_FILE`
+> secret, **before** schema validation and onto the canonical variable name, so
+> file-backed secrets cannot bypass a production guard (test-proven and
+> artifact-validated); access-token keys rotate gracefully through an optional
+> verification-only `JWT_PREVIOUS_SECRET`; credential redaction is proven
+> across the startup, config, secret-file, SMTP-failure, and 401 paths; and
+> manual rotation/incident runbooks exist. The external-email half was **not
+> executable**: this environment has no email-provider credentials, no verified
+> sending domain, and no readable test mailbox, so there is no
+> provider-acceptance, inbox-receipt, or SPF/DKIM/DMARC evidence and none is
+> claimed — the specification permits that condition to be met by a precisely
+> documented blocker, so it is not a failed sprint deliverable, but it does
+> leave ORG-PR-002 open and leaves Orgistry with **no evidence that production
+> email works**. Secrets/Ops maturity improves; **Email delivery does not
+> move** — adapter and credential plumbing are not delivery evidence. **No
+> finding closed, which is a permitted sprint outcome, not a sprint failure.** ORG-PR-002, ORG-PR-006, and ORG-PR-049 are materially advanced but
+> open — and ORG-PR-006's residual is a **real capability gap** (no secrets
+> manager or platform store, no least-privilege secret access, no
+> secret-access auditability, no automated rotation, no rehearsed rotation),
+> not merely an external blocker — and those are finding-closure and
+> production-maturity gaps rather than Sprint 24 DoD items. **4 P1 blockers remain open (ORG-PR-001,
+> 002, 005, 006), plus ORG-PR-015 at P2.** The overriding rule still yields
+> *not production-ready*; the state remains
+> **C — Ready to continue production implementation** (not ready for staging,
+> not ready for production). Recommended next: **Sprint 25 — Backup, PITR,
+> Restore, and Retention Foundation**, with ORG-PR-002's external-email
+> validation and ORG-PR-006's residual secrets-management capability running
+> alongside it as outstanding workstreams.

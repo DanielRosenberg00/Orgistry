@@ -1,7 +1,9 @@
 # Email & Email Verification
 
-Sprint 16 design reference: the account-mailer boundary, its drivers, the
-email-verification lifecycle, and the security invariants both must uphold.
+Sprint 16 design reference (extended in Sprint 24 with the SMTP credential
+source, the account-email family matrix, and the external-validation evidence
+state): the account-mailer boundary, its drivers, the email-verification
+lifecycle, and the security invariants both must uphold.
 For the current honest scope boundary see
 [known-limitations.md](known-limitations.md); for finding status see the
 [findings register](production-readiness/findings-register.md) (ORG-PR-002,
@@ -337,20 +339,121 @@ contains the raw token, the hash, the verification URL, or provider data.
   the new address lands in the Mailpit UI (http://localhost:8025) — follow
   the link.
 
+## SMTP credential source (Sprint 24)
+
+`SMTP_USERNAME` and `SMTP_PASSWORD` are resolved through the shared runtime
+secret boundary, so a deployment may supply either the direct environment value
+or a mounted file (`SMTP_PASSWORD_FILE=/run/secrets/smtp_password`). Resolution
+happens before validation, so a file-backed credential receives exactly the
+same production guard treatment as a direct one — including the
+placeholder/known-development rejections. The mailer itself is unchanged and
+stays provider-agnostic: it consumes a resolved `Config`, never an environment
+variable, and contains no provider SDK or provider-specific branch. See
+[runtime-secrets.md](runtime-secrets.md); rotation:
+[rotation-runbook.md](rotation-runbook.md#rotate-smtp-credentials).
+
+Credential hygiene across failure modes has direct test evidence
+(`smtp-failure-redaction.test.ts`): for rejected authentication, rejected
+sender, rejected recipient, connection refused, untrusted certificate, and
+connection timeout, the SMTP password appears in neither the error message, the
+stack, nor any own property of the thrown error — so a caller logging `{ err }`
+cannot print it.
+
+## Account-email families
+
+Every account email Orgistry actually sends today. There are six; no family was
+added in Sprint 24.
+
+| Family | Renderer | Link token transport | Delivery-failure policy |
+|---|---|---|---|
+| Registration completion | `auth/registration.email.ts — renderRegistrationCompletionEmail` | fragment (`/auth/complete-registration#token=`) | persist-then-send, best-effort (never alters the generic response) |
+| Existing-account guidance | `auth/registration.email.ts — renderExistingAccountNoticeEmail` | none — carries no token | best-effort, rate-limited, silently skipped |
+| Password recovery | `auth/password-recovery.email.ts` | fragment (`/auth/reset-password#token=`) | persist-then-send, swallowed behind `{ accepted: true }` |
+| Email verification | `auth/email-verification.email.ts` | fragment (`/auth/verify-email#token=`) | fail-closed on explicit request/resend |
+| Email-change verification | same renderer, `trigger: 'email_change'` | fragment | best-effort (the change already committed) |
+| Organization invitation | `invitations/invitation.mailer.ts` | **query string** (`/invitations/accept?token=`) — a deliberate Sprint 9 exception, see [invitations.md](invitations.md) | fail-closed (send before persist) |
+
+## Delivery posture: retries, provider limits, bounces
+
+Stated from the implementation, because the honest answer to most of these is
+"nothing" and an operator must not assume otherwise.
+
+**Retry — there is none.** `AccountMailer.deliver` makes exactly one delivery
+attempt and rejects on any failure. No application code retries, backs off, or
+re-enqueues: the callers either propagate the error (fail-closed families) or
+swallow it (best-effort families). nodemailer does not retry a rejected
+`sendMail` either — it is a protocol client, not a delivery agent. The
+transport is also unpooled (`pool` is not set in `smtp-transport.ts`), so every
+send opens and closes its own connection.
+
+**Transient provider failure is indistinguishable from permanent failure to
+Orgistry.** A 4xx greylist, a connection reset, and a 5xx refusal all surface as
+one rejected promise carrying a coarse category and the request id. Nothing
+inspects the SMTP reply class to decide whether a retry would help.
+
+**Best-effort emails can therefore be permanently lost.** For registration
+completion, the existing-account notice, password recovery, and post-email-change
+verification, the user-facing operation has already committed and the failure is
+recorded only as a security event
+(`send_failed` / `existing_account_notice_failed` / `outcome: send_failed`) and a
+log line. The affected user recovers by *requesting a new link*; nothing
+re-sends automatically. The fail-closed families (invitation create, explicit
+verification request/resend) surface the error instead, so the caller can retry
+by repeating the request.
+
+**There is no outbox and no queue.** No table stages outbound messages, and
+there is no worker or scheduler to drain one (ORG-PR-016). This is deliberate:
+an outbox is the correct fix and is out of scope, so the gap is documented
+rather than half-built.
+
+**Provider rate limits are not modelled.** Orgistry sends synchronously,
+inline with the request, and applies no send-side throttle, concurrency cap, or
+per-provider quota tracking. What *does* bound outbound volume is the
+per-endpoint abuse control on the surfaces that trigger email — the
+registration, recovery, verification, and invitation buckets in
+`config.rateLimit.*` — so a single actor cannot generate unbounded mail. That
+is an abuse control, not a provider-quota control: a provider that throttles or
+temporarily blocks the sender will simply cause delivery failures with the
+loss semantics above. An operator expecting bursts should size the provider
+plan accordingly rather than rely on application backpressure.
+
+**Bounces, complaints, and suppression lists are not implemented at all.**
+Orgistry never ingests a bounce or feedback-loop notification, keeps no
+suppression list, and does not mark an address undeliverable — it will keep
+sending to a hard-bounced address every time a flow asks it to. All of this is
+handled at the provider, if at all, and is the operator's responsibility to
+monitor there. Reputation damage from repeated hard bounces is a real
+consequence of this gap.
+
+Operator response to a provider incident, rate-limit event, or credential
+problem: [rotation-runbook.md](rotation-runbook.md#email-provider-incident-handling).
+
 ## External provider validation
 
-**Status: NOT performed.** No provider credentials or sandbox inbox exist in
-this repository's environments, so no claim of external delivery is made and
-ORG-PR-002 remains open (materially advanced). The safe procedure once an
-operator has credentials:
+**Status: NOT performed. ORG-PR-002 remains open (materially advanced).**
 
-1. In a throwaway shell (never committed): `NODE_ENV=production` plus real
-   `JWT_SECRET`, `COOKIE_SECURE=true`, `MAIL_DRIVER=smtp`, the provider's
-   `SMTP_HOST`/`SMTP_PORT=465`/`SMTP_USERNAME`/`SMTP_PASSWORD`, a real
-   `MAIL_FROM_EMAIL` on a domain with SPF/DKIM configured at the provider,
-   and an https `WEB_DEMO_URL`.
-2. Start the API, register with a test-inbox address you control, and confirm
-   the registration-completion email arrives externally and its link
-   completes (creating the account).
-3. Record the provider name, timestamp, and message-id as evidence in the
-   findings register — then, and only then, close ORG-PR-002.
+No email-provider credentials, no verified sending domain, and no test inbox
+exist in this repository or any of its validation environments — confirmed for
+Sprint 24 (the repository has no configured GitHub Actions environments and no
+repository secrets). Every claim below is therefore explicitly scoped.
+
+| Evidence class | State |
+|---|---|
+| Application generates the message | **Proven** for all six families — unit + route + integration suites assert on the captured `AccountEmail` (recipient, subject, link shape) |
+| Local SMTP conversation (TLS handshake, AUTH, 5xx refusals, header safety, encoded-word subjects) | **Proven** against an in-process fake server |
+| Local delivery to Mailpit | **Manually verified** (development sink; plaintext, no auth) |
+| Provider *acceptance* of a message | **Not performed** — no provider credentials |
+| Real *inbox receipt* | **Not performed** — no test mailbox |
+| Sender identity as received | **Not performed** |
+| SPF / DKIM / DMARC verdicts | **Not performed** — no sending domain |
+
+Provider acceptance and inbox receipt are separate facts and are never inferred
+from each other, nor from the local evidence above: the fake server and Mailpit
+prove Orgistry speaks SMTP correctly, not that a real provider accepts our
+messages or that a real mailbox receives them.
+
+The exact procedure to obtain the missing evidence — configuration, the
+per-family trigger matrix, the header checks, the DNS validation, and what to
+record — is
+[rotation-runbook.md → Validate external email delivery](rotation-runbook.md#validate-external-email-delivery).
+Closing ORG-PR-002 requires all of it.

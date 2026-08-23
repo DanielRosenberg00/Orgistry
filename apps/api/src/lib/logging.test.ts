@@ -123,6 +123,35 @@ describe('logger redaction backstop', () => {
     await app.close();
   });
 
+  it('redacts the rotation-window JWT secrets (Sprint 24)', async () => {
+    const { app, all } = captureSetup();
+    app.log.info(
+      {
+        config: {
+          previousJwtSecret: 'config-previous-jwt-secret-value',
+          JWT_PREVIOUS_SECRET: 'env-style-previous-jwt-secret',
+        },
+      },
+      'rotation config accident',
+    );
+    const output = all();
+    expect(output).not.toContain('config-previous-jwt-secret-value');
+    expect(output).not.toContain('env-style-previous-jwt-secret');
+    await app.close();
+  });
+
+  it('keeps secret-FILE paths visible: they are configuration, not secrets', async () => {
+    // An operator debugging a failed secret mount needs the attempted path;
+    // only the file's CONTENTS are sensitive (see config/secret-source.ts).
+    const { app, all } = captureSetup();
+    app.log.error(
+      { config: { JWT_SECRET_FILE: '/run/secrets/jwt_secret' } },
+      'secret file unreadable',
+    );
+    expect(all()).toContain('/run/secrets/jwt_secret');
+    await app.close();
+  });
+
   it('redacts hash fields and nested sensitive objects in error context', async () => {
     const { app, all } = captureSetup();
     app.log.error(

@@ -9,6 +9,12 @@ exercised via `pnpm artifact:smoke` — see
 3000/8080 ports as a running dev stack, so stop one before starting the other.
 There is still no production deployment automation here.
 
+Operating a deployed process — injecting runtime secrets, rotating the
+access-token signing secret or SMTP credentials, invalidating sessions,
+handling an email-provider incident — is a separate document:
+[rotation-runbook.md](rotation-runbook.md). The design behind it is
+[runtime-secrets.md](runtime-secrets.md).
+
 ## Services
 
 | Service | Image | Host port(s) | Purpose |

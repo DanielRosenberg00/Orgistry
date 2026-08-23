@@ -256,15 +256,14 @@ Phase 6: End-to-End Verification & Security Review
   `pnpm artifact:smoke` exit 0. Closing artifact:
   [sprint-23-artifact-package.md](sprint-23-artifact-package.md);
   docs: [../deployment-artifacts.md](../deployment-artifacts.md).
-- **Sprint 24 (NOT YET CLOSED — pending post-change remote workflow
-  validation; repository work executed 2026-08-23) — Runtime Secrets and
-  External Email Validation.** No DoD condition failed and no repository work
-  remains; the single outstanding gate is that the changes are uncommitted, so
-  CI, Security scans, CodeQL, and `Artifacts (build + smoke)` have not run
-  against them. Real external SMTP validation was **not performed** — the
-  specification permits that condition to be met by a precisely documented
-  blocker, which it is, so it is not a failed deliverable (it does keep
-  ORG-PR-002 open). Delivered: a runtime secret-source boundary
+- **Sprint 24 — Runtime Secrets and External Email Validation. ✅ COMPLETE
+  (2026-08-23); Sprint 24 DoD MET.** All required remote checks green for
+  implementation commit `de6780f` on PR #33 (CI `32663739832`, CodeQL
+  `32663739811`, Security scans `32663739952`). Real external SMTP validation
+  was **not performed** — the specification permits that condition to be met by
+  a precisely documented blocker, which it is, so it is not a failed
+  deliverable (it does keep ORG-PR-002 open, and it is not evidence that
+  production email works). Delivered: a runtime secret-source boundary
   (`packages/config/src/secret-source.ts`) giving six secret variables an
   optional mounted-file source (`<NAME>_FILE`) alongside the direct
   environment value, resolved BEFORE schema validation and onto the canonical
@@ -291,22 +290,23 @@ Phase 6: End-to-End Verification & Security Review
   ORG-PR-049 also materially advanced. Local exit evidence: `pnpm validate`,
   `pnpm validate:integration`, `pnpm scan:deps`, `pnpm scan:deps:local`,
   `pnpm scan:secrets`, `actionlint`, and `tooling/artifact-smoke.sh` all pass;
-  remote validation PENDING OPERATOR ACTION. Current (provisional) evidence
-  package: [sprint-24-artifact-package.md](sprint-24-artifact-package.md) — it
-  becomes the closing artifact once the remote gate is green.
-  **Remaining work to close Sprint 24:** commit/push/PR the working tree and
-  confirm CI, Security scans, CodeQL, and `Artifacts (build + smoke)` green for
-  that exact commit. That is the whole list — neither ORG-PR-002 nor
-  ORG-PR-006 has to close first.
-- **Sprint 25 (ANTICIPATED — NOT AUTHORIZED TO START) — Backup, PITR, Restore,
-  and Retention Foundation** (ORG-PR-005, with retention groundwork tracked by
-  ORG-PR-015/016). Scope unchanged, and it remains the expected next sprint
-  *after* Sprint 24 closes; it must **not** begin while Sprint 24's remote gate
-  is outstanding. Two workstreams run alongside it rather than inside it: the
-  operator-blocked **ORG-PR-002** external-email validation
+  remote validation green for `de6780f`. Two earlier remote runs failed, each on
+  a **Linux-only portability defect in a validation fixture** (artifact-smoke
+  secret-directory permissions, then an SMTP timeout test's address family) —
+  never in the application, and neither fixed by weakening the production
+  security model; the chain `74f50e4` → `486bee8` → `de6780f` is preserved as
+  evidence that CI worked. Closing artifact:
+  [sprint-24-artifact-package.md](sprint-24-artifact-package.md).
+- **Sprint 25 (next) — Backup, PITR, Restore, and Retention Foundation.**
+  Primary focus: **ORG-PR-005** (automated backups, PITR, and a tested restore
+  drill — the mandatory launch gate) and **ORG-PR-015** (retention/cleanup
+  foundation, to the extent the Sprint 25 specification authorizes; enforcement
+  depends on the background runtime, ORG-PR-016). Authorized now that Sprint 24
+  is complete. Two Sprint 24 residuals run **alongside** it and are not absorbed
+  into it: the operator-blocked **ORG-PR-002** external-email validation
   ([../rotation-runbook.md](../rotation-runbook.md#validate-external-email-delivery))
   and **ORG-PR-006**'s residual secrets-management capability. Neither is
-  closed, and neither is a precondition for finalizing the Sprint 24 artifact.
+  closed; both remain outstanding production-readiness work.
   The later Phase 5–6 work below keeps its content, ordering,
   dependencies, and exit criteria but carries no assigned sprint numbers
   yet — numbers are assigned when each item is actually scheduled.

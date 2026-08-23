@@ -1,38 +1,43 @@
 # Sprint 24 Artifact Package — Runtime Secrets and External Email Validation
 
-> **Status: SPRINT 24 IS NOT YET CLOSED — pending post-change remote workflow
-> validation. This is the current (provisional) evidence package; it becomes
-> the closing artifact once those workflows are green.**
+> **Status: SPRINT 24 COMPLETE — DEFINITION OF DONE MET.** This is the official
+> Sprint 24 closing artifact.
 >
-> Repository implementation and local validation are complete. Exactly **one**
-> DoD gate is outstanding: post-change remote workflow validation
-> (**PENDING OPERATOR ACTION**, §19). Two remote attempts have run on PR #33,
-> each exposing a **Linux-only test-fixture** portability defect — never an
-> application defect:
+> Every mandatory DoD condition is satisfied, and the required post-change
+> remote workflows are green for implementation commit **`de6780f`** on PR #33:
+> CI (`32663739832`), CodeQL (`32663739811`), and Security scans
+> (`32663739952`) — all seven required checks pass (§19).
 >
-> - run `32656512688` — `Artifacts (build + smoke)` failed on secret-directory
->   permissions. Fixed, and **confirmed green remotely** on the next run.
-> - run `32657860558` (`486bee8`) — `Artifacts (build + smoke)`, Integration,
->   Dependency audit, Secret scan, and CodeQL all passed; `Validate (offline)`
->   failed on **one** unit test (913/914) whose silent TCP listener bound IPv4
->   while the client dialled `localhost`, which resolves to `::1` first on
->   Linux. Fixed and locally re-validated (§17–§18).
+> **Sprint completion is not production readiness, and it is not finding
+> closure.** Both are deliberately separate, and both remain unchanged:
 >
-> The second fix is uncommitted, so the gate has not been re-run against it.
+> - **ORG-PR-002 stays OPEN — materially advanced.** External SMTP provider
+>   validation was **not performed**: no provider credentials, no verified
+>   sending domain, no readable test mailbox. The binding specification permits
+>   that DoD condition to be met by a *precisely documented blocker*, which it
+>   is (§11–§14) — so it is not a failed deliverable, and it is equally not
+>   evidence that production email works. **Orgistry has no evidence that
+>   production email works.**
+> - **ORG-PR-006 stays OPEN — materially advanced.** Sprint 24 delivered the
+>   runtime secret-source and rotation foundation; a secrets manager,
+>   least-privilege secret access, access auditability, automated rotation, and
+>   a rehearsed real-runtime rotation remain unbuilt. `<NAME>_FILE` support plus
+>   manual runbooks is a foundation, **not** a secrets-management platform.
+> - **Readiness stays `C — Ready to continue production implementation`. NOT
+>   ready for staging. NOT ready for production.** Four P1 blockers remain open
+>   (ORG-PR-001/002/005/006), plus ORG-PR-015 (P2).
 >
-> External SMTP provider validation was **not performed** — no provider
-> credentials, verified sending domain, or readable test mailbox exist here.
-> The binding specification permits that condition to be met by a *precisely
-> documented blocker*, which it is (§11–§14), so it is **not** a failed
-> deliverable. It does mean **ORG-PR-002 stays open** and Orgistry has **no
-> evidence that production email works** — three different statements that this
-> document keeps apart throughout.
+> Getting here took three commits and two remote failures, both of them
+> **Linux-only portability defects in validation fixtures** — never in the
+> application, and neither fixed by weakening the production security model. The
+> full chain is preserved in §17 as evidence that the validation system worked.
 >
-> Finding closure is likewise **not** a Sprint 24 DoD condition: ORG-PR-002 and
-> ORG-PR-006 remaining open is the honest, specification-permitted outcome. See
-> the [DoD reconciliation](#definition-of-done-reconciliation) below,
-> [what is NOT a DoD condition](#what-is-not-a-sprint-24-dod-condition), §21,
-> and §25.
+> **One nuance about this document.** The green evidence above belongs to
+> `de6780f`. This closing pass is documentation-only and will itself become a
+> later commit, which has **not** run through CI at the time of writing. Sprint
+> 24's repository closure is fully sealed once that documentation commit also
+> shows green required checks; the implementation DoD result above does not
+> depend on it.
 
 Every statement in this document is labelled by evidence class:
 
@@ -66,7 +71,7 @@ Status vocabulary:
   the blocker precisely; the required external resource is unavailable and the
   blocker is recorded with the exact evidence still needed.
 - **PENDING OPERATOR ACTION** — repository work is complete; an operator step
-  remains.
+  remains. *(No condition carries this status at closure.)*
 - **FAIL/MISSING** — repository work is still required.
 
 ### Runtime secrets
@@ -146,23 +151,31 @@ validated and nothing is claimed.
 | Fork-PR safety (no secret reachable) | PASS — no repository secrets, no environments, no `pull_request_target` |
 | Least-privilege workflow permissions preserved | PASS — workflows unmodified |
 | Gitleaks / CodeQL / artifact gate preserved | PASS — workflows unmodified |
-| Post-change remote status (CI, Security, CodeQL, Artifacts) | **PENDING OPERATOR ACTION** — run `32656512688` failed `Artifacts (build + smoke)`; run `32657860558` (`486bee8`) turned that gate **green** and failed `Validate (offline)` on one unit test. Both were Linux-only test-fixture defects; both are fixed locally, the second not yet pushed (§17, §19) |
+| Post-change remote status (CI, Security, CodeQL, Artifacts) | **PASS** — all seven required checks green for `de6780f`: CI `32663739832`, CodeQL `32663739811`, Security scans `32663739952` (§19) |
 
 ### Result
 
-**33 PASS · 2 SATISFIED BY EXPLICIT EXTERNAL BLOCKER · 1 PENDING OPERATOR
+**34 PASS · 2 SATISFIED BY EXPLICIT EXTERNAL BLOCKER · 0 PENDING OPERATOR
 ACTION · 0 FAIL/MISSING.**
 
-**No Sprint 24 DoD condition has failed.** Sprint 24 is **NOT YET CLOSED —
-pending post-change remote workflow validation**. Two remote attempts each
-exposed a genuine Linux portability defect in a **test fixture** — the artifact
-smoke harness, then one SMTP unit test — both fixed and re-validated locally
-(§17–§18). The artifact gate is now green remotely; pushing the second fix and
-getting a green `Validate (offline)` for the resulting commit is the remaining
-work.
-Once CI, Security scans, CodeQL, and `Artifacts (build + smoke)` are green for
-that exact commit, this document can be finalized as the Sprint 24 closing
-artifact (§25).
+**SPRINT 24 DEFINITION OF DONE: MET.** No condition failed, nothing is
+outstanding, and the required remote workflows are green for `de6780f` (§19).
+
+The two `SATISFIED BY EXPLICIT EXTERNAL BLOCKER` entries are the real external
+SMTP provider validation and the actual SPF/DKIM/DMARC verdicts. To be
+unambiguous about what that status does and does not mean:
+
+| It means | It does NOT mean |
+|---|---|
+| The DoD allowed this condition to be met by completing the validation **or** documenting the blocker precisely, and the blocker is documented precisely (§11–§14). | ✗ Provider validation passed. |
+| Every repository-side prerequisite within Sprint 24's scope is implemented and tested. | ✗ Real delivery was proven. |
+| The exact missing external resources and the exact evidence still required are named, with an executable operator procedure. | ✗ ORG-PR-002 is closed — it stays **OPEN — materially advanced**. |
+
+Reaching this took three commits. Two remote runs each exposed a genuine
+Linux-only portability defect in a **validation fixture** — first the artifact
+smoke harness, then one SMTP unit test — each fixed without weakening the
+production security model, and the full chain is preserved in §17. The
+validation system doing its job is the point of that history, not noise.
 
 ### What is NOT a Sprint 24 DoD condition
 
@@ -591,13 +604,28 @@ portability fix below).
 
 ### Remote CI history for this gate
 
-| Attempt | Commit / run | Result |
-|---|---|---|
-| 1 | PR #33, CI run `32656512688` | **FAILED** `Artifacts (build + smoke)` — Linux secret-directory permission defect in the smoke fixture (below). All five other required checks green. |
-| 2 | PR #33 @ `486bee8`, CI run `32657860558` | `Artifacts (build + smoke)` **PASSED** — the permission fix is confirmed remotely. Integration, Dependency audit, Secret scan, and CodeQL also passed. **FAILED** `Validate (offline)`: one unit test, a second Linux portability defect (§18). |
-| 3 | not yet run | Pending — the fix for attempt 2's failure is in the working tree, uncommitted. |
+Sprint 24 landed over three commits on PR #33. Each remote run is recorded
+because the progression is itself evidence: two Linux-only portability defects
+existed in **validation fixtures**, CI caught both, and neither was masked or
+worked around.
 
-### Defect 1 — Linux secret-directory permissions (fixed, remotely confirmed)
+| # | Commit | CI run | Validate | Integration | Artifacts | Security | CodeQL |
+|---|---|---|---|---|---|---|---|
+| 1 | `74f50e4` | `32656512688` **failure** | pass | pass | **FAIL** | pass (`32656512690`) | pass (`32656512661`) |
+| 2 | `486bee8` | `32657860558` **failure** | **FAIL** | pass | pass | pass (`32657860599`) | pass (`32657860565`) |
+| 3 | `de6780f` | `32663739832` **success** | pass | pass | pass | pass (`32663739952`) | pass (`32663739811`) |
+
+Commit 1 was the implementation; commits 2 and 3 were the two fixture fixes
+below. `de6780f` is the final, fully remote-validated implementation commit.
+
+**Neither defect was a production application failure.** Both were portability
+bugs in test fixtures — one in the smoke harness, one in a unit test — and in
+the first case the application behaved exactly as designed, failing closed with
+a sanitized error. Neither fix weakened the production security model: the API
+artifact still runs non-root, mounted secrets are still read-only, and no
+assertion was removed or loosened.
+
+### Defect 1 — Linux secret-directory permissions (fixed; green remotely from `486bee8`)
 
 The first remote run of this gate **failed** — PR #33, CI run `32656512688`,
 job `Artifacts (build + smoke)` — at the first Sprint 24 step:
@@ -682,7 +710,7 @@ via the `trap`) — no secret file is stored in the repository.
 
 ---
 
-### Defect 2 — SMTP timeout test bound IPv4, dialled `localhost` (fixed, not yet re-run remotely)
+### Defect 2 — SMTP timeout test bound IPv4, dialled `localhost` (fixed; green remotely from `de6780f`)
 
 CI run `32657860558` (`486bee8`) had `Artifacts (build + smoke)` green but
 `Validate (offline)` red: **913 of 914 unit tests passed**, with one failure in
@@ -732,14 +760,18 @@ certificate certifies that name. The assertion was **not** loosened to accept
 a 300 ms budget, the message is `Connection timeout`, and `ECONNREFUSED` is
 absent. The suite passed 5 consecutive runs.
 
-**Remote status: pending.** This fix is uncommitted, so `Validate (offline)`
-has not been re-run against it.
+**Remote status: resolved.** `Validate (offline)` passes for `de6780f`
+(CI run `32663739832`), alongside every other required check.
 
 ---
 
 ## 18. Local Validation Evidence
 
-All commands executed on 2026-08-23 against the working tree.
+All commands below were executed on 2026-08-23 against the working tree that
+became **`de6780f`** — i.e. after both fixture fixes. They were **not** re-run
+during the documentation-only closing pass that produced this section's final
+wording; that pass ran only `git diff --check`, `pnpm scan:secrets`, and
+`actionlint` (all exit 0).
 
 | Command | Result |
 |---|---|
@@ -750,7 +782,7 @@ All commands executed on 2026-08-23 against the working tree.
 | `pnpm scan:deps:local` | **exit 0** — no issues; 1 filtered advisory; reports `GHSA-mh99-v99m-4gvg` as an unused ignore (pre-existing, unrelated to this sprint) |
 | `pnpm scan:secrets` | **exit 0** — 39 commits scanned, no leaks |
 | `actionlint` | **exit 0** |
-| `tooling/artifact-smoke.sh` | **`SMOKE OK`** — every check passed, including the six new secret-source checks |
+| `tooling/artifact-smoke.sh` | **exit 0, `SMOKE OK`** — 26/26 steps, including the six new secret-source checks |
 
 `pnpm validate:integration` required `DATABASE_URL`/`TEST_DATABASE_URL`
 pointed at the alternate-port validation Postgres (`localhost:55432`) because
@@ -773,106 +805,76 @@ pnpm vitest run apps/api/src/lib/logging.test.ts
 
 ## 19. Remote Validation Evidence
 
-**PENDING OPERATOR ACTION — two remote runs have happened; the fix for the
-second failure is in the working tree and is not yet pushed.**
+**PASS — all required checks are green for the final implementation commit.**
 
-| Run | Commit | Outcome |
+**Validated commit: `de6780f`** (PR #33, `sprint-24-runtime-secrets`).
+
+| Workflow | Run ID | Conclusion |
 |---|---|---|
-| `32656512688` | PR #33 | **FAILED** `Artifacts (build + smoke)` (Linux secret-directory permissions). Five other required checks green. |
-| `32657860558` | PR #33 @ `486bee8` | `Artifacts (build + smoke)` **PASSED** — permission fix confirmed remotely. Integration, Dependency audit, Secret scan, CodeQL passed. **FAILED** `Validate (offline)`: 913/914 unit tests, one SMTP timeout fixture defect (§17, Defect 2). |
-| — | pending | The Defect 2 fix is uncommitted; no workflow has run against it. |
+| CI | `32663739832` | success |
+| CodeQL | `32663739811` | success |
+| Security scans | `32663739952` | success |
 
-Both runs are preserved as historical evidence. Sprint 23's `main` @ `6019db8`
-must not be read as Sprint 24 validation either.
+All seven required checks pass — verified via `gh pr checks 33` and
+`gh run list --commit de6780f`:
 
-`main` is protected by ruleset `19769611` with no bypass actors, so a direct
-push to `main` is rejected — the changes must land through a pull request whose
-six required checks pass.
+| Required check | Result |
+|---|---|
+| CI / Validate (offline) | pass |
+| CI / Integration (PostgreSQL + Redis) | pass |
+| CI / Artifacts (build + smoke) | pass |
+| Security scans / Dependency audit (pnpm) | pass |
+| Security scans / Secret scan (Gitleaks) | pass |
+| CodeQL / Analyze (javascript-typescript) | pass |
+| CodeQL (rollup) | pass |
 
-**Step 1 — the branch already exists; stage and commit the fix (operator does
-this manually). `git push` with no `-u` is correct: the upstream is already
-set from the earlier push.**
+`0 failing · 0 pending · 0 cancelled · 0 skipped · 7 successful.`
+
+The two earlier failing runs are retained in §17 as the Sprint 24 CI evidence
+chain; they are historical, not current status.
+
+`Artifacts (build + smoke)` exercises the mounted secret-file path and required
+**no** workflow secret and **no** Actions environment — routine CI remains
+credential-free.
+
+Workflow definitions were reviewed and **not modified** during Sprint 24:
+`ci.yml`, `security.yml`, and `codeql.yml` keep their SHA-pinned actions,
+explicit least-privilege `permissions:`, concurrency groups, `pull_request`
+(never `pull_request_target`) triggers, and credential-free jobs.
+
+### Scope of this evidence
+
+The green result above belongs to **`de6780f`, the final implementation
+commit**. This closing artifact is a documentation-only change made after that
+commit, so it will become a **later commit that has not yet run through CI**.
+
+- **Sprint 24's implementation DoD is MET** on the evidence of `de6780f`; that
+  does not change when documentation is added.
+- **Repository closure is fully sealed** once the closing-documentation commit
+  also shows green required checks.
+
+`main` is protected by ruleset `19769611` with no bypass actors, so the
+documentation commit lands the same way: pushed to the existing branch, merged
+through PR #33 after its checks pass.
 
 ```sh
-git switch sprint-24-runtime-secrets   # already created for PR #33
-git diff                               # review the harness fix
+git switch sprint-24-runtime-secrets   # PR #33 branch; upstream already set
+git diff                               # review the closing documentation
 git add -A
-git status                             # review the staged set before committing
+git status                             # review the staged set
 git commit                             # write the message in your editor
-git push                               # updates the existing PR #33
-```
+git push                               # updates PR #33
 
-**Step 2 — PR #33 is already open**, so `gh pr create` is not needed. If a
-fresh PR is ever required instead:
-
-```sh
-gh pr create --base main --head sprint-24-runtime-secrets \
-  --title 'feat(config): runtime secret sources and access-token key rotation' \
-  --body-file -    # or --web to compose in the browser
-```
-
-**Step 3 — watch the checks for the NEW head commit:**
-
-```sh
 SHA="$(git rev-parse HEAD)"
-
-# Every run GitHub started for this commit.
 gh run list --commit "$SHA" --limit 20 \
   --json workflowName,status,conclusion,databaseId
-
-# Follow CI to completion (resolves the run id for this commit first).
 CI_RUN_ID="$(gh run list --commit "$SHA" --workflow ci.yml --limit 1 \
   --json databaseId -q '.[0].databaseId')"
 gh run watch "$CI_RUN_ID"
-
-# Per-workflow conclusion for this commit.
-for wf in ci.yml security.yml codeql.yml; do
-  gh run list --commit "$SHA" --workflow "$wf" --limit 1 \
-    --json workflowName,status,conclusion,databaseId
-done
-
-# Per-JOB conclusions inside the CI run — this is where the artifact gate shows
-# up. (`gh run view --job` takes a numeric job ID, never a job name.)
-gh run view "$CI_RUN_ID" --json jobs \
-  -q '.jobs[] | "\(.name)\t\(.conclusion)"'
-
-# Aggregate PR check state, i.e. exactly what the ruleset gates on.
-gh pr checks
+gh run view "$CI_RUN_ID" --json jobs -q '.jobs[] | "\(.name)\t\(.conclusion)"'
+gh pr checks 33
 ```
 
-**Step 4 — confirm all four required surfaces are green** for that commit:
-
-| Workflow (file) | Job / check name |
-|---|---|
-| CI (`ci.yml`) | `Validate (offline)`, `Integration (PostgreSQL + Redis)`, `Artifacts (build + smoke)` |
-| Security scans (`security.yml`) | `Dependency audit (pnpm)`, `Secret scan (Gitleaks)` |
-| CodeQL (`codeql.yml`) | `Analyze (javascript-typescript)` |
-
-To read the artifact gate's log specifically, resolve its numeric job ID first:
-
-```sh
-ARTIFACT_JOB_ID="$(gh run view "$CI_RUN_ID" --json jobs \
-  -q '.jobs[] | select(.name == "Artifacts (build + smoke)") | .databaseId')"
-gh run view --job "$ARTIFACT_JOB_ID" --log
-```
-
-`Artifacts (build + smoke)` now additionally exercises the mounted secret-file
-path; it needs no new credential, so **no workflow secret and no Actions
-environment must be created** for Sprint 24.
-
-Workflow definitions were reviewed and **not modified**: `ci.yml`,
-`security.yml`, and `codeql.yml` keep their SHA-pinned actions, explicit
-least-privilege `permissions:`, concurrency groups, `pull_request` (never
-`pull_request_target`) triggers, and credential-free jobs.
-
-Record the new run ID and conclusions in the table above once they exist,
-keeping both prior runs recorded. `Artifacts (build + smoke)` is green as of
-`486bee8`; **`Validate (offline)` is not**, and must not be described as green
-until it actually passes for the corrected commit. Until all six required
-checks are green on one commit, this gate stays PENDING OPERATOR ACTION and
-Sprint 24 stays open.
-
----
 
 ## 20. Documentation Index / Updates
 
@@ -1036,44 +1038,56 @@ open, no deployment environment exists, and external email delivery is
 unvalidated. Sprint 24 improved the runtime security posture of a system that
 still cannot be deployed.
 
+**Sprint completion is not production readiness.** Sprint 24's DoD being met
+says the sprint's own deliverables were completed and validated; it says
+nothing about launch clearance. Nothing in this document should be read as
+staging or production readiness.
+
 ---
 
 ## 25. Recommended Next Sprint
 
-**None yet — Sprint 24 is not closed.** The single outstanding Sprint 24 DoD
-gate is post-change remote workflow validation (§19), so the immediate next
-action is finishing Sprint 24, not starting anything new.
+Sprint 24 is complete, so the roadmap may advance.
 
-### Step 1 — close Sprint 24 (the only mandatory remaining work)
+### Sprint 25 — Backup, PITR, Restore, and Retention Foundation
 
-Commit, push, and open a PR for this working tree, then confirm CI, Security
-scans, CodeQL, and `Artifacts (build + smoke)` are green for that exact commit
-(§19). Record the run IDs there. That clears the last DoD gate, and this
-document can then be finalized as the Sprint 24 closing artifact.
+The expected next production-readiness sprint. Primary focus:
 
-**Neither ORG-PR-002 nor ORG-PR-006 has to close first.** Sprint completion and
-finding closure are separate; both findings remaining open is the honest,
-specification-permitted outcome of this sprint.
+- **ORG-PR-005** — automated backups, point-in-time recovery, and a **tested
+  restore drill** (the mandatory launch gate: a restore that reconstructs the
+  database to a target timestamp and then passes readiness and integration
+  checks);
+- **ORG-PR-015** — retention/cleanup foundation for the unbounded tables, to
+  the extent the Sprint 25 specification authorizes it. Note that enforcement
+  depends on a background runtime (ORG-PR-016), which does not exist.
 
-### Step 2 — after Sprint 24 closes
+Not started here, and not scoped further by this document.
 
-**Sprint 25 — Backup, PITR, Restore, and Retention Foundation** (ORG-PR-005,
-with the retention groundwork tracked by ORG-PR-015/016) is the expected next
-production-readiness sprint. Its scope is unchanged; it is **not authorized to
-begin** while Sprint 24's remote gate is outstanding.
+### Sprint 24 residuals that Sprint 25 does NOT absorb
 
-Two workstreams run alongside it and are **not** absorbed into it:
+These stay visible as outstanding production-readiness work and must not be
+quietly folded into the next sprint or treated as closed:
 
-- **ORG-PR-002 — external email validation (operator-blocked).** Provision
-  provider credentials, a verified sending domain with SPF/DKIM/DMARC, and a
-  readable test mailbox; execute `../rotation-runbook.md` §Validate external
-  email delivery; record per-family acceptance/receipt and the
-  `Authentication-Results` verdicts in §12–§14; then close the finding from that
-  evidence. Until then Orgistry has **no evidence that production email works**.
-- **ORG-PR-006 — residual secrets-management capability.** A secrets manager or
-  platform secret store, least-privilege secret access, secret-access
-  auditability, automated rotation and expiry tracking, and a rehearsed
-  rotation against a real runtime (which needs ORG-PR-001's environment) all
-  remain unbuilt. `<NAME>_FILE` support plus manual runbooks is a foundation,
-  not secrets management. This is future scoped work — it was deliberately
-  **not** retro-fitted into Sprint 24's requirements.
+| Residual | Status | What closure needs |
+|---|---|---|
+| **ORG-PR-002** — external production email | OPEN — materially advanced | Operator-provided provider credentials, a verified sending domain with SPF/DKIM/DMARC, and a readable test mailbox; then execute [`../rotation-runbook.md` §Validate external email delivery](../rotation-runbook.md#validate-external-email-delivery) and record per-family provider-acceptance and inbox-receipt evidence plus `Authentication-Results` verdicts in §12–§14 |
+| **ORG-PR-006** — complete secrets management | OPEN — materially advanced | A secrets manager or platform secret store, least-privilege secret access control, secret-access auditability, automated rotation and expiry tracking, and a rehearsed rotation against a real runtime (which needs ORG-PR-001's environment) |
+
+Both are genuine production-readiness gaps. Sprint 24 closing with them open is
+the specification-permitted outcome, not an oversight — and neither is evidence
+of readiness.
+
+### Remaining P1 blockers after Sprint 24
+
+Sprint completion changes none of these:
+
+| Finding | Sev | Status |
+|---|---|---|
+| ORG-PR-001 — production deployment automation, environment, promotion, rollback | P1 | Open |
+| ORG-PR-002 — external production email validation | P1 | Open — materially advanced |
+| ORG-PR-005 — backup / PITR / tested restore | P1 | Open |
+| ORG-PR-006 — complete secrets management and rotation capability | P1 | Open — materially advanced |
+| ORG-PR-015 — retention/cleanup for unbounded tables | P2 | Open |
+
+**Orgistry is `C — Ready to continue production implementation`. It is NOT
+ready for staging and NOT ready for production.**

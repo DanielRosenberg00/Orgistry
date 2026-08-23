@@ -139,11 +139,9 @@ the P1/P2 work and the launch gate (see
 > remains **C — Ready to continue production implementation** (not ready for
 > staging, not ready for production).
 
-> **Status update (Sprint 24, 2026-08-23 — SPRINT 24 NOT YET CLOSED, pending
-> post-change remote workflow validation. Repository implementation and local
-> validation are complete, no DoD condition failed, and no repository work
-> remains; the sprint stays open only until CI, Security scans, CodeQL, and
-> `Artifacts (build + smoke)` run green for the exact Sprint 24 commit.)**
+> **Status update (Sprint 24, 2026-08-23 — COMPLETE; Sprint 24 DoD MET.** All
+> required remote checks are green for implementation commit `de6780f` on PR
+> #33: CI `32663739832`, CodeQL `32663739811`, Security scans `32663739952`.**)**
 > The runtime-secrets half landed: secrets resolve
 > at process start from a direct environment value or a mounted `<NAME>_FILE`
 > secret, **before** schema validation and onto the canonical variable name, so
@@ -166,9 +164,10 @@ the P1/P2 work and the launch gate (see
 > secret-access auditability, no automated rotation, no rehearsed rotation),
 > not merely an external blocker — and those are finding-closure and
 > production-maturity gaps rather than Sprint 24 DoD items. **4 P1 blockers remain open (ORG-PR-001,
-> 002, 005, 006).** Remote validation is **PENDING OPERATOR ACTION**. The
-> overriding rule still yields *not production-ready*; the state remains
+> 002, 005, 006), plus ORG-PR-015 at P2.** The overriding rule still yields
+> *not production-ready*; the state remains
 > **C — Ready to continue production implementation** (not ready for staging,
-> not ready for production). Next step is clearing Sprint 24's one remaining
-> gate (commit/push/PR + green remote workflows), not a new sprint; neither
-> ORG-PR-002 nor ORG-PR-006 has to close first.
+> not ready for production). Recommended next: **Sprint 25 — Backup, PITR,
+> Restore, and Retention Foundation**, with ORG-PR-002's external-email
+> validation and ORG-PR-006's residual secrets-management capability running
+> alongside it as outstanding workstreams.

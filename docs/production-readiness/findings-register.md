@@ -203,7 +203,13 @@ unchanged.** The repository remains not ready for staging or production. See
 [sprint-23-artifact-package.md](sprint-23-artifact-package.md) (final) and
 [../deployment-artifacts.md](../deployment-artifacts.md).
 
-**Status update (Sprint 24, 2026-08-23):** **no finding closed.**
+**Status update (Sprint 24, 2026-08-23):** **Sprint 24 is COMPLETE and its DoD
+is MET** (all required remote checks green for implementation commit `de6780f`
+on PR #33: CI `32663739832`, CodeQL `32663739811`, Security scans
+`32663739952`) — and **no finding was closed.** That combination is the
+specification-permitted outcome, not a contradiction: sprint completion and
+finding closure are separate, and the sprint's external-email condition was
+explicitly allowed to be met by a precisely documented blocker.
 [ORG-PR-006](#org-pr-006) (P1) **remains Open, materially advanced**: a runtime
 secret-source boundary now resolves `<NAME>_FILE` mounted secrets for
 `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `JWT_PREVIOUS_SECRET`,

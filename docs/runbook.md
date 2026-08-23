@@ -1,8 +1,13 @@
 # Local Infrastructure Runbook
 
-Operating the local services Orgistry depends on. All infrastructure is defined
-in `infra/docker-compose.yml` and is local-only — there is no production
-deployment automation here.
+Operating the local services Orgistry depends on. The day-to-day dev stack is
+defined in `infra/docker-compose.yml` and is local-only. The separate
+`infra/compose.production-like.yml` is the Sprint 23 artifact-validation
+reference (production-shaped API/web images + one-shot migrations), normally
+exercised via `pnpm artifact:smoke` — see
+[deployment-artifacts.md](deployment-artifacts.md); it publishes the same
+3000/8080 ports as a running dev stack, so stop one before starting the other.
+There is still no production deployment automation here.
 
 ## Services
 
@@ -12,9 +17,11 @@ deployment automation here.
 | `redis` | `redis:7.4.10-alpine` | `6379` | Auth + external-API rate limiting; backs the `/ready` probe. |
 | `mailpit` | `axllent/mailpit:v1.30.5` | `1025` (SMTP), `8025` (web UI) | Local email sink for invitation delivery. |
 
-Image tags are pinned to exact patch versions (Sprint 21, ORG-PR-042);
-Dependabot proposes bumps. Keep this table in sync with
-`infra/docker-compose.yml`.
+Image references are pinned to exact patch tags plus manifest-list digests
+(Sprint 21 tags, Sprint 23 digests — ORG-PR-042); Dependabot proposes bumps.
+Keep this table and `infra/compose.production-like.yml` in sync with
+`infra/docker-compose.yml` (update procedure:
+[validation.md](validation.md#image-pinning-policy)).
 
 The Compose project name is `orgistry`, so containers are named
 `orgistry-postgres-1`, `orgistry-redis-1`, `orgistry-mailpit-1`.

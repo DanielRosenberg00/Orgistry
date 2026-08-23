@@ -29,11 +29,24 @@ updates:
       interval: weekly
       day: monday
 
-  # Local development / integration infrastructure images. `infra/` contains
-  # only docker-compose.yml (no Dockerfiles), so the `docker-compose`
-  # ecosystem is the one that actually discovers its image tags.
+  # Infrastructure images referenced from compose files: the local dev stack
+  # (docker-compose.yml) and the production-like artifact reference
+  # (compose.production-like.yml). All references are pinned tag+digest
+  # (ORG-PR-042); Dependabot proposes coordinated tag+digest bumps.
+  # NOT covered by Dependabot (bump manually, same digests — see
+  # docs/validation.md): the `services:` images in .github/workflows/ci.yml.
   - package-ecosystem: docker-compose
     directory: /infra
+    schedule:
+      interval: weekly
+      day: monday
+
+  # Production Dockerfile base images (Sprint 23): node bookworm-slim for the
+  # API build/runtime and web build; nginx-unprivileged for the web runtime.
+  - package-ecosystem: docker
+    directories:
+      - /apps/api
+      - /apps/web-demo
     schedule:
       interval: weekly
       day: monday

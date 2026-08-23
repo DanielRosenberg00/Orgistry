@@ -1,0 +1,51 @@
+# Docker build-context boundary (Sprint 23, ORG-PR-001).
+#
+# Both production Dockerfiles (apps/api/Dockerfile, apps/web-demo/Dockerfile)
+# build from the repository root so `pnpm install --frozen-lockfile` sees the
+# whole workspace. This file keeps that context small, deterministic, and
+# secret-safe: nothing listed here may ever influence a production artifact.
+# The artifact smoke test (tooling/artifact-smoke.sh) independently asserts
+# that none of this material reaches the built images.
+
+# Version control and repository metadata.
+.git
+.github
+
+# Environment files. Real or local secrets must NEVER enter a build context;
+# runtime configuration is injected only when a container starts.
+# (`**/` prefixes matter: without them Docker matches only at the context root.)
+**/.env
+**/.env.*
+**/*.local
+
+# Dependencies — reinstalled inside the build stage from pnpm-lock.yaml.
+**/node_modules
+**/.pnpm-store
+
+# Build outputs — always rebuilt inside the build stage.
+**/dist
+**/build
+**/*.tsbuildinfo
+**/coverage
+
+# Logs, scanner output, local databases, temp files.
+**/*.log
+**/*.sarif
+**/*.sqlite
+**/*.output
+
+# Local assistant/tooling state (mirrors .gitignore).
+.claude
+.tokensave
+
+# Editor / OS metadata.
+**/.DS_Store
+.idea
+.vscode
+
+# Local infrastructure and CI definitions — not part of any image.
+infra
+docs
+tooling
+**/*.md
+LICENSE

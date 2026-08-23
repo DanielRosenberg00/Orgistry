@@ -178,6 +178,42 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > **C — Ready to continue production implementation**. Recommended next:
 > **Sprint 23 — Deployable artifact & pipeline** (Phase 4).
 
+> **Sprint 23 update (2026-08-23) — deployable artifact. Local
+> implementation and validation complete; remote Sprint 23 DoD evidence
+> pending** (the working tree is uncommitted; the CI / Security / CodeQL /
+> `Artifacts (build + smoke)` workflows must pass remotely after push, and
+> the new artifact check must be registered in the `main` ruleset, before the
+> sprint finally closes). Implemented: production-shaped
+> non-root container artifacts for the API (esbuild bundle of the existing
+> `server.ts`/`migrate.ts` entrypoints + lockfile-exact hoisted production
+> node_modules on `node:22.23.2-bookworm-slim`) and the web demo (Vite build
+> on nginx-unprivileged with SPA fallback); an explicit one-shot migration
+> entrypoint (`node dist/migrate.mjs` — migrations never run at API boot); a
+> production-like compose validation reference
+> (`infra/compose.production-like.yml`, fake guard-passing config only); and
+> a deterministic smoke gate (`tooling/artifact-smoke.sh`, added as the CI
+> `artifacts` job — not yet executed remotely) proving production-mode boot,
+> health/readiness (incl. fail-closed on a
+> Redis stop), non-root UIDs, read-only application tree, artifact hygiene,
+> secret absence from logs and web assets, config-guard rejection of dev
+> secrets, and exit-0 SIGTERM shutdown — all from the packaged artifacts.
+> **ORG-PR-042 is CLOSED** (every active image reference pinned exact patch
+> tag + manifest-list digest). **ORG-PR-001 remains open, materially
+> advanced** (no deployment environment, pipeline, or registry publishing);
+> **ORG-PR-006 remains open** (runtime injection boundary enforced; no
+> secrets manager, no rotation). `pnpm validate`, `pnpm validate:integration`,
+> and `pnpm artifact:smoke` exit 0 (2026-08-23). See
+> [sprint-23-artifact-package.md](sprint-23-artifact-package.md)
+> (provisional pending remote evidence) and
+> [../deployment-artifacts.md](../deployment-artifacts.md). Four P1 blockers
+> remain open (ORG-PR-001/002/005/006); the repository is still **not ready
+> for staging or production** — the state remains **C — Ready to continue
+> production implementation**. If Sprint 23 remote closure succeeds, the
+> next sprint is **Sprint 24 — Runtime Secrets and External Email
+> Validation** (reserved by the binding Sprint 23 specification;
+> ORG-PR-002, ORG-PR-006); if remote closure exposes an artifact/runtime
+> gap, that residual is closed first.
+
 ## Audit context
 
 - **Execution date:** 2026-07-02
@@ -214,6 +250,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-21-artifact-package.md](sprint-21-artifact-package.md) | The Sprint 21 closing artifact (supply-chain & CI hardening: pinning, scanners, advisory remediation, `noUncheckedIndexedAccess`). |
 | [sprint-22-artifact-package.md](sprint-22-artifact-package.md) | The Sprint 22 closing artifact (CodeQL alert triage, gate policy + ruleset enforcement, ORG-PR-020 closure). |
 | [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) | Per-alert triage of all 41 baseline CodeQL High alerts: evidence, root-cause groups, classifications, dispositions. |
+| [sprint-23-artifact-package.md](sprint-23-artifact-package.md) | The Sprint 23 closing artifact (deployable API/web artifacts, migration entrypoint, smoke gate, image policy; ORG-PR-042 closure). |
 
 ## Source-of-truth hierarchy
 

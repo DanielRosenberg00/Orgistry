@@ -30,10 +30,12 @@ real body of work with security and correctness implications.
 
 ### Production hardening
 
-- **Deployment automation.** No container/release pipeline, infra-as-code, or
-  environment provisioning exists. *Would add:* a production Dockerfile per app,
-  IaC (Terraform/Helm), and a deploy workflow. *Done when:* a tagged build deploys
-  to a target environment reproducibly.
+- **Deployment automation.** Production Dockerfiles per app, an explicit
+  migration entrypoint, and a CI build+smoke gate exist (Sprint 23 —
+  see [deployment-artifacts.md](deployment-artifacts.md)); no release
+  pipeline, registry publishing, infra-as-code, or environment provisioning
+  exists. *Would add:* IaC (Terraform/Helm) and a deploy workflow. *Done
+  when:* a tagged build deploys to a target environment reproducibly.
 - **Secrets management.** Secrets are local-only `.env` placeholders (though as
   of Sprint 15 the config loader refuses dev-default/weak secrets under
   `NODE_ENV=production` — see

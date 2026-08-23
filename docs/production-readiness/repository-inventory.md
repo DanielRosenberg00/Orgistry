@@ -135,6 +135,11 @@ Root `package.json`: `dev*`, `typecheck`, `lint(:fix)`, `test`, `test:integratio
 reset:test`. `packages/db/scripts/`: `migrate.ts`, `reset-test.ts` (guard weaker
 than documented — ORG-PR-037).
 
+> **Update (Sprint 23, 2026-08-23):** added `build:api` (esbuild production
+> bundle via `apps/api/scripts/build.mjs`), `artifact:build` (compose build of
+> both production images), and `artifact:smoke` (`tooling/artifact-smoke.sh`
+> — the deterministic artifact smoke gate).
+
 ## CI inventory
 
 `.github/workflows/ci.yml` — two jobs mirroring local validation: `validate`
@@ -166,6 +171,15 @@ block (ORG-PR-019); no dependency/secret/SAST scanning, no Dependabot/Renovate
 > (ORG-PR-020 closed). ORG-PR-041 and ORG-PR-001 unchanged. See
 > [sprint-22-artifact-package.md](sprint-22-artifact-package.md).
 
+> **Update (Sprint 23, 2026-08-23):** `ci.yml` gained a third job,
+> `artifacts` (build + smoke): it runs `tooling/artifact-smoke.sh`, which
+> builds the production API/web images and validates them against
+> `infra/compose.production-like.yml` — no secrets, nothing published. The
+> integration job's service containers are now tag+digest pinned. Dependabot
+> gained a `docker` ecosystem entry for `apps/api` + `apps/web-demo`.
+> ORG-PR-001's "no release/deploy job" gap narrows to deployment only. See
+> [sprint-23-artifact-package.md](sprint-23-artifact-package.md).
+
 ## Docker inventory
 
 `infra/docker-compose.yml` — local Postgres 16 / Redis 7 / Mailpit (`latest`),
@@ -177,6 +191,16 @@ floating tags (ORG-PR-042). `infra/postgres-init/01-create-test-db.sql` creates
 > `redis:7.4.10-alpine`, `axllent/mailpit:v1.30.5`); `latest` is gone.
 > Digest pinning deferred with ORG-PR-001 (ORG-PR-042 open, materially
 > advanced). Still no app Dockerfiles (ORG-PR-001, unchanged).
+
+> **Update (Sprint 23, 2026-08-23):** app Dockerfiles EXIST —
+> `apps/api/Dockerfile` (multi-stage: workspace install → esbuild bundle →
+> hoisted prod node_modules; non-root runtime with `dist/` + `migrations/`
+> only) and `apps/web-demo/Dockerfile` (Vite build → nginx-unprivileged with
+> `apps/web-demo/nginx.conf`). New: root `.dockerignore` (context boundary),
+> `infra/compose.production-like.yml` (artifact validation reference).
+> Every active image reference — Dockerfile bases, both compose files, CI
+> service containers — is exact-patch-tag + manifest-list-digest pinned
+> (ORG-PR-042 CLOSED). See [../deployment-artifacts.md](../deployment-artifacts.md).
 
 ## Test inventory (67 test files)
 
@@ -204,6 +228,8 @@ current-as-design). **Stale:** `database-foundation` (frozen Sprint 4),
 `org.read`, `evaluation-guide` test count — all ORG-PR-046. Historical: 13
 `sprint-*-artifact-package.md` + `sprint-1-foundation.md`. This
 `docs/production-readiness/` package is new (Sprint 14).
+Added later: `deployment-artifacts.md` (Sprint 23 — authoritative artifact/
+runtime/migration/env-contract/image-policy reference).
 
 ## Maintenance / demo / generated artifacts
 

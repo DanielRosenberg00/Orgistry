@@ -46,6 +46,7 @@ pnpm lint                 # ESLint gate (API + packages + web demo)
 pnpm test                 # unit tests (no infrastructure required)
 pnpm validate             # full offline gate (see below)
 pnpm validate:integration # live gate — needs PostgreSQL + Redis
+pnpm artifact:smoke       # deployable-artifact gate — needs Docker; ports 3000/8080 free
 ```
 
 `pnpm validate` runs the offline matrix: typecheck, lint, unit tests, web demo

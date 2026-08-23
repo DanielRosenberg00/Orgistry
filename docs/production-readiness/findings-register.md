@@ -169,16 +169,48 @@ ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged.** The repository remains not
 ready for staging or production. See
 [sprint-22-artifact-package.md](sprint-22-artifact-package.md).
 
+**Status update (Sprint 23, 2026-08-23):** deployable artifact — local
+implementation and validation complete; **remote Sprint 23 DoD evidence
+pending** (working tree uncommitted; the CI / Security / CodeQL /
+`Artifacts (build + smoke)` workflows must pass remotely after push).
+[ORG-PR-042](#org-pr-042) (P3) **Closed** (implementation evidence): every
+active image reference —
+both new production Dockerfiles, both `infra/` compose files, and the CI
+service containers — is pinned exact patch tag PLUS manifest-list digest; no
+floating references remain, and the one Dependabot coverage gap (workflow
+`services:` images) has a documented manual bump procedure.
+[ORG-PR-001](#org-pr-001) (P1) **remains Open, materially advanced**: the
+repository now has non-root production container artifacts for the API
+(esbuild bundle of the existing entrypoints + lockfile-exact production
+node_modules) and web (static nginx), an explicit one-shot migration
+entrypoint, a production-like compose validation reference, and a CI
+build + smoke gate (locally proven; first remote run pending push) proving
+`NODE_ENV=production` boot, health/readiness,
+secret hygiene, and clean shutdown from the packaged artifacts — but the
+finding's deployment half (a pipeline that promotes artifacts to a target
+environment, with migration orchestration and rollback) still does not exist.
+[ORG-PR-006](#org-pr-006) (P1) **remains Open, advanced only at the
+boundary**: the artifacts define and enforce the runtime secret-injection
+seam (no secrets at build time, no `.env` in images, environment-only at
+process start) that a future secrets manager plugs into; there is still no
+manager, no rotation procedure, and no rehearsed `JWT_SECRET` rotation —
+documentation of an injection boundary is not secrets management. **Open P1
+production blockers: ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006 —
+unchanged.** The repository remains not ready for staging or production. See
+[sprint-23-artifact-package.md](sprint-23-artifact-package.md) (provisional
+pending remote evidence) and
+[../deployment-artifacts.md](../deployment-artifacts.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
 | --- | --- | --- | --- | --- | --- |
-| [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) | Infrastructure | Production blocker | P1 | High |
+| [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Open; materially advanced (Sprint 23): non-root artifacts + CI build/smoke gate exist; deployment pipeline to a target environment does not** | Infrastructure | Production blocker | P1 | High |
 | [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16): adapter + guard exist, external delivery unvalidated** | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
 | [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
 | [ORG-PR-005](#org-pr-005) | No database backup / PITR / tested restore | Backup & DR | Production blocker | P1 | High |
-| [ORG-PR-006](#org-pr-006) | No secrets management or rotation procedure | Secrets/Ops | Production blocker | P1 | High |
+| [ORG-PR-006](#org-pr-006) | No secrets management or rotation procedure — **Open; boundary advanced (Sprint 23): runtime-only injection seam enforced by the artifacts; no manager, no rotation** | Secrets/Ops | Production blocker | P1 | High |
 | [ORG-PR-007](#org-pr-007) | No observability (metrics/tracing/dashboards/alerts) | Observability | Operational gap | P2 | High |
 | [ORG-PR-008](#org-pr-008) | No incident response / production runbook / on-call | Operations | Operational gap | P2 | High |
 | [ORG-PR-009](#org-pr-009) | Rate limiting fails open on Redis outage — **Materially advanced (Sprint 19): sensitive buckets fail closed in production; alerting residual → ORG-PR-007** | Auth/App security | Security risk | P2 | High |
@@ -214,7 +246,7 @@ ready for staging or production. See
 | [ORG-PR-039](#org-pr-039) | No password-change / email-change flows — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P3 | High |
 | [ORG-PR-040](#org-pr-040) | `noUncheckedIndexedAccess` disabled — **Closed (Sprint 21)** | Type safety/DX | Maintainability issue | P3 | High |
 | [ORG-PR-041](#org-pr-041) | Mailpit / live SMTP path never exercised in CI | Testing | Operational gap | P3 | High |
-| [ORG-PR-042](#org-pr-042) | Docker infra images pinned by floating tags — **Open; materially advanced (Sprint 21): exact patch tags everywhere; digest pinning deferred to the ORG-PR-001 artifact track** | Supply chain | Maintainability issue | P3 | High |
+| [ORG-PR-042](#org-pr-042) | Docker infra images pinned by floating tags — **CLOSED (Sprint 23): exact patch tag + manifest-list digest on every active reference (Dockerfiles, compose files, CI services)** | Supply chain | Maintainability issue | P3 | High |
 | [ORG-PR-043](#org-pr-043) | PII in audit/security metadata with no retention | Privacy | Compliance dependency | P3 | Medium |
 | [ORG-PR-044](#org-pr-044) | Narrow concurrency test coverage — **Closed (Sprint 20)** | Testing | Reliability risk | P3 | High |
 | [ORG-PR-045](#org-pr-045) | No MFA/passkeys and no security notifications | Account lifecycle | Product completeness gap | P3 | High |
@@ -257,6 +289,27 @@ Standards · Threats.
 - **Dependencies:** Requires the production target decision. Blocks ORG-PR-005, ORG-PR-007, ORG-PR-008.
 - **Effort:** L. **Validation:** a tagged build deploys to a target environment reproducibly; container runs as non-root.
 - **Roadmap:** Phase 4 (Production infrastructure). **Standards:** SLSA build/provenance; SSDF PW.6/PO.3. **Threats:** T-DEP, T-OPS.
+- **Progress (Sprint 23, 2026-08-23): Open — materially advanced.** The
+  artifact half of this finding is implemented and locally validated, with a
+  CI gate added (first remote execution pending push):
+  `apps/api/Dockerfile` (multi-stage; esbuild bundles of the EXISTING
+  `src/server.ts` and `packages/db/scripts/migrate.ts` entrypoints +
+  lockfile-exact hoisted production node_modules; non-root `node` user;
+  read-only `/app`; no `.env`/source/git in the image) and
+  `apps/web-demo/Dockerfile` (Vite production build served by non-root
+  nginx-unprivileged with SPA fallback). `infra/compose.production-like.yml`
+  is the production-like validation reference (postgres healthy → one-shot
+  `node dist/migrate.mjs` → API under `NODE_ENV=production` with fake
+  guard-passing config), and `tooling/artifact-smoke.sh` (CI: the
+  `artifacts` job in `ci.yml`, local: `pnpm artifact:smoke`) proves build,
+  migrate, boot, health/readiness (incl. fail-closed on a Redis stop),
+  non-root UIDs, artifact hygiene, secret absence from logs/web assets,
+  config-guard rejection of dev secrets, and exit-0 SIGTERM shutdown from the
+  PACKAGED artifacts. **Why still open:** the expected production behavior —
+  artifacts "built and promoted by a pipeline to a target environment, with
+  migration orchestration and rollback" — still has no environment, no
+  registry publishing, no promotion/deploy pipeline, and no rollback beyond
+  forward-only migrations. Docs: [../deployment-artifacts.md](../deployment-artifacts.md).
 
 <a id="org-pr-002"></a>
 ### ORG-PR-002 — No production email provider (Mailpit-only)
@@ -347,6 +400,17 @@ Standards · Threats.
 - **Remediation:** Integrate a secrets store; document rotation runbooks; pair with ORG-PR-049 for graceful JWT rotation.
 - **Dependencies:** ORG-PR-001, ORG-PR-003. **Effort:** M. **Validation:** a rehearsed rotation of `JWT_SECRET` with no unexpected mass logout beyond the accepted window.
 - **Roadmap:** Phase 3 / Phase 4. **Standards:** ASVS V6.4 (secret management); SSDF PS.1. **Threats:** T-SECRET, T-CONF.
+- **Progress (Sprint 23, 2026-08-23): Open — boundary advanced only.** The
+  deployable artifacts now enforce the runtime secret-injection seam a future
+  manager plugs into: secrets are read exclusively from the runtime
+  environment at process start; no secret enters Docker build args or image
+  layers; `.env` files are excluded from build contexts and proven absent
+  from images; the smoke test asserts the (fake) runtime secrets never appear
+  in logs or in the static web assets. This is the injection *boundary*, not
+  secrets management: there is still no secrets-manager/platform-store
+  integration, no routine or emergency rotation procedure, no rehearsed
+  `JWT_SECRET` rotation, and no `kid`/versioned-secret path (ORG-PR-049).
+  The finding's validation criterion is untouched.
 
 <a id="org-pr-007"></a>
 ### ORG-PR-007 — No observability (metrics/tracing/dashboards/alerts)
@@ -930,6 +994,20 @@ Standards · Threats.
 - **Remediation:** Pin production images by digest; tighten dev tags.
 - **Dependencies:** ORG-PR-001. **Effort:** S. **Validation:** images referenced by digest in production manifests. **Roadmap:** Phase 4. **Standards:** SLSA (reproducibility). **Threats:** T-DEP.
 - **Progress (Sprint 21, 2026-07-26): Open — materially advanced.** All floating tags are removed from current repository scope: `infra/docker-compose.yml` and the CI integration service containers now pin exact patch tags (`postgres:16.14-alpine`, `redis:7.4.10-alpine`, `axllent/mailpit:v1.30.5`; `latest` eliminated). Tags were verified to exist on Docker Hub, `docker compose config` validates, the local stack and CI service definitions stay drop-in compatible (same majors as before), and the runbook's service table and examples were updated. Dependabot's `docker` ecosystem proposes tag bumps for `infra/`. **Why still open:** the finding's production half — digest-pinned images in production manifests — cannot be satisfied until the ORG-PR-001 deployment-artifact track creates those manifests; digest pinning of the dev/CI images was deliberately deferred with them so one mechanism governs both. Residual risk (accepted, documented): a registry tag can in principle be re-pushed; exact patch tags narrow but do not eliminate that window — precisely what digest pinning will close.
+- **Resolution (Sprint 23, 2026-08-23): CLOSED.** The production manifests
+  now exist and every active image reference is pinned exact patch tag PLUS
+  manifest-list digest (`name:X.Y.Z@sha256:…`): the API/web Dockerfile base
+  images (`node:22.23.2-bookworm-slim`,
+  `nginxinc/nginx-unprivileged:1.31.4-alpine`), `infra/docker-compose.yml`
+  and `infra/compose.production-like.yml`
+  (`postgres:16.14-alpine`, `redis:7.4.10-alpine`, `axllent/mailpit:v1.30.5`),
+  and the `ci.yml` service containers. No `latest`, no floating tags; the
+  tag-re-push window is closed. Dependabot covers Dockerfiles (`docker`
+  ecosystem) and compose files (`docker-compose`); workflow `services:`
+  images are outside Dependabot's coverage and carry a documented manual
+  bump procedure ([../validation.md](../validation.md#image-pinning-policy) —
+  the accepted residual). Evidence: `pnpm artifact:smoke` and the CI
+  `artifacts`/`integration` jobs pull and run every pinned reference.
 
 <a id="org-pr-043"></a>
 ### ORG-PR-043 — PII in audit/security metadata with no retention

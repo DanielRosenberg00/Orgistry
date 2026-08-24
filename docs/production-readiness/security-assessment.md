@@ -316,10 +316,18 @@ the workflow definitions:
   credential-shape guards that refuse to write anything secret-looking into a
   release manifest or a deployment evidence record.
 
-**Gaps:** ORG-PR-041 (SMTP untested), ORG-PR-001 (the release and deployment
-workflows have **never executed remotely**, nothing has been published to any
-registry, no GitHub Environment exists, and there is no deployment target). No
-artifact signing and no provenance attestation. The minimum release pipeline
+**Executed evidence (2026-08-24).** All four Sprint 26 workflow paths ran green
+against merged `main` (`91664d0`): `Release` `32776576782` (gate authorization
+then publication), `Deploy` `32777270537`, `Deployment rehearsal` `32777259951`,
+`Data durability` `32777249673`. The permission split held in practice — the
+gate job carried `actions: read` with no package scope, the publish job carried
+`packages: write` with no Actions scope. All four run logs were scanned for
+credential-shaped values: **zero hits**.
+
+**Gaps:** ORG-PR-041 (SMTP untested), ORG-PR-001 (**no deployment target
+exists**, so no deployment has ever been performed; the `staging-like` GitHub
+Environment exists but has zero protection rules, and published images are
+single-architecture amd64). No artifact signing and no provenance attestation. The minimum release pipeline
 for the target is defined in
 [production-roadmap.md](production-roadmap.md); what now exists is described in
 [../deployment.md](../deployment.md).

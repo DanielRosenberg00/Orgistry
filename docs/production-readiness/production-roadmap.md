@@ -357,12 +357,17 @@ Phase 6: End-to-End Verification & Security Review
   and a content fingerprint when the tree is dirty; and publication became
   authorised by proof that all six required checks succeeded for the exact
   release commit, with their run IDs recorded in the manifest.
+  Merged as PR #38 (`91664d0`) and **validated remotely**: every required job
+  green for that exact SHA, `Release` `32776576782` publishing both images to
+  GHCR after exact-SHA gate authorization, `Deploy` `32777270537`,
+  `Deployment rehearsal` `32777259951`, and `Data durability` `32777249673` all
+  successful. **Sprint 26 DoD is MET.**
   **No finding closed** (the permitted outcome for a sprint whose closure
   criteria depend on infrastructure that does not exist). **ORG-PR-001 remains
-  OPEN — materially advanced for the second time:** there is still no
-  deployment target of any kind, no image has been published to any registry,
-  neither new workflow has executed on GitHub Actions, no GitHub Environment is
-  configured, and rollback is validated only in the local rehearsal.
+  OPEN — materially advanced:** the pipeline is executed and both images are
+  published, but there is still no deployment target of any kind, nothing has
+  been deployed to one, the `staging-like` GitHub Environment has zero
+  protection rules, and rollback is validated only in the rehearsal.
   ORG-PR-005 and ORG-PR-006 gained integration and handling boundaries
   respectively; neither moves toward closure. Closing artifact:
   [sprint-26-artifact-package.md](sprint-26-artifact-package.md); docs:

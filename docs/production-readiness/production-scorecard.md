@@ -31,9 +31,9 @@ average — do not read a high domain score as launch clearance.
 | Application security | 2 | Yes | Safe error handler, no DTO leaks, in-mem token | No headers/proxy/global limit | ORG-PR-010, 011, 012, 013 | High |
 | Frontend | 1 | No (target: demo) | Exemplary token/secret handling | No error boundary/CSP | ORG-PR-023, 035, 036 | High |
 | Testing | 2 | Partly | Strong negative/isolation coverage + real-DB quota/authz concurrency races (S20) | No failure-injection/E2E | ORG-PR-026 | High |
-| CI/CD | 3 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22); deployable-artifact build+smoke gate in CI (S23); gated GHCR release workflow, environment-scoped deployment-verification workflow, and a deployment rehearsal workflow (S26) | The release and deployment workflows have never executed remotely; nothing has been published | ORG-PR-001 | High |
-| Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); every active image reference tag+digest-pinned (S23, ORG-PR-042 closed); build-once/promote-by-digest enforced at four points and a schema-validated release manifest (S26); two documented advisory acceptances | No provenance/signing; nothing published to a registry yet | ORG-PR-001 | High |
-| Infrastructure | 2 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23); single-host deployment topology, promote-by-digest deployment script with migrate-once + verified head, post-deploy smoke, evidence ledger, and rehearsed application rollback (S26) | **No deployment environment exists** — no host, provider account, deployment credential, or GitHub Environment; nothing published to a registry; no IaC; no TLS/DNS/proxy; no least-privilege DB roles | ORG-PR-001, 022 | High |
+| CI/CD | 4 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22); deployable-artifact build+smoke gate in CI (S23); release workflow that publishes to GHCR only after proving all six required checks succeeded for the exact release SHA, plus environment-scoped deployment-verification and deployment-rehearsal workflows — all executed remotely and green for `91664d0` (S26) | No artifact signing or SLSA provenance; nothing has been deployed to an environment | ORG-PR-001 | High |
+| Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); every active image reference tag+digest-pinned (S23, ORG-PR-042 closed); build-once/promote-by-digest enforced at four points and a schema-validated release manifest (S26); two documented advisory acceptances | No artifact signing or SLSA provenance attestation; published images are single-architecture amd64 | ORG-PR-001 | High |
+| Infrastructure | 2 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23); single-host deployment topology, promote-by-digest deployment script with migrate-once + verified head, post-deploy smoke, evidence ledger, and rehearsed application rollback (S26) | **No deployment environment exists** — no host, provider account, or deployment credential, and nothing has been deployed to one; the `staging-like` GitHub Environment has no reviewer protection; no IaC; no TLS/DNS/proxy; no least-privilege DB roles | ORG-PR-001, 022 | High |
 | Reliability | 2 | Yes | Graceful shutdown; readiness probes; tested recovery tooling (S25) | No scheduled backups; fail-open non-sensitive limiters | ORG-PR-005, 009, 016 | High |
 | Backup & recovery | 2 | Yes | Repeatable logical backup + checksum + provenance; restore drill into a fresh DB reaching the packaged artifact incl. an authenticated read of restored data; **PITR VERIFIED** (base backup + archived WAL + recovery target); CI-gated; command-level runbooks (S25) | Nothing schedules a backup; no remote/encrypted storage; no continuous WAL archiving on a long-lived DB; no provider-managed PITR; no measured RPO/RTO; failed-migration recovery unrehearsed | ORG-PR-005, 028 | High |
 | Observability | 1 | Yes | Structured logs + request IDs | No metrics/tracing/alerts | ORG-PR-007 | High |
@@ -212,13 +212,19 @@ the P1/P2 work and the launch gate (see
 > migrate-exactly-once contract and a verified applied migration head,
 > post-deployment smoke, an append-only evidence ledger, application rollback to
 > the previous known-good digests, and an end-to-end rehearsal that executes the
-> whole lifecycle and passes locally. **Infrastructure deliberately stays at 2.**
-> A rehearsed deployment pipeline with no target is a capability, not
-> infrastructure: no host, provider account, deployment credential, or GitHub
-> Environment exists; the release workflow has never run, so **no Orgistry image
-> has been published to any registry**; neither the release nor the deployment
-> workflow has ever executed on GitHub Actions; and rollback is validated only
-> in the local rehearsal, between two releases differing by an image label,
+> whole lifecycle and passes locally. The pipeline was then **executed
+> remotely** against merged `main` `91664d0`: `Release` `32776576782` published
+> both images to GHCR after proving all six required checks succeeded for that
+> exact SHA, and `Deploy` `32777270537`, `Deployment rehearsal` `32777259951`,
+> and `Data durability` `32777249673` all passed.
+> **CI/CD moves 3 → 4** on executed release-authorization evidence.
+> **Infrastructure deliberately stays at 2.**
+> A deployment pipeline with no target is a capability, not
+> infrastructure: no host, provider account, or deployment credential exists;
+> **nothing has been deployed to any environment**; the `staging-like` GitHub
+> Environment exists but carries zero protection rules; and rollback is
+> validated only in the rehearsal, between two releases differing by an image
+> label,
 > against a throwaway database. Infrastructure reaches 3 when a real environment
 > has actually been deployed to and rolled back. **Backup & recovery stays at
 > 2**: the deployment integrates the Sprint 25 backup at the one point that

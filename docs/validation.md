@@ -483,7 +483,10 @@ UTC) runs the deployment rehearsal (see
 deliberately outside the pull-request path — it builds two image sets and
 performs three deployments, and it validates a deployment STRATEGY that changes
 only when the deployment tooling, the compose topology, or the Dockerfiles
-change. **It has never been executed on GitHub Actions.**
+change. It has been executed on GitHub Actions against merged `main`
+(`91664d0`): run
+[32777259951](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32777259951),
+**success**, 65 assertions.
 
 `.github/workflows/release.yml` (push to `main`, manual dispatch) is the only
 workflow that publishes anything (Sprint 26, ORG-PR-001), and it publishes only
@@ -505,7 +508,13 @@ path to publishing; `actions: read` is scoped to the gate job and
 its credential is the job's own short-lived `GITHUB_TOKEN`, passed on stdin. No
 production runtime secret is involved, and image builds take no secrets — and,
 since the refinement, no build arguments at all.
-**It has never been executed, so no Orgistry image has been published anywhere.**
+It has been executed: run
+[32776576782](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32776576782)
+published `ghcr.io/danielrosenberg00/orgistry-api` and `…/orgistry-web` for
+commit `91664d0`, after its gate job proved all six required checks succeeded
+for that exact SHA (CI `32776576684`, Security `32776576586`, CodeQL
+`32776576905`). Both packages are **private**; they were verified by
+authenticated registry inspection.
 
 `.github/workflows/deploy.yml` (manual dispatch only) authorises and verifies a
 deployment: it binds to a GitHub Environment, downloads a release run's
@@ -514,7 +523,11 @@ gate runs that authorised it, proves both digests still resolve in the registry,
 and emits the deployment plan and operator commands. It is read-only everywhere and does **not** contact a
 deployment target — none is reachable from CI, and target execution is the
 operator-run `tooling/deploy.sh` ([deployment.md](deployment.md)).
-**It has never been executed, and no GitHub Environment is configured.**
+It has been executed: run
+[32777270537](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32777270537)
+against environment `staging-like`, **success**. The environment now exists
+(GitHub created it on first use) but has **zero protection rules** — adding
+required reviewers remains an operator action.
 
 `.github/workflows/codeql.yml` (push/PR to main, weekly schedule) runs CodeQL
 static analysis for `javascript-typescript` in source-only mode

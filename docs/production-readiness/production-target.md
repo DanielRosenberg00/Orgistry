@@ -30,8 +30,10 @@ would change under a different target.
   release manifests, a single-host deployment topology, a deployment executor,
   post-deployment smoke, an evidence ledger, and application rollback, all
   rehearsed end to end ([../deployment.md](../deployment.md)). No deployment
-  ENVIRONMENT exists, nothing has been published to a registry, and
-  observability tooling remains absent.)*
+  ENVIRONMENT exists — the release pipeline itself has been executed and both
+  images are published to GHCR for the merged Sprint 26 commit, but nothing has
+  been deployed to any environment — and observability tooling remains
+  absent.)*
 
 ## Explicit assumptions
 

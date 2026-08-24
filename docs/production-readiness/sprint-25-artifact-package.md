@@ -179,9 +179,13 @@ proves a restore did not widen authentication.
 *Why not a browser-session login?* Session authentication needs a real Argon2id
 password hash, which cannot be produced from a SQL fixture without duplicating
 the hashing implementation inside the drill. API-key authentication is
-deterministic SHA-256, so the drill derives a real hash at run time and
-`tooling/restore-drill-fixture.test.ts` pins the assumption that the product
-hashes that way.
+deterministic SHA-256 over 256 bits of CSPRNG output, so the drill derives a
+real hash at run time (in shell) and seeds it.
+
+**This authenticated read is also the fixture/product hash contract test.** The
+seeded hash authenticates only if the packaged API computes the same value from
+the raw key; a salt, pepper, or algorithm change turns it into a 401 and fails
+the drill. It runs in the `artifacts` CI job on every push and pull request.
 
 No development server is involved anywhere in this path.
 
@@ -498,31 +502,50 @@ client-newer-than-server combination `pg_dump` supports, and CI runs both at
 
 ## 12. Remote validation evidence
 
-**None yet.** At the time this artifact was written, **remote CI has not run
-for this change set** — the work is uncommitted in the working tree, as the
-sprint specification requires. No CI run ID, no workflow conclusion, and no
-remote artifact exists for it, and none is claimed.
+**First remote run: `e7d5710` on PR #34, branch `sprint-25-backup-pitr-retention`.**
+Every functional and scanner check passed; the CodeQL **security gate** did
+not.
 
-**Sprint 25 is therefore NOT officially complete.** Local repository validation
-is complete and green (§11), but the sprint's Definition of Done requires the
-remote workflows to pass on the pushed change set. The correct status is:
+| Check | Result | Run |
+| --- | --- | --- |
+| Validate (offline) | **pass** | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352832447) |
+| Integration (PostgreSQL + Redis) | **pass** | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352831555) |
+| Artifacts (build + smoke) | **pass** | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352832473) |
+| Dependency audit (pnpm) | **pass** | [32701180733](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180733/job/97352833283) |
+| Secret scan (Gitleaks) | **pass** | [32701180733](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180733/job/97352831465) |
+| Analyze (javascript-typescript) | **pass** | [32701180767](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180767/job/97352831699) |
+| **CodeQL (security gate)** | **fail** — one new High alert | [97353010855](https://github.com/DanielRosenberg00/Orgistry/runs/97353010855) |
+
+Note what this does and does not say. The **integration** and **artifacts**
+jobs passing is the first remote evidence that the backup/restore drill and the
+packaged-artifact restore drill — including the API-key-authenticated read of
+restored data — work outside this machine. The CodeQL *analysis* also
+succeeded; the **gate** failed on a single new High alert, addressed in §13
+finding 3 and the CodeQL refinement pass in §21. `Data durability` (PITR) does
+not appear because it is `workflow_dispatch` + schedule only and a push does
+not trigger it.
+
+**Sprint 25 is NOT officially complete.** The correct status is:
 
 ```
-LOCAL SPRINT IMPLEMENTATION READY FOR REMOTE VALIDATION
+LOCAL IMPLEMENTATION VALIDATED
+REMOTE CODEQL REVALIDATION PENDING
+NOT READY FOR STAGING
+NOT READY FOR PRODUCTION
 ```
 
 Remote evidence still required before this artifact may record completion:
 
 | Workflow | Required |
 | --- | --- |
-| `CI` (`ci.yml`) — Validate (offline), Integration (PostgreSQL + Redis), Artifacts (build + smoke) | green on the pushed commit |
-| `Security scans` (`security.yml`) — dependency audit + Gitleaks | green on the pushed commit |
-| `CodeQL` (`codeql.yml`) | green on the pushed commit |
-| `Data durability` (`data-durability.yml`) — the PITR drill | green on a manual dispatch against the pushed ref (it is manual/scheduled, so a push does not trigger it) |
+| `CodeQL` (`codeql.yml`) — the **security gate**, not just the analyze job | green on the corrected commit (the only outstanding check) |
+| `CI` (`ci.yml`) — Validate / Integration / Artifacts | re-confirmed green on the corrected commit |
+| `Security scans` (`security.yml`) — dependency audit + Gitleaks | re-confirmed green on the corrected commit |
+| `Data durability` (`data-durability.yml`) — the PITR drill | green on a **manual dispatch** against the branch (a push does not trigger it) |
 
-Note that the backup/restore, retention, and artifact-restore evidence is
-carried by the existing `CI` jobs rather than a new workflow; only the PITR
-drill needs a separate dispatch.
+Backup/restore, retention, and artifact-restore evidence is carried by the
+existing `CI` jobs rather than a new workflow; only the PITR drill needs a
+separate dispatch.
 
 What remote CI will exercise once this is pushed:
 
@@ -564,7 +587,7 @@ work introduces.
 | Stale documentation | 20 existing documents reconciled against the implementation; the ones that previously said "no backup exists" or "no cleanup exists" now say what is and is not true. |
 | Production-readiness overclaims | Classification unchanged at **C**; ORG-PR-005 explicitly left open; every deployment-dependent gap enumerated. |
 
-**Two issues were found and fixed during review.**
+**Three issues were found and fixed during review.**
 
 **1. A committed hash literal (implementation pass).** A working-tree gitleaks
 scan (`gitleaks dir .`, run *in addition* to the repository's standard
@@ -610,6 +633,53 @@ for each referrer, plus proof that a held-back session does not starve the
 batch). The cost — sessions are effectively retained until their security
 events age out — is documented in `docs/retention.md` §3.1 rather than hidden
 behind a nominal 90-day window.
+
+**3. A duplicated cryptographic operation in a test (remote CodeQL gate).**
+After the first push, every remote check passed except the **CodeQL security
+gate**, which flagged one new High alert:
+
+```
+tooling/restore-drill-fixture.test.ts:51
+js/insufficient-password-hash — "Password from a call to shellValue is hashed insecurely."
+```
+
+The CodeQL *analysis job* succeeded; the gate failed because the alert was new
+and High.
+
+*What it actually was.* The flagged line was
+`createHash('sha256').update(secret).digest('hex')` inside a **test**, where
+`secret` was the checked-in fake API-key fixture component read out of a shell
+file. CodeQL's password heuristic classifies a value reached through a function
+returning something named `secret` as password-like, and a fast hash as an
+insufficient sink. It is **not** a weak password-hash implementation: no
+password is involved, nothing is stored, and Orgistry's API-key hashing is a
+deliberate design — SHA-256 over 256 bits of CSPRNG output, because the threat
+is exfiltrated-database replay rather than offline brute force
+(`apps/api/src/modules/api-keys/api-key-secret.ts`, and the boundary is pinned
+by `packages/auth-core/src/hashing-invariants.test.ts`: passwords are Argon2id
+only, opaque tokens are SHA-256 digests).
+
+*But it was a real test-design defect, independent of CodeQL.* The assertion
+compared Node's `createHash` against the product's `hashApiKeySecret` —
+**neither of which is the hasher the drill uses.** The drill derives its hash
+with a *shell* helper (`sha256_hex`), so the test proved a weaker property than
+it appeared to, while reimplementing the cryptographic operation it was
+supposed to be validating.
+
+*Correction.* The duplicated operation was deleted, not suppressed and not
+re-algorithmed. The invariant it was meant to protect is already proven, more
+strongly and deterministically, by
+`tooling/db-restore-drill.sh --with-artifact` in the `artifacts` CI job:
+shell-derived hash → seeded `api_keys.secret_hash` → backup → restore →
+packaged API authenticates the raw key → the restored projects come back, and
+an unknown key still returns 401. The fixture test keeps exactly what a running
+drill cannot check — key parseability, an obviously-fake credential, that the
+drill *derives* rather than carries its hash, and that no 64-hex literal is
+committed into either tooling file (pinned image digests excluded, since those
+are required by ORG-PR-042). **No `codeql[...]` suppression, no query
+exclusion, and no Gitleaks allowlist entry was added**, and the Sprint 25
+Gitleaks fix (no committed hash literal) is not merely preserved but extended
+to a second file.
 
 ---
 
@@ -787,3 +857,13 @@ inside, that sprint.
 | Added a MISSING-artifact rejection check to the restore drill | The corrupted-input path was proven; the missing-input path was not. Now asserts non-zero exit, the unopenable path named, no credential echoed, and a still-empty target. |
 | Reconciled `audit_retention_days` explicitly, from source | Verified it is modeled, documented-as-non-enforced metadata in three places predating Sprint 25 — so the global window neither honours nor breaks a contract, and ORG-PR-015's closure stands. Recorded in §10, `retention.md`, and the findings register rather than left as an inference. |
 | Documented that sessions are effectively retained until their security events age out | An honest consequence of the referential-integrity rule; better stated than hidden behind a nominal 90-day number. |
+
+### CodeQL refinement pass (after the first remote run)
+
+| Change | Rationale |
+| --- | --- |
+| Removed the duplicated `createHash('sha256')` assertion from `tooling/restore-drill-fixture.test.ts` | Remote CodeQL read it as `js/insufficient-password-hash` on a fake API-key fixture value. It was also a genuine test-design defect: it compared Node's crypto against the product's, when the drill's hasher is a *shell* helper. See §13. |
+| Documented the packaged-API authenticated read as the fixture/product hash contract test — in the test header, in `db-restore-drill.sh`, and in `backup-and-restore.md` | The end-to-end assertion is the stronger and more honest proof, and it already runs in the `artifacts` CI job on every push/PR. |
+| Extended the no-hash-literal guard to `db-restore-drill.sh`, excluding pinned image digests | The drill is now where the hash is derived, so a literal could regress there; `@sha256:<digest>` is required by ORG-PR-042 and is the one legitimate 64-hex string. |
+| Added a guard that the drill *derives* its hash (`sha256_hex`) rather than carrying one | Protects the original Gitleaks correction structurally rather than by convention. |
+| **No** CodeQL suppression, query exclusion, or Gitleaks allowlist entry; **no** change to API-key or password hashing | The gate had to be removed by correct code structure, not by silencing the analyzer or weakening a deliberate security contract. |

@@ -188,12 +188,25 @@ The API-key `secret_hash` is **derived at run time** (`sha256_hex` in
 repository is indistinguishable from a real credential to a secret scanner, and
 a derived value cannot drift from the secret it belongs to.
 
-That derivation assumes the product hashes an API-key secret as plain SHA-256
-hex, which a bash script cannot check. `tooling/restore-drill-fixture.test.ts`
-pins it — asserting `hashApiKeySecret(secret)` equals the shell's computation,
-that the raw key parses back through `parseApiKey`, and that no hash literal
-sits in the fixture file. If the key format or hashing changes, that test fails
-with the actual cause instead of the drill failing inside a container.
+That derivation assumes the product hashes an API-key secret the same way. The
+**contract test for that assumption is the authenticated read in §5**, not a
+unit test: the seeded hash lets `GET /v1/external/projects` return the restored
+projects only if the packaged API computes the same hash from the raw key, and
+an unknown key must still return 401. If the product ever salted, peppered, or
+changed algorithm, that request returns 401 and the drill fails. Because the
+drill's hasher is a *shell* helper, an end-to-end assertion is also the only
+one that actually exercises it.
+
+`tooling/restore-drill-fixture.test.ts` therefore covers only what a running
+drill cannot: that the raw key parses back through the product's `parseApiKey`
+(a format break would otherwise surface as an unexplained 401), that the
+fixture credential is obviously fake, that the drill derives its hash rather
+than carrying one, and that no 64-hex hash literal is committed into either
+tooling file. It deliberately does **not** re-derive the hash in TypeScript —
+that compared Node's `createHash` against the product's `hashApiKeySecret`,
+neither of which is the shell helper the drill uses, so it proved less than the
+drill already proves while duplicating a cryptographic operation in test code
+(and CodeQL read that duplicate as `js/insufficient-password-hash`).
 
 ---
 

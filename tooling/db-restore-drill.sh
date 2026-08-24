@@ -421,6 +421,14 @@ step 'Reading restored data back through the authenticated API'
 # and returns that organization's projects. A successful read therefore
 # exercises restored credential metadata, restored tenant state, and restored
 # business rows in one request.
+#
+# THIS IS ALSO THE FIXTURE/PRODUCT HASH CONTRACT TEST. `DRILL_API_KEY_SECRET_HASH`
+# was derived here by `sha256_hex` (tooling/lib/pg-tools.sh) and seeded into
+# `api_keys.secret_hash`; the request below succeeds only if the packaged API
+# computes the SAME hash from the raw key. If the product ever salted,
+# peppered, or changed algorithm, this returns 401 and the drill fails. That is
+# why tooling/restore-drill-fixture.test.ts deliberately does NOT re-derive the
+# hash in TypeScript — see the header there.
 EXTERNAL_RESPONSE="$(
   curl -s -H "Authorization: Bearer ${DRILL_API_KEY_RAW}" \
     "${API_URL}/v1/external/projects"

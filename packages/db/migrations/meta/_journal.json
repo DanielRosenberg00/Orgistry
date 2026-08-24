@@ -85,6 +85,13 @@
       "when": 1784652208682,
       "tag": "0011_calm_gressill",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787555203153,
+      "tag": "0012_shocking_warbound",
+      "breakpoints": true
     }
   ]
 }

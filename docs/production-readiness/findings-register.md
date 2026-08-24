@@ -240,6 +240,25 @@ for staging or production. See
 [../runtime-secrets.md](../runtime-secrets.md), and
 [../rotation-runbook.md](../rotation-runbook.md).
 
+**Status update (Sprint 25, 2026-08-24):** [ORG-PR-015](#org-pr-015) (P2) is
+**Closed** — a retention policy, a runnable one-shot cleanup command (source
+mode and deployable artifact), the indexes its predicates need, and
+PostgreSQL-backed safety tests all exist; scheduling remains
+deployment-dependent and is tracked under ORG-PR-016.
+[ORG-PR-005](#org-pr-005) (P1) **remains Open, materially advanced**: a
+repeatable logical backup, a tested restore into a fresh database that reaches
+the packaged API artifact, and a **VERIFIED** PostgreSQL PITR drill (base
+backup + archived WAL + recovery target time, with post-target damage proven
+undone) now exist with command-level runbooks — but **nothing schedules a
+backup, no backup is stored remotely or encrypted, no long-lived database
+archives WAL, no managed-provider PITR is configured, and no RPO/RTO has been
+measured**, all of which depend on ORG-PR-001. **Open P1 production blockers:
+ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged.** The repository
+remains not ready for staging or production. See
+[sprint-25-artifact-package.md](sprint-25-artifact-package.md),
+[../backup-and-restore.md](../backup-and-restore.md), [../pitr.md](../pitr.md),
+and [../retention.md](../retention.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
@@ -248,7 +267,7 @@ for staging or production. See
 | [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16 adapter + guard; Sprint 24 runtime credential source, failure-mode redaction proofs, family matrix, operator validation procedure): external delivery, inbox receipt, and sender-domain authentication all still unvalidated** | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
 | [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
-| [ORG-PR-005](#org-pr-005) | No database backup / PITR / tested restore | Backup & DR | Production blocker | P1 | High |
+| [ORG-PR-005](#org-pr-005) | No database backup / PITR / tested restore — **Open; materially advanced (Sprint 25): repeatable logical backup, tested restore into a fresh database reaching the packaged artifact, and a VERIFIED PITR drill; no backup schedule, no encrypted remote storage, no continuous WAL archiving, no provider-managed PITR, no measured RPO/RTO** | Backup & DR | Production blocker | P1 | High |
 | [ORG-PR-006](#org-pr-006) | No secrets management or rotation procedure — **Open; materially advanced (Sprint 24): runtime env/file secret sources validated before production guards, graceful JWT key rotation, redaction proofs, manual rotation runbooks; no secrets manager, no automated rotation, no rehearsed rotation** | Secrets/Ops | Production blocker | P1 | High |
 | [ORG-PR-007](#org-pr-007) | No observability (metrics/tracing/dashboards/alerts) | Observability | Operational gap | P2 | High |
 | [ORG-PR-008](#org-pr-008) | No incident response / production runbook / on-call | Operations | Operational gap | P2 | High |
@@ -258,7 +277,7 @@ for staging or production. See
 | [ORG-PR-012](#org-pr-012) | No global/edge rate limiting; unauthenticated `invitations/inspect` oracle unthrottled — **Closed (Sprint 19)** | App security | Security risk | P2 | High |
 | [ORG-PR-013](#org-pr-013) | External API writes an un-throttled `security_events` row per unauthenticated request — **Closed (Sprint 19)** | App security/Reliability | Reliability risk | P2 | High |
 | [ORG-PR-014](#org-pr-014) | `security_events` lacks an `organization_id` index backing the audit read path — **Closed (Sprint 20)** | Database/Perf | Reliability risk | P2 | High |
-| [ORG-PR-015](#org-pr-015) | No retention/cleanup for unbounded tables | Data governance | Operational gap | P2 | High |
+| [ORG-PR-015](#org-pr-015) | No retention/cleanup for unbounded tables — **Closed (Sprint 25)** | Data governance | Operational gap | P2 | High |
 | [ORG-PR-016](#org-pr-016) | No background-processing runtime (workers/scheduler) | Reliability | Operational gap | P2 | High |
 | [ORG-PR-017](#org-pr-017) | Admin can escalate self/others to Owner (no role-transition guard) — **Closed (Sprint 20)** | Authorization | Security risk | P2 | Medium |
 | [ORG-PR-018](#org-pr-018) | `drizzle-orm` high-severity advisory (installed `<0.45.2`) — **Closed (Sprint 21)** | Supply chain | Security risk | P2 | Medium |
@@ -462,6 +481,88 @@ Standards · Threats.
 - **Remediation:** Use managed-Postgres backups/PITR or documented `pg_dump`/WAL archiving; document and rehearse restore. **Not implemented during the Sprint 14 audit.**
 - **Dependencies:** ORG-PR-001 (infra). **Effort:** M. **Validation:** a restore drill reconstructs the DB to a target timestamp and passes readiness/integration checks — mandatory launch gate.
 - **Roadmap:** Phase 5 (Reliability & operations). **Standards:** SSDF PO.3; ASVS V14. **Threats:** T-DBLOSS, T-OPS.
+- **Progress (Sprint 25, 2026-08-24): OPEN — materially advanced. The
+  repository-controlled half is complete and evidenced; the
+  deployment-dependent half is untouched, and that half is what makes this a
+  production blocker.**
+
+  **Delivered and verified (repository-controlled):**
+  - *Persistent-data inventory.* PostgreSQL is the only durable store. Redis
+    holds nothing but TTL-bounded `INCR`/`EXPIRE` rate-limit counters
+    (`apps/api/src/lib/rate-limit.ts`), images/bundles are rebuildable from
+    source, logs are stdout-only with no writable application path in the
+    artifact, and there is no object storage or upload path anywhere in the
+    repository. Backup scope is therefore PostgreSQL and nothing else
+    ([../backup-and-restore.md](../backup-and-restore.md)).
+  - *Repeatable logical backup.* `tooling/db-backup.sh` (`pnpm db:backup`) —
+    `pg_dump -Fc` run from the pinned `postgres:16.14-alpine` image so the
+    client can never drift from the server, plus a SHA-256 sidecar and a
+    provenance `meta.json` (server version, client version, image digest,
+    applied-migration count, byte count, `"encrypted": false`). Credentials
+    are passed by environment variable and never reach an argument, a
+    filename, a log line, or the sidecar. A dump failure or an empty output
+    deletes the partial file and exits non-zero.
+  - *Tested restore.* `tooling/db-restore-drill.sh` (`pnpm drill:restore`)
+    exercises the REAL backup script, verifies the checksum, proves a
+    truncated artifact is rejected by `pg_restore`, asserts the target has
+    zero public tables BEFORE restoring, restores with `--exit-on-error`,
+    then asserts every table, the Drizzle migration ledger, each seeded
+    entity, an owner→organization→plan→project join, and byte-identical
+    API-key hash metadata — and finally re-runs migrations against the
+    restored database requiring a no-op.
+  - *Deployable-artifact recovery contract.* `--with-artifact` completes
+    restored PostgreSQL → `node dist/migrate.mjs` → the packaged API →
+    `/health` 200 → `/ready` 200 → an API-key-authenticated
+    `GET /v1/external/projects` returning the restored projects (the key's
+    SHA-256 hash comes out of the restored database) → an unknown key still
+    401 → no drill secret in the artifact logs → the packaged retention
+    command in both modes.
+  - ***PITR VERIFIED.*** `tooling/db-pitr-drill.sh` (`pnpm drill:pitr`) proves
+    real point-in-time recovery, not a logical restore: WAL archival is
+    verified WORKING (`pg_stat_archiver.archived_count > 0`, no
+    `last_failed_wal`, files present on the archive volume); the base backup
+    is taken with `pg_basebackup` BEFORE the pre-target writes, so those rows
+    exist only in archived WAL; a recovery target is recorded, destructive
+    post-target writes follow (`DELETE FROM users`, `DROP TABLE projects`); an
+    independent server recovers from the base backup + archive with
+    `recovery_target_time`; the target's log is asserted to contain
+    `restored log file` AND a recovery-stopping line; and the recovered state
+    is checked in BOTH directions — pre-target rows present, post-target-only
+    row absent, `DELETE` and `DROP TABLE` undone, schema and migration ledger
+    intact. Recorded evidence: [../pitr.md](../pitr.md).
+  - *CI.* The data-layer restore drill runs in the `integration` job and the
+    `--with-artifact` drill in the `artifacts` job on every push and pull
+    request; the PITR drill runs manually and weekly in
+    `.github/workflows/data-durability.yml` (cost rationale documented).
+  - *Backup security.* `backups/`, `*.dump`, and `*.dump.sha256` are
+    git-ignored; the tool refuses to write inside `.git`; artifacts are
+    created under `umask 077` and `chmod 600`; drills delete their artifacts
+    on exit; the checksum is documented as integrity only, never represented
+    as encryption or access control.
+  - *Operational process.* Command-level runbooks for taking, verifying,
+    restoring, and protecting a backup; for choosing, performing, validating,
+    and diagnosing a PITR recovery; and for handling a failed migration —
+    the last explicitly labelled unrehearsed guidance.
+
+  **Why this stays OPEN.** The finding's expected production behavior is
+  *automated encrypted backups + PITR meeting a target RPO/RTO, with a restore
+  drill executed before production data*. None of the following exists, and
+  every one depends on ORG-PR-001:
+  - no scheduler invokes `db:backup` anywhere — the command has no producer;
+  - backups are written to a local directory: no remote storage, no lifecycle
+    policy, no encryption at rest, no cross-region copy;
+  - no long-lived Orgistry database archives WAL. The PITR drill enables
+    archiving for its own lifetime and deletes the archive volume afterwards;
+  - no managed-provider continuous backup/PITR window is configured;
+  - no RPO or RTO has been measured. The drills recover fixture-sized
+    databases in seconds, which says nothing about production volume;
+  - no monitoring of archive health — a silently failing `archive_command` is
+    the classic way PITR stops existing unnoticed;
+  - no least-privilege backup/restore identity (ORG-PR-006, open).
+
+  Closing this finding on repository-controlled capability alone would assert
+  that the backup/DR launch gate is satisfied while no backup runs anywhere.
+  The capability is proven; the production posture is not.
 
 <a id="org-pr-006"></a>
 ### ORG-PR-006 — No secrets management or rotation procedure
@@ -713,6 +814,117 @@ Standards · Threats.
   can use — in [sprint-20-artifact-package.md](sprint-20-artifact-package.md).
   Documentation and indexes do NOT constitute retention enforcement; this
   finding stays open until an actual cleanup runtime lands.
+- **Resolution (Sprint 25, 2026-08-24): CLOSED.** A retention policy, a
+  runnable cleanup that enforces it, and PostgreSQL-backed safety tests all
+  exist. Documentation alone was explicitly insufficient; this is enforcement.
+
+  **Policy.** Six categories, each defined once in
+  `apps/api/src/maintenance/retention-policy.ts` with its table, growth driver,
+  retention column, window, supporting index, and predicate:
+  `security_events` (`created_at`, 180 d default / 30 d floor),
+  `expired_refresh_tokens` and `expired_sessions` (`expires_at`, 90 d / 7 d),
+  and `expired_email_verification_tokens`,
+  `expired_password_reset_tokens`, `expired_pending_registrations`
+  (`expires_at`, 30 d / 1 d). `invitations` and `api_keys` are DELIBERATELY
+  excluded — both schema files declare their rows durable lifecycle records —
+  as are `users`/`organizations`/`memberships`/`projects` (account and tenant
+  state; deletion is ORG-PR-043, not a maintenance sweep). Categories from the
+  generic retention checklist that this repository does not have (a separate
+  audit table, a persistent idempotency store, an email-event/outbox table,
+  job tables) are documented as non-existent rather than invented. Full
+  matrix: [../retention.md](../retention.md).
+
+  **Enforcement.** `apps/api/src/maintenance/retention-command.ts`, runnable as
+  `pnpm db:retention` in source mode and as `node dist/retention.mjs` from the
+  deployable artifact (`apps/api/scripts/build.mjs` bundles it into the same
+  image, so a maintenance job cannot drift from the deployment it maintains).
+  It loads configuration through the same `loadWorkspaceEnv()` + `getConfig()`
+  path as the API, so `<NAME>_FILE` mounted secrets and every production guard
+  apply unchanged. Deletion requires `--apply`; the default mode is `dry-run`
+  and no other flag combination reaches apply mode. Deletion is bounded — one
+  `LIMIT`-ed id-subselect batch per transaction, oldest rows first, stopping on
+  a short batch or the `--max-batches` cap — so a sweep never holds a long
+  destructive lock. A failing category is isolated, reported, and the process
+  still exits non-zero. Output is counts and table metadata only; PostgreSQL
+  `detail`/`hint` and Drizzle's bound-parameter block are stripped from failure
+  messages.
+
+  **Configuration.** Four typed values with HARD FLOORS
+  (`RETENTION_SECURITY_EVENT_DAYS` ≥ 30, `RETENTION_EXPIRED_AUTH_TOKEN_DAYS`
+  ≥ 1, `RETENTION_ENDED_SESSION_DAYS` ≥ 7, `RETENTION_CLEANUP_BATCH_SIZE`
+  1–50000). A zero window would put live rows in scope and a negative one would
+  make every row eligible; both fail process start. The default
+  `security_events` window is pinned above the largest plan
+  `audit_retention_days` (90) by a config test.
+
+  **Referential integrity.** `sessions` is the only retention target with
+  inbound foreign keys (`refresh_tokens.session_id`,
+  `security_events.session_id`), neither cascading. A session is deleted only
+  when EVERY row referencing it is itself past its own cutoff, each clause
+  using that referrer's own window. This makes the active-token guarantee
+  structural (a refresh token is only ever deleted by its own predicate, which
+  matters because refresh lifetimes are not capped by the session) and means
+  audit history is never mutated to make a delete succeed. Documented
+  consequence: because security events are retained longer than sessions
+  (180 d vs 90 d by default), sessions are effectively retained until their
+  events age out. See [../retention.md](../retention.md) §3.1.
+
+  **Schema.** Migration `0012` is additive and index-only —
+  `ix_refresh_tokens_expires_at`,
+  `ix_email_verification_tokens_expires_at`,
+  `ix_password_reset_tokens_expires_at`, and `ix_security_events_session_id` —
+  one index per cleanup predicate that lacked one. No speculative index was
+  added.
+
+  **Evidence.** `retention.integration.test.ts` (21 cases against live
+  PostgreSQL, deterministic ages against a fixed instant, no sleeps): dry-run
+  counts and mutates nothing; apply removes the expired half of paired
+  expired/active fixtures and preserves the active half including the account
+  itself; the `<` boundary (a row AT the cutoff survives, one millisecond older
+  does not); a second apply deletes nothing; batch size and batch cap are
+  honoured exactly and a truncated category resumes on rerun; batches take the
+  oldest rows first; `--category` touches only its own table; the session sweep
+  clears its refresh tokens even when run alone; a refresh token still inside
+  its window survives; **an eligible session whose refresh token is not
+  independently eligible is held back, and released once it ages out**; **an
+  eligible session still referenced by a retained security event is held back
+  with no failed category, and released once that event ages out**; **a
+  held-back session does not consume a batch slot or block other eligible
+  sessions**; an unreachable database fails every category and yields exit 1; a
+  serialized summary contains no email, token hash, user id, or password-hash
+  marker; every declared supporting index exists in `pg_indexes` **including
+  both session referrer indexes**; **the complete inbound-foreign-key set on
+  retention targets matches the reviewed list**; and a full run's result set
+  never names `invitations` or `api_keys`. Plus `retention-cli.test.ts` (17),
+  `retention-policy.test.ts` (9), and 7 config cases — **54 retention tests**.
+  The `--with-artifact` restore drill runs the PACKAGED command against a
+  freshly restored database and asserts it deletes nothing and leaves every
+  seeded entity in place.
+
+  **`audit_retention_days` reconciliation.** Verified from source rather than
+  inferred: it is **modeled metadata explicitly documented as non-enforced**,
+  in three independent places that all predate Sprint 25 —
+  `packages/contracts/src/plans.ts` (entitlement-key catalog: *"Modeled policy
+  value … returned, not enforced by a deletion job"*; and
+  `entitlementValuesSchema`: *"a modeled policy value only — Sprint 7 returns
+  it but does not run a retention/deletion job"*) and
+  `apps/api/src/modules/entitlements/entitlement.service.ts`
+  (`AuditEntitlements.retentionDays`: *"not enforced by a deletion job in
+  v1"*), with the same statement on the read surface in `docs/audit-log.md`. No
+  code path reads it to gate or remove data. Sprint 25 therefore adds
+  repository-level lifecycle cleanup with a GLOBAL window and leaves the
+  pre-existing non-enforced entitlement semantics unchanged — it neither
+  honours nor breaks a behavioral contract, because none existed. This does not
+  invalidate closure: this finding asked for retention/cleanup on unbounded
+  tables, which now exists and is tested. Per-plan enforcement is a separate,
+  unclaimed capability and stays in
+  [../known-limitations.md](../known-limitations.md).
+
+  **Documented residual (does NOT reopen this finding):** nothing SCHEDULES the
+  cleanup. There is no background runtime (**ORG-PR-016**, open), no metrics,
+  and no failure alerting. Per-plan `audit_retention_days` is still not
+  enforced — retention is global, not per organization. And retention bounds
+  growth; it is not erasure (**ORG-PR-043**, **ORG-PR-052**, open).
 
 <a id="org-pr-016"></a>
 ### ORG-PR-016 — No background-processing runtime (workers/scheduler)
@@ -723,6 +935,17 @@ Standards · Threats.
 - **Risk:** Enabler gap — ORG-PR-015 retention, ORG-PR-004 reset-token expiry cleanup, and email-retry reliability all depend on it.
 - **Remediation:** Add the simplest scheduler that fits the target (does not require a queue system at this scale).
 - **Dependencies:** ORG-PR-001. **Effort:** M. **Validation:** a scheduled job runs, is observable, and is idempotent. **Roadmap:** Phase 5. **Standards:** SSDF PO.3. **Threats:** T-AUDIT, T-PRIV.
+- **Status (Sprint 25, 2026-08-24): Open — the WORK a scheduler would run now
+  exists.** Retention cleanup (ORG-PR-015, closed) and logical backup
+  (ORG-PR-005) are real, tested, idempotent one-shot commands, runnable from
+  source and from the deployable artifact. What is still missing is exactly the
+  scheduler half of this finding: nothing invokes them periodically, nothing
+  emits metrics for a run, nothing alerts on a failed one, and there is no
+  concurrency control between two simultaneous invocations (the commands are
+  safe to run concurrently — batches are transactional and the predicates are
+  idempotent — but nothing prevents it). No worker or queue runtime was added;
+  see [../deployment-artifacts.md](../deployment-artifacts.md) ("Worker
+  decision").
 
 <a id="org-pr-017"></a>
 ### ORG-PR-017 — Admin can escalate self/others to Owner
@@ -882,6 +1105,17 @@ Standards · Threats.
 - **Risk:** A failed production migration has no rehearsed rollback; pairs with the missing restore capability (ORG-PR-005).
 - **Remediation:** Document the forward-only recovery model and rehearse it with the restore drill.
 - **Dependencies:** ORG-PR-005. **Effort:** S. **Validation:** a bad-migration recovery is rehearsed in staging. **Roadmap:** Phase 4 / Phase 5. **Standards:** SSDF PO.3. **Threats:** T-MIG.
+- **Progress (Sprint 25, 2026-08-24): Open — the recovery MECHANISM now
+  exists; the rehearsal does not.** The forward-only model is documented
+  alongside two working recovery paths: restore-from-backup and PITR to a time
+  just before the migration ([../backup-and-restore.md](../backup-and-restore.md),
+  [../pitr.md](../pitr.md)), plus a `pnpm db:backup -- --label pre-migration`
+  step in the artifact deployment guide. The restore drill proves a restored
+  database is compatible with the exact migration entrypoint the deploy uses
+  (re-running migrations against it must be a no-op). **Still open:** the
+  failed-migration runbook is explicitly labelled *unrehearsed guidance* — no
+  bad-migration recovery has been executed against a real environment, and
+  there is no staging environment to rehearse it in (ORG-PR-001, open).
 
 <a id="org-pr-029"></a>
 ### ORG-PR-029 — Quota ceilings are TOCTOU-racy under concurrency

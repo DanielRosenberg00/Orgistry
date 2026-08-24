@@ -1,0 +1,55 @@
+name: Data durability
+
+# Point-in-time-recovery drill (Sprint 25, ORG-PR-005).
+#
+# WHY THIS IS NOT IN CI
+# The PITR drill starts two PostgreSQL servers, enables WAL archiving, takes a
+# base backup, and then WAITS for archive recovery to reach a target time and
+# promote. That is roughly a minute of mostly-idle waiting per run and it
+# cannot be parallelised away. The logical backup/restore drill — which is what
+# a code change can realistically break — runs on every push and pull request
+# in .github/workflows/ci.yml; PITR validates the RECOVERY STRATEGY, which
+# changes only when the tooling or the PostgreSQL version changes.
+#
+# Run it on demand (Actions -> Data durability -> Run workflow) before any
+# change to tooling/db-pitr-drill.sh, tooling/lib/pg-tools.sh, the pinned
+# PostgreSQL image, or the migration baseline. The weekly schedule is the
+# freshness floor, not the only trigger. Procedure and evidence: docs/pitr.md.
+#
+# This workflow needs no secrets, publishes nothing, and contacts no real
+# database — every credential in the drill is a fake local value.
+on:
+  schedule:
+    # Mondays 05:40 UTC, ahead of the security scans.
+    - cron: '40 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: data-durability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pitr:
+    name: PITR drill (base backup + WAL archive + recovery target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The drill applies the real Orgistry migration baseline to the source
+      # database, so the recovered database is a real Orgistry database rather
+      # than an empty PostgreSQL instance.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: PITR drill
+        run: ./tooling/db-pitr-drill.sh

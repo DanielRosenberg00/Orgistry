@@ -17,8 +17,13 @@ concurrency:
 
 # Three jobs that mirror the local validation matrix (see docs/validation.md):
 #   validate    -> the offline gate, equivalent to `pnpm validate`
-#   integration -> the live-service gate, equivalent to `pnpm validate:integration`
-#   artifacts   -> the deployable-artifact gate, equivalent to `pnpm artifact:smoke`
+#   integration -> the live-service gate, equivalent to `pnpm validate:integration`,
+#                  plus the logical backup/restore drill (`pnpm drill:restore`)
+#   artifacts   -> the deployable-artifact gate, equivalent to `pnpm artifact:smoke`,
+#                  plus the restore drill against the packaged artifact
+#
+# The PITR drill is deliberately NOT here — see
+# .github/workflows/data-durability.yml.
 #
 # Action pinning policy (ORG-PR-019): every `uses:` is a full commit SHA with
 # the upstream version in a trailing comment. Dependabot proposes pin bumps;
@@ -133,6 +138,19 @@ jobs:
       - name: Integration tests
         run: pnpm validate:integration
 
+      # Sprint 25 (ORG-PR-005): the backup/restore drill. Self-contained —
+      # it creates its OWN throwaway PostgreSQL containers via Docker (the
+      # service containers above are untouched), takes a real backup with
+      # tooling/db-backup.sh, restores into a fresh database, and asserts the
+      # schema, migration metadata, and seeded Orgistry data survived. The
+      # packaged-artifact half of the drill runs in the `artifacts` job below,
+      # where the image already exists. PITR is NOT run here — it needs two
+      # servers, WAL archiving, and a recovery wait; it lives in
+      # .github/workflows/data-durability.yml (docs/pitr.md explains the
+      # tradeoff).
+      - name: Backup + restore drill (data layer)
+        run: ./tooling/db-restore-drill.sh
+
   # ---- Deployable-artifact gate: production images build + smoke-test ----
   #
   # Sprint 23 (ORG-PR-001): builds the production-shaped API and web images
@@ -151,3 +169,13 @@ jobs:
 
       - name: Build artifacts and run smoke tests
         run: ./tooling/artifact-smoke.sh
+
+      # Sprint 25 (ORG-PR-005/ORG-PR-015): the recovery contract that involves
+      # the artifact — restored PostgreSQL -> the artifact's migration
+      # entrypoint -> the packaged API -> /health, /ready -> an API-key
+      # authenticated read of restored data -> the packaged retention command.
+      # Reuses the image the smoke step just built, so this needs no workspace
+      # install: with --with-artifact the drill migrates through
+      # `dist/migrate.mjs` instead of `pnpm db:migrate`.
+      - name: Restore drill against the deployable artifact
+        run: ./tooling/db-restore-drill.sh --with-artifact

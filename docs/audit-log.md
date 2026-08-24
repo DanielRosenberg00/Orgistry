@@ -267,9 +267,12 @@ endpoint costs at most one indexed page, so the global per-IP limiter suffices.
 This one is different: the `targetId` filter compares against five JSONB
 metadata keys that carry no index (`audit.repo.ts`), so PostgreSQL walks the
 organization's slice of `security_events` in keyset order and filters row by
-row. A `targetId` that matches nothing reads the **entire** slice — and that
-table has no retention policy yet (ORG-PR-015), so the slice grows without
-bound.
+row. A `targetId` that matches nothing reads the **entire** slice. Sprint 25
+bounds that slice for the first time — `security_events` now has a retention
+policy and a runnable cleanup (`RETENTION_SECURITY_EVENT_DAYS`, default 180
+days — [retention.md](retention.md)) — but the bound is only as real as the
+operator's cadence, since nothing schedules the cleanup (ORG-PR-016, open).
+These buckets remain the load-bearing control.
 
 | Bucket | Key | Env var | Default |
 | --- | --- | --- | --- |
@@ -287,9 +290,10 @@ Window: `RATE_LIMIT_AUDIT_READ_WINDOW_SECONDS` (default 60).
 - A limiter-store outage follows `RATE_LIMIT_FAILURE_MODE`: production fails
   **closed** (generic 503), development/test fail open.
 
-The limiter bounds exploitation; it does not make the query cheap. The durable
-fix — an index over the target-id metadata keys, or retention on
-`security_events` — is tracked as residual under ORG-PR-055.
+The limiter bounds exploitation; it does not make the query cheap. Of the two
+durable fixes, retention on `security_events` now exists (Sprint 25) and caps
+how far back a scan can reach; an index over the target-id metadata keys still
+does not. The residual is tracked under ORG-PR-055.
 
 ### Retention metadata behavior
 
@@ -373,9 +377,14 @@ Sprint 10 deliberately does **not** implement:
 
 Also explicitly:
 
-- **Retention is display-only.** `auditRetentionDays` reflects plan policy; no
-  events are deleted and no age limit is enforced. The value can exceed or differ
-  from the age of returned data.
+- **Per-plan retention is display-only.** `auditRetentionDays` reflects plan
+  policy; nothing enforces it per organization, and the value can differ from
+  the age of returned data. A GLOBAL retention window does exist since Sprint
+  25 (`RETENTION_SECURITY_EVENT_DAYS`, default 180 days) and the retention
+  cleanup deletes `security_events` rows past it — but that window is
+  platform-wide, is enforced only when an operator runs the command, and is
+  deliberately set above every plan's advertised value so it cannot delete
+  history a plan promises to keep. See [retention.md](retention.md).
 - **Security events are excluded** from the default stream per the chosen v1
   boundary; only organization action events are returned. The `category` field is
   reserved (`action` only in v1) so a future, safely-attributed security stream
@@ -389,8 +398,8 @@ Also explicitly:
   nothing scans the organization's whole slice of `security_events`. Sprint 22
   added per-user and per-organization rate limits so this cannot be looped, but
   a single legitimate call on a large tenant is still expensive. Fixing the
-  cost itself needs an index over those keys or retention under ORG-PR-015 —
-  neither is implemented.
+  cost itself needs an index over those keys — still not implemented — or
+  retention on `security_events`, which Sprint 25 delivered (ORG-PR-015).
 
 ### Metadata sanitization
 

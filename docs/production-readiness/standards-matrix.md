@@ -31,7 +31,8 @@ are drawn only from: **Satisfied**, **Partially satisfied**, **Not satisfied**,
 | Validation & injection | Partially satisfied | Zod on all inputs; parameterized queries | drizzle advisory in range | P2 | ORG-PR-018 |
 | Cryptography & secret management | Partially satisfied | jose HS256 allowlist; hash-only secrets; production secret guards (S15); runtime env/file secret sources validated before the guard and graceful access-token key rotation (S24) | no secrets manager, no least-privilege secret access, no automated/rehearsed rotation, no `kid`/versioned keys | P1 | ORG-PR-003 (closed), 006, 049 |
 | Logging & monitoring | Partially satisfied (S19) | request IDs (inbound id sanitized, S19), sanitized event metadata, centralized pino redaction backstop (S19) | no metrics/alerts | P2 | ORG-PR-007; 033 closed (S19) |
-| Data protection & privacy | Not satisfied | soft-delete only | no export/delete; PII retained | P2/P3 | ORG-PR-025, 043 |
+| Data protection & privacy | Partially satisfied (S25) | soft-delete; a bounded, enforced retention window for `security_events` and the account-lifecycle token tables (policy + tested cleanup, ORG-PR-015 closed) | no export/delete; retention is growth control, not erasure or per-subject deletion; cleanup is operator-invoked (no scheduler) | P2/P3 | ORG-PR-025, 043, 016 |
+| Resilience & recovery (ASVS V14 / SSDF PO.3 adjacent) | Partially satisfied (S25) | repeatable logical backup with integrity checksum and provenance; restore drill into a fresh database reaching the packaged artifact; **PITR VERIFIED**; CI-gated; documented runbooks | nothing schedules a backup; no encrypted remote backup storage; no continuous WAL archiving on a long-lived database; no provider-managed PITR; no measured RPO/RTO | P1 | ORG-PR-005, 028 |
 | Business logic / anti-automation | Partially satisfied (S19) | per-surface auth limits; global per-trusted-IP limit + per-actor mutation buckets (S19); sensitive buckets fail closed in production (S19) | quota TOCTOU; limiter-outage alerting pending ORG-PR-007 | P2/P3 | ORG-PR-029; 012/032 closed, 009 materially advanced (S19) |
 | API & configuration | Partially satisfied (S19) | uniform envelope; safe error handler; prod config guard (S15); security headers + typed proxy trust (S19) | no DB/pool/statement timeouts | P2 | ORG-PR-021; 003 closed (S15), 010/011 closed (S19) |
 
@@ -51,14 +52,14 @@ not at the individual task identifier level.
 
 | Business function / practice | Maturity (0–3, indicative) | Evidence | Gap |
 | --- | --- | --- | --- |
-| Governance — Policy & Compliance | ~1 | known-limitations, honest scope | no privacy/retention policy (legal) — ORG-PR-025/043 |
+| Governance — Policy & Compliance | ~1 | known-limitations, honest scope; a documented, enforced ENGINEERING retention policy (S25) | no privacy/LEGAL retention policy or review — ORG-PR-025/043 |
 | Design — Threat Assessment | ~1→2 | this threat model (new) | no prior model; keep current |
 | Design — Security Architecture | ~2 | permission/entitlement/quota separation, tenant model | RLS absent (defense-in-depth, deferred) |
 | Implementation — Secure Build | ~1→2 | reproducible via lockfile; CI-built non-root container artifacts + smoke gate (S23) | no release pipeline/provenance — ORG-PR-001 |
 | Implementation — Secure Deployment | ~0→1 | production-shaped artifacts + smoke gate (S23); runtime secret sources + manual rotation runbooks (S24) | no deploy automation, no secrets manager, no automated rotation — ORG-PR-001/006 |
 | Verification — Security Testing | ~2 | strong functional/negative tests; SAST (CodeQL) running remotely with triaged findings (S22) | no DAST/E2E/pentest — ORG-PR-026 |
-| Operations — Incident Mgmt | ~0 | none | no incident process — ORG-PR-008 |
-| Operations — Environment Mgmt | ~1 | local runbook | no prod runbook/backup — ORG-PR-005/027 |
+| Operations — Incident Mgmt | ~0→1 | data-loss and PITR recovery procedures with executed evidence (S25) | no incident process, on-call, severity model, or alerting — ORG-PR-008 |
+| Operations — Environment Mgmt | ~1 | local runbook; backup/restore/PITR and retention runbooks with executed evidence (S25) | no prod runbook; nothing SCHEDULES backup or retention; no remote/encrypted backup storage — ORG-PR-005/016/027 |
 
 ## SLSA (build/provenance)
 

@@ -31,6 +31,11 @@ There are two tiers:
 | `pnpm scan:secrets` | scan | Gitleaks full git-history secret scan (`brew install gitleaks`) — fails on any suspected live secret; run before pushing. |
 | `pnpm artifact:build` | artifact (Docker) | Production API + web images build from their Dockerfiles. |
 | **`pnpm artifact:smoke`** | **artifact (Docker)** | **Builds the production artifacts and runs the full smoke gate against the production-like compose reference (see [Artifact validation](#artifact-validation)).** |
+| `pnpm db:backup` | durability (Docker) | Takes a `pg_dump -Fc` logical backup plus a SHA-256 checksum and a provenance sidecar. |
+| **`pnpm drill:restore`** | **durability (Docker)** | **Backup → checksum verify → restore into a FRESH database → schema/migration/data assertions → migration no-op. Add `-- --with-artifact` to also drive the packaged API artifact (see [Data-durability validation](#data-durability-validation)).** |
+| `pnpm drill:pitr` | durability (Docker + pnpm) | Point-in-time recovery: base backup + verified WAL archiving + recovery to a target time, proving pre-target state survives and post-target damage does not. |
+| `pnpm db:retention -- --dry-run` | durability | Reports retention-eligible rows per category. Mutates nothing. |
+| `pnpm db:retention -- --apply` | durability | Deletes retention-eligible rows in bounded batches. **Destructive** — take a backup first. |
 
 ## Offline validation: `pnpm validate`
 
@@ -215,6 +220,48 @@ Requirements: Docker with compose v2 and `curl`; no workspace install, **no
 real secrets and no email-provider credentials**. Ports 3000/8080/3010 must be
 free (stop `pnpm dev` first).
 
+## Data-durability validation
+
+Sprint 25 (ORG-PR-005, ORG-PR-015). Three drills, all self-contained: they
+create their own throwaway PostgreSQL containers from the pinned image, so they
+never touch a developer's database or the CI service containers, and they
+destroy every container, volume, network, and backup file on exit.
+
+**`pnpm drill:restore`** — `tooling/db-restore-drill.sh`. Migrates a throwaway
+source, seeds deterministic Orgistry data, takes a backup with the REAL
+`tooling/db-backup.sh`, verifies the artifact's checksum, asserts the target is
+empty before restoring, proves that BOTH a truncated copy and a MISSING path
+are rejected by `pg_restore` without leaving a partially restored target,
+restores with `--exit-on-error`, then asserts every table, the Drizzle
+migration ledger, each seeded entity, an owner→organization→plan→project join,
+and byte-identical API-key hash metadata. Finally it re-runs migrations against
+the restored database and requires the ledger to be unchanged.
+
+**`pnpm drill:restore -- --with-artifact`** — additionally boots
+`orgistry-api:production-like` against the restored database (build it first
+with `pnpm artifact:build`), checks `/health` and `/ready`, reads the restored
+projects back through the API-key-authenticated
+`GET /v1/external/projects`, asserts an unknown key still returns 401 and no
+drill secret reaches the logs, and runs the packaged retention command in both
+modes. In this mode migrations run through the artifact's own
+`dist/migrate.mjs`, so no workspace install is needed.
+
+**`pnpm drill:pitr`** — `tooling/db-pitr-drill.sh`. Twelve checks from
+`wal_level`/`archive_mode` through verified WAL archival, `pg_basebackup`,
+pre-target writes that exist only in archived WAL, a recorded recovery target,
+destructive post-target writes, recovery in an independent server, proof that
+archived WAL was actually consumed, and the target boundary in both directions.
+Requires a workspace install (it applies the real migration baseline). Full
+detail and recorded evidence: [pitr.md](pitr.md).
+
+Retention behavior itself is covered by
+`apps/api/src/maintenance/retention.integration.test.ts`, which runs as part of
+`pnpm validate:integration`. See [retention.md](retention.md).
+
+Requirements: Docker; `curl` for `--with-artifact`; `pnpm` for the non-artifact
+restore mode and for the PITR drill. No real secrets and no real database are
+involved.
+
 ### Loopback test fixtures: dial the address you bound
 
 A second Linux-only failure (PR #33, CI run 32657860558) came from the same
@@ -288,14 +335,31 @@ permissions, and nothing publishes or deploys — see
 - **Integration (PostgreSQL + Redis)** — spins up `postgres:16.14-alpine` and
   `redis:7.4.10-alpine` service containers (tag+digest pinned, matching
   `infra/docker-compose.yml`), creates the test database, applies the
-  migration baseline, and runs `pnpm validate:integration`.
+  migration baseline, runs `pnpm validate:integration`, and then runs the
+  data-layer backup/restore drill (`./tooling/db-restore-drill.sh`).
 - **Artifacts (build + smoke)** — runs `tooling/artifact-smoke.sh`: builds the
   production API and web images and validates them against the
   production-like compose reference (see
-  [Artifact validation](#artifact-validation)). Needs no production secrets;
-  publishes and pushes nothing. Equivalent to `pnpm artifact:smoke`.
+  [Artifact validation](#artifact-validation)), then runs
+  `./tooling/db-restore-drill.sh --with-artifact` against the image it just
+  built. Needs no production secrets; publishes and pushes nothing.
 
 Mailpit is intentionally omitted from CI (see above).
+
+`.github/workflows/data-durability.yml` (manual + weekly) runs the PITR drill.
+It is deliberately outside the pull-request path: the drill starts two
+PostgreSQL servers and waits on archive recovery, and it validates the recovery
+STRATEGY, which changes only when the tooling, the pinned PostgreSQL image, or
+the migration baseline changes. Run it on demand before merging any such
+change. Rationale in full: [pitr.md](pitr.md).
+
+**Operator follow-up (not repository-controlled):** the Sprint 25 steps run
+inside the existing `integration` and `artifacts` jobs, so they are covered by
+whatever required-check configuration those jobs already have. The new
+`Data durability` workflow is intentionally NOT a required check — it is
+manual/scheduled. If a maintainer later wants it enforced, that is a GitHub
+branch-protection change made in repository settings; nothing here mutates
+remote configuration.
 
 `.github/workflows/security.yml` (push to main, pull requests, weekly
 schedule, manual dispatch) runs the scanners:

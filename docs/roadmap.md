@@ -55,8 +55,17 @@ real body of work with security and correctness implications.
 - **Rate-limit fail-closed option.** Redis-backed limiters fail open by design.
   *Would add:* a configurable fail-closed mode for sensitive surfaces. *Done
   when:* operators can choose availability-vs-protection per surface.
-- **Backups and disaster recovery.** No backup/restore story. *Would add:*
-  documented backup cadence and a tested restore runbook.
+- **Backups and disaster recovery.** ✅ *Repository half shipped in Sprint 25*:
+  a repeatable logical backup (`pnpm db:backup`), a restore drill that recovers
+  into a fresh database and drives the packaged API artifact against it
+  (`pnpm drill:restore`), a **verified** PostgreSQL PITR drill
+  (`pnpm drill:pitr`), and command-level runbooks — see
+  [backup & restore](backup-and-restore.md) and [PITR](pitr.md). *Still
+  missing (deployment-dependent):* a backup schedule, encrypted remote backup
+  storage, continuous WAL archiving on a long-lived database,
+  provider-managed PITR, and measured RPO/RTO. *Done when:* backups run
+  automatically against a real deployment, land in encrypted remote storage,
+  and a restore to a target time is rehearsed there.
 
 ### Observability
 
@@ -74,9 +83,15 @@ real body of work with security and correctness implications.
   only. *Would add:* RLS policies as defense-in-depth behind the existing
   app-layer scoping. *Done when:* a missing app-layer scope still cannot cross a
   tenant boundary.
-- **Audit retention enforcement.** `audit_retention_days` is display-only. *Would
-  add:* a retention/cleanup mechanism (needs background processing, below). *Done
-  when:* events past retention are actually purged per plan.
+- **Audit retention enforcement.** ✅ *Global retention shipped in Sprint 25*:
+  `security_events` rows older than `RETENTION_SECURITY_EVENT_DAYS` (default
+  180) are deleted by the runnable, tested retention cleanup
+  (`pnpm db:retention` — see [retention](retention.md)). *Still missing:*
+  PER-PLAN enforcement — `audit_retention_days` (Free 0, Pro 30, Business 90)
+  remains a display-only modeled value, and retention is not scoped per
+  organization; scheduling the cleanup also needs background processing
+  (below). *Done when:* events past a plan's window are purged for that
+  organization, on a schedule.
 
 ---
 
@@ -137,10 +152,12 @@ and a natural extension of the existing auth foundation.
 
 ### Background processing
 
-- **Workers / queues / scheduler** — the enabler for expiry sweeps, audit
-  retention deletion, email retries, and other deferred work. Today, expiry is
-  derived on read and nothing reclaims storage; several items above depend on this
-  capability existing.
+- **Workers / queues / scheduler** — the enabler for periodic maintenance and
+  email retries. Since Sprint 25 the maintenance WORK exists as one-shot
+  commands (`pnpm db:retention`, `pnpm db:backup`, and their artifact
+  entrypoints); what is missing is anything that invokes them on a schedule,
+  plus metrics and failure alerting for such runs. Token expiry itself is
+  still derived on read.
 
 ### E2E testing
 

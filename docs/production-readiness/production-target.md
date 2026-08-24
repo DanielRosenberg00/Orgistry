@@ -22,6 +22,11 @@ would change under a different target.
   (`packages/db/src/schema/plans.ts`).
 - **Local-only email + no background processing** (`docs/known-limitations.md`).
 - **No deployment, backup, or observability tooling** (`docs/roadmap.md`).
+  *(Sprint 25 update: backup, restore, PITR, and retention TOOLING now exist
+  and are tested — see [../backup-and-restore.md](../backup-and-restore.md),
+  [../pitr.md](../pitr.md), [../retention.md](../retention.md). Nothing
+  schedules or stores them, and deployment and observability tooling remain
+  absent.)*
 
 ## Explicit assumptions
 
@@ -89,7 +94,7 @@ established requirement.
 | **Availability** | ~99.5% (single region, rolling deploys) | A public multi-tenant SaaS would demand ≥99.9% + multi-AZ, changing infra materially. |
 | **Latency** | p95 < 300 ms for API reads at A2 scale | Requires the audit-read index (ORG-PR-014) and pool/statement timeouts (ORG-PR-021). |
 | **RPO** | ≤ 1 hour (PITR) before production data; daily snapshot acceptable for controlled evaluation | Larger/regulated targets push RPO toward minutes + cross-region replicas. |
-| **RTO** | ≤ 4 hours, via rehearsed restore | Must be rehearsed (ORG-PR-005); larger target → automated failover. |
+| **RTO** | ≤ 4 hours, via rehearsed restore | Restore and PITR procedures are rehearsed against SYNTHETIC data (S25) and pass; not yet rehearsed against a real environment or production-sized data, and no recovery time has been measured (ORG-PR-005). Larger target → automated failover. |
 | **Email delivery** | Authenticated TLS SMTP/API provider with verified domain (SPF/DKIM/DMARC published) | Blocking for invitations/recovery (ORG-PR-002). The adapter and credential plumbing exist; no provider send, inbox receipt, or domain authentication has ever been validated. |
 | **Billing** | **None** (fixed demo plans) | Out of scope; the entitlement/quota seam is designed to accept billing later without reworking authorization. |
 | **Operator model** | Small team, business-hours on-call, runbook-driven | Larger target → dedicated on-call + SLOs/error budgets. |
@@ -158,8 +163,16 @@ decisions via DG-1/DG-5.
 - **DG-5 — Target RPO/RTO.** *RATIFIED (Project Owner, 2026-07-18):* RPO ≤ 1
   hour with PITR available before production data is accepted (daily
   snapshots only for evaluation-only environments with no production data);
-  RTO ≤ 4 hours via a documented, rehearsed restore. Implementation is
-  Sprint 22/23 work (ORG-PR-005 stays open until then).
+  RTO ≤ 4 hours via a documented, rehearsed restore.
+  *Status (Sprint 25, 2026-08-24):* the **capability** DG-5 requires now
+  exists and is verified — PITR to an arbitrary target time
+  ([../pitr.md](../pitr.md)) and a documented, executed restore procedure
+  ([../backup-and-restore.md](../backup-and-restore.md)). The **objectives**
+  are not met and cannot be until Phase 4: RPO ≤ 1 h needs continuous WAL
+  archiving on a long-lived database (none exists), and RTO ≤ 4 h is an
+  unmeasured claim — the drills recover fixture-sized databases in seconds,
+  which says nothing about production volume. ORG-PR-005 stays open on exactly
+  this gap.
 
 ## What this target explicitly is not
 

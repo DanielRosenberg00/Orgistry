@@ -58,6 +58,12 @@ User → Organization → Membership → Role → Permission → Entitlement →
   with re-verification of the new address.
 - **Audit log** — a permission- and entitlement-gated, filterable read over
   sanitized organization action events.
+- **Data durability & lifecycle** — a repeatable PostgreSQL logical backup with
+  checksum and provenance metadata, a restore drill that recovers into a fresh
+  database and drives the packaged API artifact against it, a **verified**
+  PostgreSQL PITR drill (base backup + archived WAL + recovery target time),
+  and a one-shot, dry-run-by-default retention cleanup with index-backed,
+  batched, active-row-preserving deletion.
 - **Web demo** — a thin React admin UI that consumes these APIs (it holds no
   authority of its own).
 
@@ -136,9 +142,13 @@ security scanners — dependency audit + secret scan
 ([codeql.yml](.github/workflows/codeql.yml)) — with local equivalents
 `pnpm scan:deps` / `pnpm scan:secrets`. All three are **required checks** on
 `main` via a repository ruleset, so a scanner failure blocks the merge rather
-than merely showing up red. Full detail, the CI security policy (SHA-pinned
-actions, least-privilege permissions), the CodeQL alert policy, and failure
-interpretation: [docs/validation.md](docs/validation.md).
+than merely showing up red. CI also runs the Sprint 25 backup/restore drill —
+in the integration job at the data layer, and in the artifacts job against the
+built API image; the heavier PITR drill runs manually and weekly in
+[data-durability.yml](.github/workflows/data-durability.yml). Full detail, the
+CI security policy (SHA-pinned actions, least-privilege permissions), the
+CodeQL alert policy, and failure interpretation:
+[docs/validation.md](docs/validation.md).
 
 | Command | Purpose |
 | --- | --- |
@@ -152,6 +162,10 @@ interpretation: [docs/validation.md](docs/validation.md).
 | `pnpm infra:up` / `:down` / `:reset` | Start / stop / wipe local infrastructure |
 | `pnpm db:migrate` / `pnpm db:generate` / `pnpm db:reset:test` | Apply / regenerate / reset DB |
 | `pnpm demo:seed` | Populate a presentable local demo state via the public API |
+| `pnpm db:backup` | Take a PostgreSQL logical backup (`pg_dump -Fc` + checksum + metadata) |
+| `pnpm drill:restore` | Backup → restore → verify drill (`-- --with-artifact` also drives the packaged API) |
+| `pnpm drill:pitr` | Point-in-time-recovery drill (base backup + WAL archive + recovery target) |
+| `pnpm db:retention` | Retention cleanup (`-- --dry-run` by default; `-- --apply` deletes) |
 
 ## Web demo
 
@@ -206,8 +220,14 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   optional `JWT_PREVIOUS_SECRET` verification window, SMTP-failure credential
   redaction proofs, and manual rotation/incident runbooks (see
   [runtime secrets](docs/runtime-secrets.md) and
-  [rotation runbook](docs/rotation-runbook.md)) — with external email delivery
-  still unvalidated; the project remains not ready for staging or production.
+  [rotation runbook](docs/rotation-runbook.md)); Sprint 25 shipped the
+  data-durability and lifecycle foundation — a repeatable logical backup, a
+  tested restore drill that reaches the packaged API artifact, a **verified**
+  PostgreSQL PITR drill, and a runnable, tested retention cleanup (see
+  [backup & restore](docs/backup-and-restore.md), [PITR](docs/pitr.md), and
+  [retention](docs/retention.md)) — with backup scheduling, encrypted remote
+  backup storage, provider-managed PITR, and external email delivery all still
+  unvalidated; the project remains not ready for staging or production.
 
 **Authoritative (current):**
 
@@ -226,6 +246,13 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   de-enumeration posture.
 - [API surface index](docs/api-surface.md) — every route by domain, with auth,
   permission, and entitlement.
+- [Backup & restore](docs/backup-and-restore.md) — the persistent-data
+  inventory, the logical backup and its security rules, and the restore drill
+  that proves recoverability end to end.
+- [Point-in-time recovery](docs/pitr.md) — the PITR strategy, the drill, the
+  recorded evidence, and the boundary between that and production PITR.
+- [Data retention](docs/retention.md) — the lifecycle policy matrix, the
+  runnable cleanup command, and its safety invariants.
 - [Validation matrix](docs/validation.md) — what to run, what it proves, how to
   read failures.
 - [Deployable artifacts](docs/deployment-artifacts.md) — the production-shaped
@@ -283,11 +310,14 @@ Orgistry is **not production-certified**. Out of scope by design: billing
 delivery (a production-shaped SMTP adapter exists but has never sent through a
 real provider; verification is advisory), workers/
 queues, PostgreSQL RLS, custom roles, resource-level/ABAC permissions, audit
-retention enforcement / export / SIEM, write-enabled external API, API key
+export / SIEM, write-enabled external API, API key
 rotation, full browser E2E tests, and deployment automation to a real
 environment (production-shaped container artifacts and a CI smoke gate exist
 since Sprint 23, but there is no staging/production environment, registry
-publishing, or deploy pipeline). The UI is
+publishing, or deploy pipeline). Backup, restore, PITR, and retention cleanup
+are implemented and tested since Sprint 25, but nothing SCHEDULES them: there
+is no backup schedule, no encrypted remote backup storage, no continuous WAL
+archiving on any long-lived database, and no measured RPO/RTO. The UI is
 demo-quality, quotas accept small race windows, and non-sensitive rate limiting
 fails open on a Redis outage (sensitive endpoints fail closed in production;
 there is no alerting on that state yet). The complete, honest list is

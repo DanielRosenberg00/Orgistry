@@ -59,12 +59,30 @@ explicit lifecycle state.
 | Table | Purpose | Notable invariants |
 | --- | --- | --- |
 | `users` | Accounts | unique index on `normalized_email`; `password_hash` only |
-| `sessions` | Login sessions (access-token anchor) | indexed by `user_id`, `expires_at` |
-| `refresh_tokens` | Refresh rotation + reuse detection (Sprint 3) | unique `token_hash`; `family_id` lineage; `used_at`/`replacement_token_id`/`revoked_*` |
-| `email_verification_tokens` | Email-verification lifecycle (Sprint 16) | unique `token_hash`; `used_at`/`invalidated_at` lifecycle (migration `0008`) |
-| `password_reset_tokens` | Password recovery (Sprint 17) | unique `token_hash`; same `used_at`/`invalidated_at` lifecycle (migration `0009`) |
-| `pending_registrations` | Staged verification-first registrations (Sprint 18) | `preg_` ids; unique `token_hash`; partial unique `uq_pending_registrations_usable_email` on `normalized_email WHERE used_at IS NULL AND invalidated_at IS NULL` (one usable generation per email); `expires_at` index for a future sweep (migration `0010_tiresome_thunderbird.sql`) |
-| `security_events` | Durable auth/security records | sanitized `metadata`; indexed by `event_type`, `created_at` |
+| `sessions` | Login sessions (access-token anchor) | indexed by `user_id`, `expires_at` (the latter backs the retention sweep) |
+| `refresh_tokens` | Refresh rotation + reuse detection (Sprint 3) | unique `token_hash`; `family_id` lineage; `used_at`/`replacement_token_id`/`revoked_*`; `expires_at` index for the retention sweep (migration `0012`) |
+| `email_verification_tokens` | Email-verification lifecycle (Sprint 16) | unique `token_hash`; `used_at`/`invalidated_at` lifecycle (migration `0008`); `expires_at` index (migration `0012`) |
+| `password_reset_tokens` | Password recovery (Sprint 17) | unique `token_hash`; same `used_at`/`invalidated_at` lifecycle (migration `0009`); `expires_at` index (migration `0012`) |
+| `pending_registrations` | Staged verification-first registrations (Sprint 18) | `preg_` ids; unique `token_hash`; partial unique `uq_pending_registrations_usable_email` on `normalized_email WHERE used_at IS NULL AND invalidated_at IS NULL` (one usable generation per email); `expires_at` index backing the retention sweep (migration `0010_tiresome_thunderbird.sql`) |
+| `security_events` | Durable auth/security records | sanitized `metadata`; indexed by `event_type`, `created_at` (the latter backs the retention sweep), `session_id` (backs the ended-session referrer check), and `(organization_id, created_at, id)` |
+
+**Retention indexes (Sprint 25, ORG-PR-015).** Migration `0012` is additive and
+index-only: `ix_refresh_tokens_expires_at`,
+`ix_email_verification_tokens_expires_at`,
+`ix_password_reset_tokens_expires_at`, and `ix_security_events_session_id`.
+Each exists for exactly one reason — it is the supporting index for a cleanup
+predicate. The first three back an `expires_at < cutoff` sweep; the fourth
+backs the ended-session category's referrer check, because `sessions` is the
+only retention target with inbound foreign keys (`refresh_tokens.session_id`
+and `security_events.session_id`, neither cascading) and a session may only be
+deleted once every row referencing it is itself past its own cutoff. The
+relationship `cleanup predicate → supporting index` is declared per category in
+`apps/api/src/maintenance/retention-policy.ts` and tabulated in
+[retention.md](retention.md); integration tests assert every declared index
+exists in `pg_indexes` **and** that the inbound-foreign-key set on retention
+targets still matches the reviewed list. No speculative index was added:
+`sessions`, `pending_registrations`, and `security_events.created_at` already
+had theirs.
 
 `refresh_tokens` is now exercised by the Sprint 3 session lifecycle (rotation,
 reuse detection, family/session revocation) — **no migration was needed**, the
@@ -73,8 +91,9 @@ exercised by the Sprint 16 verification lifecycle. `pending_registrations`
 holds everything needed to create an account at registration completion —
 email, normalized email, Argon2id `password_hash`, display name, the SHA-256
 completion-token hash, and an optional stable invitation id (never the
-invitation token or its hash); no cleanup scheduler exists yet, so
-consumed/expired rows accumulate. See
+invitation token or its hash). Consumed and expired rows are reclaimed by the
+Sprint 25 retention cleanup on `expires_at`; no SCHEDULER exists, so the sweep
+runs only when an operator invokes it ([retention.md](retention.md)). See
 [`auth-foundation.md`](auth-foundation.md) and
 [`session-lifecycle.md`](session-lifecycle.md).
 

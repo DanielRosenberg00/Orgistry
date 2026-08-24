@@ -52,6 +52,15 @@ export type TrustProxySetting = false | number | readonly string[];
 export const TRUST_PROXY_MAX_HOPS = 16;
 
 /**
+ * Upper bound for one retention cleanup batch (Sprint 25, ORG-PR-015). A
+ * batch is deleted inside a single transaction, so the ceiling exists to keep
+ * that transaction — and the locks it holds — bounded. The retention command
+ * applies the same bound to its `--batch-size` override, so an operator
+ * cannot widen it from the command line.
+ */
+export const RETENTION_MAX_BATCH_SIZE = 50_000;
+
+/**
  * True when `entry` is a real IP address or a well-formed CIDR block:
  * `node:net`'s `isIP` validates the address part (octet ranges, IPv6 group
  * syntax — no shape heuristics), and the optional prefix must be an
@@ -594,6 +603,64 @@ const rawEnvSchema = z.object({
     .int()
     .nonnegative()
     .default(60),
+
+  // ----- Data retention (Sprint 25, ORG-PR-015) -----
+  //
+  // Each window is the MINIMUM age a row must reach before the retention
+  // cleanup (`apps/api/src/maintenance/`) may delete it. Windows are
+  // expressed in whole days and are ORGISTRY ENGINEERING DEFAULTS, not
+  // regulatory requirements — see docs/retention.md for the policy matrix.
+  //
+  // Every bound below is a hard floor enforced here, so a typo, an unset
+  // variable coerced to 0, or a negative value can never widen the deletion
+  // predicate: a rejected value fails process start instead of silently
+  // authorizing a destructive sweep. There is no "disable" switch and none is
+  // needed — cleanup is a one-shot operator-invoked command (no scheduler
+  // exists; ORG-PR-016 is open), so "disabled" simply means "not invoked".
+
+  // Age floor for `security_events` deletion, measured on `created_at`. This
+  // is the platform's audit/security history, so it is the longest window.
+  // The 30-day floor keeps the table above the largest per-plan
+  // `audit_retention_days` value in the seeded catalog (90 days) only at the
+  // default; an operator who lowers this below a plan's advertised retention
+  // must reconcile the two deliberately (docs/retention.md).
+  RETENTION_SECURITY_EVENT_DAYS: z.coerce
+    .number()
+    .int()
+    .min(30, 'RETENTION_SECURITY_EVENT_DAYS must be at least 30 days')
+    .default(180),
+
+  // Age floor for EXPIRED account-lifecycle token rows (email verification,
+  // password reset, pending registrations), measured on `expires_at`. Only
+  // rows already past their expiry by this margin are eligible; a usable
+  // token is never in scope.
+  RETENTION_EXPIRED_AUTH_TOKEN_DAYS: z.coerce
+    .number()
+    .int()
+    .min(1, 'RETENTION_EXPIRED_AUTH_TOKEN_DAYS must be at least 1 day')
+    .default(30),
+
+  // Age floor for ENDED session state (sessions and their refresh-token
+  // family records), measured on `expires_at`. An expired session cannot be
+  // refreshed or reused, so this window governs only how long the forensic
+  // record of a finished session is kept.
+  RETENTION_ENDED_SESSION_DAYS: z.coerce
+    .number()
+    .int()
+    .min(7, 'RETENTION_ENDED_SESSION_DAYS must be at least 7 days')
+    .default(90),
+
+  // Rows deleted per statement per category. Cleanup runs one bounded batch
+  // per transaction so a sweep never holds a long destructive lock.
+  RETENTION_CLEANUP_BATCH_SIZE: z.coerce
+    .number()
+    .int()
+    .min(1, 'RETENTION_CLEANUP_BATCH_SIZE must be at least 1')
+    .max(
+      RETENTION_MAX_BATCH_SIZE,
+      `RETENTION_CLEANUP_BATCH_SIZE must not exceed ${RETENTION_MAX_BATCH_SIZE}`,
+    )
+    .default(1_000),
 });
 
 /**

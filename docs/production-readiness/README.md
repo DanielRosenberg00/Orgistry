@@ -273,6 +273,47 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > (ORG-PR-005, with retention groundwork under ORG-PR-015). ORG-PR-002's
 > external-email validation and ORG-PR-006's residual secrets-management
 > capability remain outstanding workstreams alongside it, not inside it.
+>
+> **Sprint 25 status (2026-08-24) — backup, PITR, restore, and retention
+> foundation. Implementation complete in its repository scope; remote CI has
+> not yet run for this change set.** Implemented: a persistent-data inventory
+> establishing PostgreSQL as the sole durability boundary (Redis holds only
+> TTL-bounded rate-limit counters; no object storage or upload path exists);
+> a repeatable logical backup (`tooling/db-backup.sh`) producing a
+> `pg_dump -Fc` artifact plus a SHA-256 sidecar and provenance metadata, with
+> every PostgreSQL client tool run from the repository's own pinned image so
+> client and server can never drift; a restore drill
+> (`tooling/db-restore-drill.sh`) that exercises the real backup path,
+> verifies the checksum, proves a truncated artifact is rejected, restores
+> into a genuinely empty target, asserts schema/migration-ledger/entity/
+> relational/API-key-hash survival, and requires re-running migrations against
+> the restored database to be a no-op; an `--with-artifact` mode completing
+> the recovery contract through the packaged API image to `/health`, `/ready`,
+> and an **API-key-authenticated read of restored data**; and — the load-bearing
+> result — **PITR VERIFIED** by `tooling/db-pitr-drill.sh`: base backup plus
+> demonstrably-working WAL archiving plus `recovery_target_time`, with
+> pre-target rows that exist only in archived WAL recovered, post-target
+> `DELETE`/`DROP TABLE` damage undone, archived-WAL consumption asserted from
+> the recovery log, and the schema left intact. Retention (ORG-PR-015) shipped
+> as a six-category policy catalog, a dry-run-by-default one-shot cleanup
+> command runnable from source AND from the deployable artifact, hard-floored
+> typed configuration, four additive cleanup indexes (migration `0012`), and
+> 54 retention tests including 21 against live PostgreSQL (plus 7 drill-fixture
+> drift tests). `invitations` and `api_keys`
+> are deliberately excluded from cleanup on their own schema contracts.
+> **ORG-PR-015 is CLOSED** (policy + runnable enforcement + tested safety;
+> scheduling remains under ORG-PR-016). **ORG-PR-005 remains OPEN — materially
+> advanced**: the repository-controlled half is complete and verified, but
+> nothing schedules a backup, no backup is stored remotely or encrypted, no
+> long-lived database archives WAL, no provider-managed PITR exists, and no
+> RPO/RTO has been measured — all dependent on ORG-PR-001. ORG-PR-001,
+> ORG-PR-002, and ORG-PR-006 were explicitly out of scope and are untouched.
+> See [sprint-25-artifact-package.md](sprint-25-artifact-package.md),
+> [../backup-and-restore.md](../backup-and-restore.md),
+> [../pitr.md](../pitr.md), and [../retention.md](../retention.md).
+> Four P1 blockers remain open (ORG-PR-001/002/005/006); the repository is
+> still **not ready for staging or production** — the state remains
+> **C — Ready to continue production implementation**.
 
 ## Audit context
 
@@ -312,6 +353,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-22-codeql-alert-inventory.md](sprint-22-codeql-alert-inventory.md) | Per-alert triage of all 41 baseline CodeQL High alerts: evidence, root-cause groups, classifications, dispositions. |
 | [sprint-23-artifact-package.md](sprint-23-artifact-package.md) | The Sprint 23 closing artifact (deployable API/web artifacts, migration entrypoint, smoke gate, image policy; ORG-PR-042 closure). |
 | [sprint-24-artifact-package.md](sprint-24-artifact-package.md) | The official Sprint 24 closing artifact (runtime secret sources, JWT key rotation, redaction proofs, external-email evidence state, CI defect history; DoD MET, ORG-PR-002/006 remain open). |
+| [sprint-25-artifact-package.md](sprint-25-artifact-package.md) | The official Sprint 25 closing artifact (persistent-data inventory, logical backup, restore drill, **PITR VERIFIED**, retention policy and cleanup, validation evidence; ORG-PR-015 closed, ORG-PR-005 open and materially advanced). |
 
 ## Source-of-truth hierarchy
 

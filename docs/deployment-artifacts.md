@@ -66,6 +66,20 @@ leaked):
    runtime user. `USER node`, `EXPOSE 3000`, `NODE_ENV=production`,
    `NODE_OPTIONS=--enable-source-maps`, `CMD ["node", "dist/server.mjs"]`.
 
+`dist/` holds three entrypoints, all bundled from existing source by
+`apps/api/scripts/build.mjs` — there is no second implementation path:
+
+| Entrypoint | Command | Purpose |
+| --- | --- | --- |
+| `dist/server.mjs` | the image `CMD` | The API process. |
+| `dist/migrate.mjs` | `node dist/migrate.mjs` | Operator-run migrations (see [Migration policy](#migration-policy)). |
+| `dist/retention.mjs` | `node dist/retention.mjs [--apply]` | Operator-run retention cleanup (Sprint 25 — [retention.md](retention.md)). |
+
+Shipping the maintenance command in the API image is deliberate: an operator
+runs it with the same image digest, the same runtime configuration, and the
+same secret-injection seam as the service itself, so a maintenance job cannot
+drift from the deployment it maintains.
+
 Preserved behavior (validated from the packaged artifact by
 `tooling/artifact-smoke.sh`): structured pino JSON logs with sanitized
 `requestId`s, `/health` liveness, coarse production `/ready` (Sprint 19
@@ -108,11 +122,14 @@ No worker artifact exists because no worker runtime is required: every
 side-effecting flow (account email, audit/security-event writes, rate-limit
 accounting, API-key `last_used_at` throttling) executes synchronously inside
 the API request path, and `infra/docker-compose.yml` + `docs/architecture.md`
-have always documented "no worker/queue runtime" as a deliberate boundary. A
-worker becomes necessary when the roadmap's backups/DR & background-jobs work
-implements scheduled retention/expiry cleanup jobs (ORG-PR-015/016), or if
-queued email delivery/bounce handling (ORG-PR-002) is adopted — that work
-defines its own runtime.
+have always documented "no worker/queue runtime" as a deliberate boundary.
+
+Sprint 25 did not change this. The retention cleanup (ORG-PR-015) is a
+**one-shot command** in the existing API image, not a worker: it connects,
+sweeps, prints a summary, and exits. A worker or scheduler still becomes
+necessary when something must INVOKE that command — and the backup command — on
+a schedule (ORG-PR-016, open), or if queued email delivery/bounce handling
+(ORG-PR-002) is adopted; that work defines its own runtime.
 
 ## Runtime process model
 
@@ -120,8 +137,8 @@ defines its own runtime.
 | --- | --- | --- |
 | API (`node dist/server.mjs`) | stateless process | all durable state in PostgreSQL; scale-out is not limited by process state |
 | Web (nginx) | stateless static serving | rebuilt per config change |
-| PostgreSQL | **operator-provided, stateful** | the only durable store; must persist outside application containers |
-| Redis | operator-provided | rate limiting + readiness; data is reconstructible (limiter windows), durability not required |
+| PostgreSQL | **operator-provided, stateful** | the only durable store; must persist outside application containers, and is the entire backup scope ([backup-and-restore.md](backup-and-restore.md)) |
+| Redis | operator-provided | rate limiting + readiness; data is reconstructible (limiter windows), durability not required and deliberately not backed up |
 | SMTP provider | operator-provided | production driver is implicit-TLS + SASL auth; external delivery still unvalidated (ORG-PR-002) |
 
 Startup order (encoded in `infra/compose.production-like.yml`):
@@ -154,10 +171,20 @@ docker run --rm -e DATABASE_URL=... <api-image> node dist/migrate.mjs
   process. The compose reference encodes this
   (`depends_on: migrate: service_completed_successfully`).
 - **Rollback limitation:** migrations are forward-only; no down migrations
-  exist. Recovery from a bad migration is restore-from-backup — which does not
-  exist yet (ORG-PR-005, the backups/DR work). Schema drift between `src/schema` and
-  `migrations/` is caught by `pnpm db:check` in CI, so the baked baseline
-  matches the code in the same image.
+  exist. Recovery from a bad migration is restore-from-backup or point-in-time
+  recovery. Both now exist as tested tooling (Sprint 25 —
+  [backup-and-restore.md](backup-and-restore.md), [pitr.md](pitr.md)), and the
+  restore drill proves a restored database is compatible with this exact
+  migration entrypoint. What does **not** exist is a scheduled backup in any
+  deployment, so the artifact a real rollback would restore from has no
+  producer yet (ORG-PR-005 stays open on that half). Schema drift between
+  `src/schema` and `migrations/` is caught by `pnpm db:check` in CI, so the
+  baked baseline matches the code in the same image.
+- **Take a labelled backup immediately before a production migration:**
+  `pnpm db:backup -- --label pre-migration`. The runbook for a failed migration
+  is in
+  [backup-and-restore.md](backup-and-restore.md#handle-a-failed-migration) and
+  is explicitly labelled as unrehearsed guidance.
 - A migration failure exits non-zero and must abort the deploy; the running
   old API is unaffected (it never observes a half-applied transaction —
   drizzle applies each migration transactionally).
@@ -192,6 +219,7 @@ requires production-safe values as noted. Classification:
 | `MAILPIT_*` | development-only | read only when `MAIL_DRIVER=mailpit` |
 | `RATE_LIMIT_FAILURE_MODE` | optional, non-secret | leave unset in production (derives to `closed`); explicit `open` is rejected |
 | `AUTH_*`, `RATE_LIMIT_*`, `*_TTL_SECONDS`, `API_KEY_LAST_USED_THROTTLE_SECONDS`, `MAIL_TIMEOUT_MS` | optional tuning, non-secret | defaults documented in `.env.example` |
+| `RETENTION_*` | optional policy, non-secret | read ONLY by `dist/retention.mjs`; each has a hard floor, so a zero/negative value fails process start rather than widening a deletion predicate ([retention.md](retention.md)) |
 | `TEST_DATABASE_URL` | test-only | never set in a deployable environment |
 | `POSTGRES_USER/PASSWORD/DB` | development-only | consumed by the local compose files, not by the application |
 | `VITE_*` | **public frontend configuration** | web **build args**, not API runtime env; compiled into the browser bundle |

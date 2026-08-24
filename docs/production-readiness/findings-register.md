@@ -290,10 +290,10 @@ restore?", application rollback to the previous known-good digests, and an
 end-to-end rehearsal that executes all of it locally and passes. **Why it stays
 open:** the finding's required validation is "a tagged build deploys to a
 target environment reproducibly". No target environment exists — no host, no
-provider account, no deployment credential, no GitHub Environment — the release
-workflow has never run, so no image has been published to any registry, and
-neither new workflow has ever executed on GitHub Actions. Rollback is validated
-only in the local rehearsal. Deployment mechanics implemented is not deployment
+provider account, no deployment credential — and nothing has been deployed to
+one. *(The pipeline itself was subsequently executed remotely: see the
+Remote validation entry on [ORG-PR-001](#org-pr-001).)* Rollback is validated
+only in the rehearsal. Deployment mechanics implemented is not deployment
 target validated, and neither is staging readiness.
 
 [ORG-PR-005](#org-pr-005) (P1) **remains Open**, unchanged in substance. Sprint
@@ -328,7 +328,7 @@ and [../deployment.md](../deployment.md).
 
 | ID | Title | Domain | Class | Sev | Conf |
 | --- | --- | --- | --- | --- | --- |
-| [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Open; materially advanced (Sprint 23 artifacts + CI build/smoke gate; Sprint 26 registry publishing, release manifest, promote-by-digest deployment, migration contract, smoke, evidence, rollback, rehearsed end to end): no deployment target exists, nothing has been published to a registry, and neither new workflow has run remotely** | Infrastructure | Production blocker | P1 | High |
+| [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Open; materially advanced (Sprint 23 artifacts + CI build/smoke gate; Sprint 26 registry publishing, release manifest, promote-by-digest deployment, migration contract, smoke, evidence, rollback — merged as PR #38 and validated remotely: both images published to GHCR for `91664d0` after exact-SHA gate authorization): no deployment target exists and nothing has been deployed to one** | Infrastructure | Production blocker | P1 | High |
 | [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16 adapter + guard; Sprint 24 runtime credential source, failure-mode redaction proofs, family matrix, operator validation procedure): external delivery, inbox receipt, and sender-domain authentication all still unvalidated** | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
 | [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
@@ -486,9 +486,10 @@ Standards · Threats.
   **Why still open — the closure criterion is not met.** The finding requires
   "a tagged build deploys to a target environment reproducibly". **No target
   environment exists**: no host, no provider account, no deployment credential,
-  no GitHub Environment. The release workflow has never run, so **no Orgistry
-  image has been published to any registry**; `Release`, `Deploy`, and
-  `Deployment rehearsal` have never executed on GitHub Actions (they are
+  no GitHub Environment. *At the time of this entry* the release workflow had
+  not yet run, so no Orgistry image had been published to any registry, and
+  `Release`, `Deploy`, and `Deployment rehearsal` had never executed on GitHub
+  Actions — all three superseded by the Remote validation entry below (they were
   `actionlint`-clean and their scripts run locally); and rollback is validated
   only in the local rehearsal, between two releases that differ by an image
   label, on a throwaway database. Deployment mechanics implemented is not
@@ -523,8 +524,40 @@ Standards · Threats.
   missing run is `pending` and never a silent pass, and a timeout publishes
   nothing. `actions: read` is scoped to the gate job and `packages: write` to the
   publish job. **None of this changes the finding's status**: there is still no
-  deployment target, nothing has been published to any registry, and no workflow
-  has executed remotely.
+  deployment target. *(At the time of this entry nothing had been published and
+  no workflow had executed remotely; both were done in the closure pass below.)*
+- **Remote validation (Sprint 26 closure, 2026-08-24): Open — materially
+  advanced; the pipeline is now EXECUTED, not merely implemented.** Merged as PR
+  [#38](https://github.com/DanielRosenberg00/Orgistry/pull/38) (merge commit
+  `91664d0fd639ca6ca8b5681317757bbcf0f0209b`) after all six required checks
+  passed on the PR head. Against that exact merged SHA: **CI** `32776576684`,
+  **Security scans** `32776576586`, **CodeQL** `32776576905` — every required
+  JOB `success`; **Release** `32776576782` — its gate job proved those six runs
+  for that exact commit (logging `[pending]` and re-polling for ~3 minutes until
+  CodeQL concluded, never treating an unreported run as satisfied), then
+  published `ghcr.io/danielrosenberg00/orgistry-api@sha256:9b79d72c045f…` and
+  `ghcr.io/danielrosenberg00/orgistry-web@sha256:20dc434b7b62…` by re-tagging the
+  images its own artifact gate built — the publish job contains no `docker
+  build` step. The release manifest was downloaded and independently validated:
+  `published`/`deployable`/`commit` provenance, `source.commit` = the merge SHA,
+  both image tags = the merge SHA, both references digest-form and matching the
+  live registry, the complete six-gate set all bound to that SHA with real run
+  IDs, migration head `0012_shocking_warbound` matching the merged journal, and
+  no credential-shaped value anywhere. **Deploy** `32777270537` (environment
+  `staging-like`) validated the manifest, confirmed deployability and gate
+  evidence, resolved both digests in the registry, and emitted the operator
+  plan. **Deployment rehearsal** `32777259951` passed with 65 assertions.
+  **Data durability** `32777249673` passed, re-verifying PITR after Sprint 26
+  modified the Sprint 25 durability tooling. Promotion was proven against the
+  PUBLISHED artifact: one web digest started twice with two different public API
+  origins serves each correctly, with neither origin present in the bundle.
+  Ruleset `19769611` is unchanged — active, zero bypass actors, the same six
+  required checks — and no new workflow gates pull requests. **Why still open:**
+  the finding requires "a tagged build deploys to a target environment
+  reproducibly". **No deployment target exists and nothing has been deployed to
+  one.** Publishing and authorising an artifact is not deploying it; rollback
+  remains rehearsal-only; the `staging-like` environment has zero protection
+  rules; and the published images are single-architecture `linux/amd64`.
 
 <a id="org-pr-002"></a>
 ### ORG-PR-002 — No production email provider (Mailpit-only)

@@ -5,13 +5,15 @@ is built, how it is published, how a release is identified, how it reaches a
 target, how it is validated once it is there, and how it is rolled back.
 
 **Scope guard — read this before quoting anything below.** This document
-describes an implemented and rehearsed deployment *mechanism*. Orgistry has
-**no staging environment and no production environment**. Nothing here has been
-executed against a real target, no image has been published to GitHub Container
-Registry yet, and no GitHub Environment is configured. The mechanics are proven
-by a local rehearsal (`pnpm deploy:rehearsal`), which is not staging and is not
-evidence of production readiness. Finding status: `ORG-PR-001` remains **open,
-materially advanced** in the
+describes a deployment *mechanism* that is implemented, rehearsed, and
+**executed remotely**: both images are published to GitHub Container Registry
+for the merged Sprint 26 commit, authorised by the required checks for that
+exact SHA (see [Remote validation evidence](#remote-validation-evidence)).
+Orgistry nonetheless has **no staging environment and no production
+environment** — nothing here has ever been deployed to a real target, no host
+runs Orgistry, and the `staging-like` GitHub Environment carries no reviewer
+protection. Publishing and authorising an artifact is not deploying it. Finding
+status: `ORG-PR-001` remains **open, materially advanced** in the
 [findings register](production-readiness/findings-register.md).
 
 Related documents, each authoritative for its own boundary:
@@ -854,19 +856,20 @@ None of the following can be represented in this repository, and **none of it is
 configured**. Each is an operator action in GitHub or on a host. Do not treat
 any of it as done until the verification command confirms it.
 
-| # | Action | Where | Verify |
+| # | Action | Status | Verify |
 | --- | --- | --- | --- |
-| 1 | Run the `Release` workflow once so the two GHCR packages exist | Actions → Release | `gh api /users/DanielRosenberg00/packages?package_type=container` |
-| 2 | Decide and set each package's visibility (private is the default) | the package's settings page | the same API call reports `visibility` |
-| 3 | If packages stay private, give the deployment host a read-only pull credential | host + GitHub | `docker pull ghcr.io/<owner>/orgistry-api@sha256:...` on the host |
-| 4 | Create the `staging-like` GitHub Environment and add required reviewers | Settings → Environments | `gh api /repos/DanielRosenberg00/Orgistry/environments` |
-| 5 | Restrict that environment's deployment branches to `main` | the environment's settings | same call |
-| 6 | Decide whether `Deployment rehearsal` should be a required check (see below) | Settings → Rules | `gh api /repos/DanielRosenberg00/Orgistry/rulesets/19769611` |
+| 1 | Run the `Release` workflow so the two GHCR packages exist | **DONE** — run `32776576782` published both images for `91664d0` | `gh run list --workflow=release.yml` |
+| 2 | Decide and set each package's visibility (private is the default) | **OPEN** — both packages remain private, which is the safe default | the package's settings page |
+| 3 | If packages stay private, give the deployment host a read-only pull credential | **OPEN** — no host exists yet | `docker pull ghcr.io/danielrosenberg00/orgistry-api@sha256:…` on the host |
+| 4 | Add required reviewers to the `staging-like` GitHub Environment | **OPEN** — the environment now exists (auto-created by the first `Deploy` run) but has **zero protection rules** | `gh api /repos/DanielRosenberg00/Orgistry/environments` |
+| 5 | Restrict that environment's deployment branches to `main` | **OPEN** | same call |
+| 6 | Decide whether `Deployment rehearsal` should be a required check (see below) | **OPEN** — deliberately not required | `gh api /repos/DanielRosenberg00/Orgistry/rulesets/19769611` |
 
-Until (1) happens, no Orgistry image has ever been published anywhere. Until
-(4) happens, `environment: staging-like` in the deployment workflow provides no
-protection beyond being manual-dispatch-only — GitHub creates the environment
-implicitly on first use, with no reviewers.
+Both packages are private by default and were verified by authenticated
+registry inspection; nothing was made public to validate them. Until (4)
+happens, `environment: staging-like` provides no protection beyond the workflow
+being manual-dispatch-only — GitHub created the environment implicitly on the
+first `Deploy` run, with zero protection rules, exactly as this table predicted.
 
 ## Branch protection
 
@@ -903,14 +906,17 @@ Deployment-specific. The project-wide list is
 - **No deployment target exists.** No staging host, no production host, no
   provider account, no deployment credential. Everything below follows from
   that.
-- **Nothing has been published to GHCR.** The release workflow has never run;
-  its first run is operator action (1) above.
-- **Neither new workflow has been executed remotely.** `Release`, `Deploy`, and
-  `Deployment rehearsal` are statically validated (`actionlint`) and their
-  scripts are executed locally, but no GitHub run exists for any of them.
+- **Published images are single-architecture `linux/amd64`.** They are built on
+  GitHub's amd64 runners and no multi-arch manifest list is produced, so an
+  arm64 host cannot run them without emulation. This is adequate for the
+  single-host x86-64 target this model assumes, and it is a real constraint on
+  which host may be provisioned. Surfaced by inspecting the first real release.
 - **Rollback is validated only in the rehearsal**, between two releases that
   differ by an image label, on one machine, with a throwaway database. Rollback
   in a long-lived environment with real traffic is untested.
+- **The `Deploy` workflow verifies; it does not deploy.** It resolves and
+  authorises a release and emits the operator plan. No target execution has
+  occurred anywhere.
 - **No GitHub Environment is configured**, so environment-scoped protection and
   required reviewers are documented rather than enforced.
 - **The `main` ruleset is the source of the required-check list**, and the
@@ -939,7 +945,8 @@ Deployment-specific. The project-wide list is
 
 1. A host or provider account that can run the compose topology.
 2. A managed or operated PostgreSQL and Redis for it.
-3. A GHCR package the host can pull (public, or a pull credential).
+3. A pull credential for the host, or public package visibility — the two
+   packages now exist and are private (external action 2/3 above).
 4. A real SMTP provider — the production config guard refuses to boot without
    one, and delivery through a real provider has still never been validated
    (ORG-PR-002).
@@ -991,6 +998,35 @@ it so.**
   without it.
 - **After any change to the deployment tooling, the compose topology, or either
   Dockerfile:** run `pnpm deploy:rehearsal` before merging.
+
+## Remote validation evidence
+
+The first real release of this pipeline, recorded here because a deployment
+model is only as good as its executed evidence. Source of truth: the runs
+themselves.
+
+| Item | Evidence |
+| --- | --- |
+| Release source | `91664d0fd639ca6ca8b5681317757bbcf0f0209b` (PR #38 merge, `main`) |
+| `Release` run | `32776576782`, attempt 1, event `push`, **success** |
+| Gate authorization | `32776576684` (CI: Validate / Integration / Artifacts), `32776576586` (Security: Dependency audit / Secret scan), `32776576905` (CodeQL: Analyze) — all `success`, all `head_sha` = the release commit |
+| Published API image | `ghcr.io/danielrosenberg00/orgistry-api@sha256:9b79d72c045f…` |
+| Published web image | `ghcr.io/danielrosenberg00/orgistry-web@sha256:20dc434b7b62…` |
+| `Deploy` run | `32777270537`, environment `staging-like`, **success** — manifest validated, deployability and gate evidence confirmed, both digests resolved in the registry, plan emitted |
+| `Deployment rehearsal` run | `32777259951`, **success** — 65 assertions, 4 deployments × 9 smoke checks, 4 refusals, same-digest promotion, rollback |
+| `Data durability` run | `32777249673`, **success** — PITR drill re-verified after Sprint 26 modified the Sprint 25 durability tooling |
+
+**The bounded-wait race behavior was exercised for real.** `Release` started
+from the same push as CI, Security scans, and CodeQL. Its gate job logged
+`[pending]` for every check that had not concluded, re-polled every 20s for
+roughly three minutes, and proceeded only once all six reported `success`. No
+gate was ever treated as satisfied because its run had not appeared yet.
+
+**Promotion was proven against the published artifact, not only the rehearsal.**
+The published web digest `sha256:20dc434b7b62…` was started twice with two
+different `ORGISTRY_PUBLIC_API_BASE_URL` values; both containers report the same
+image digest, each serves its own origin from `/public-config.js`, and neither
+origin appears anywhere in the built assets.
 
 ## Sprint 26 changelog
 

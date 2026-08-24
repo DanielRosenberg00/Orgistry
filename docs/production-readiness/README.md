@@ -388,10 +388,10 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > **ORG-PR-001 remains OPEN — materially advanced for the second time.** Its
 > closure criterion is "a tagged build deploys to a target environment
 > reproducibly", and **no target environment exists**: no host, no provider
-> account, no deployment credential, no GitHub Environment. The release
-> workflow has never run, so **no Orgistry image has been published to any
-> registry**; `Release`, `Deploy`, and `Deployment rehearsal` have never
-> executed on GitHub Actions; and rollback is validated only in the local
+> account, no deployment credential, and no GitHub Environment protection.
+> *(Superseded in part by the remote-validation note below: the pipeline has
+> since been executed and both images are published. What remains missing is a
+> target to deploy to.)* Rollback is validated only in the local
 > rehearsal. **ORG-PR-005 and ORG-PR-006 gained an integration boundary and a
 > handling boundary respectively and are NOT closer to closure** — deployment-
 > time backup integration is not a backup programme, and enforced secret
@@ -429,6 +429,43 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > manifest, and treats a missing run as pending rather than a silent pass.
 > Local validation was re-run in full and passes (1013 unit tests, 94 web tests,
 > the artifact smoke gate, all three durability drills, and the rehearsal).
+>
+> **Remote validation (2026-08-24) — Sprint 26 DoD MET.** Merged as PR
+> [#38](https://github.com/DanielRosenberg00/Orgistry/pull/38), merge commit
+> `91664d0fd639ca6ca8b5681317757bbcf0f0209b`, after all six required checks
+> passed on the PR head. Against that exact merged SHA every required job is
+> `success` (CI `32776576684`, Security scans `32776576586`, CodeQL
+> `32776576905`), and all four Sprint 26 workflow paths ran green: **Release**
+> `32776576782` — its gate job proved those six runs belonged to that exact
+> commit, re-polling for ~3 minutes while CodeQL finished and never treating an
+> unreported run as satisfied, then published
+> `ghcr.io/danielrosenberg00/orgistry-api@sha256:9b79d72c045f…` and
+> `ghcr.io/danielrosenberg00/orgistry-web@sha256:20dc434b7b62…` by re-tagging the
+> images its own artifact gate built (no `docker build` in the publish job);
+> **Deploy** `32777270537` (environment `staging-like`) validated the published
+> manifest, confirmed deployability and gate evidence, resolved both digests in
+> the registry, and emitted the operator plan; **Deployment rehearsal**
+> `32777259951` passed with 65 assertions; **Data durability** `32777249673`
+> passed, re-verifying PITR after Sprint 26 touched the Sprint 25 durability
+> tooling. The release manifest was downloaded and independently re-validated,
+> and promotion was proven against the PUBLISHED web digest — one image, two
+> public API origins, neither baked into the bundle. Ruleset `19769611` is
+> unchanged (active, zero bypass actors, the same six required checks) and no new
+> workflow gates pull requests. **No repository defect was found remotely.**
+>
+> **This does not change any finding or the readiness classification.** The
+> pipeline is executed; **no deployment target exists and nothing has been
+> deployed to one**. Publishing and authorising an artifact is not deploying it.
+> ORG-PR-001 stays **OPEN — materially advanced**; ORG-PR-002, ORG-PR-005, and
+> ORG-PR-006 stay OPEN. Deployment mechanics validated, external deployment
+> target validated, staging readiness, and production readiness remain four
+> different things, and only the first is claimed:
+>
+> ```
+> C — Ready to continue production implementation
+> Not ready for staging
+> Not ready for production
+> ```
 >
 > See [sprint-26-artifact-package.md](sprint-26-artifact-package.md) and
 > [../deployment.md](../deployment.md). Recommended next: **Deployment Pipeline

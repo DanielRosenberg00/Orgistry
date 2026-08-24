@@ -221,7 +221,9 @@ block (ORG-PR-019); no dependency/secret/SAST scanning, no Dependabot/Renovate
 > [sprint-23-artifact-package.md](sprint-23-artifact-package.md).
 
 > **Update (Sprint 26, 2026-08-24):** three workflows added, none of them on
-> the pull-request path and none of them yet executed remotely.
+> the pull-request path. All three have since been executed remotely against
+> merged `main` (`91664d0`) and passed: `Release` `32776576782`, `Deploy`
+> `32777270537`, `Deployment rehearsal` `32777259951`.
 > `release.yml` (push to `main` + manual) runs the artifact gate itself and
 > then publishes the images that gate produced to GHCR under an immutable
 > commit-SHA tag, captures their digests, and uploads a validated release

@@ -125,12 +125,17 @@ These are intentional non-goals, not bugs:
   an end-to-end rehearsal that exercises all of it (`pnpm deploy:rehearsal`).
   **What still does not exist is an environment.** There is no staging or
   production host, no provider account, no deployment credential, and no
-  GitHub Environment; the release workflow has never run, so no Orgistry image
-  has been published to any registry; neither the release nor the deployment
-  workflow has ever executed on GitHub Actions; rollback is validated only in
-  the local rehearsal; and there is still no Terraform/Helm/Kubernetes, no
-  image signing or SLSA provenance, no TLS/DNS/reverse-proxy configuration, and
-  no observability. ORG-PR-001 remains open, materially advanced.
+  GitHub Environment protection. The pipeline itself has now been executed
+  remotely against merged `main` (`91664d0`): the `Release` workflow published
+  both images to GHCR after proving all six required checks succeeded for that
+  exact commit, and the `Deploy` and `Deployment rehearsal` workflows both ran
+  green. **What is still missing is a host to deploy to** — no deployment has
+  ever been performed against any environment, rollback is validated only in
+  the rehearsal, the `staging-like` GitHub Environment has zero protection
+  rules, published images are single-architecture `linux/amd64`, and there is
+  still no Terraform/Helm/Kubernetes, no image signing or SLSA provenance, no
+  TLS/DNS/reverse-proxy configuration, and no observability. ORG-PR-001 remains
+  open, materially advanced.
   A refinement pass then removed the last structural blocker to true
   promotion-by-digest: the web image no longer bakes in its API origin, so one
   validated web digest is deployable to any environment
@@ -228,7 +233,10 @@ These are intentional non-goals, not bugs:
   and no persistence. Its two releases differ only by an image label, so the
   rollback check proves digest switching rather than behavioral difference. It
   proves the MECHANICS and nothing about GHCR, a host, or production readiness.
-  It has also never run on GitHub Actions. Its release manifests are explicitly
+  It has now also run on GitHub Actions against merged `main` (run
+  `32777259951`, 65 assertions, success), which proves it is not
+  machine-specific — but that is remote validation of deployment MECHANICS, not
+  a staging deployment. Its release manifests are explicitly
   marked `release.type: rehearsal`, `deployable: false` — and, when the working
   tree is dirty, `provenance: working-tree` with a content fingerprint instead
   of an unqualified commit SHA — so rehearsal output can never be read as

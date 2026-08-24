@@ -148,10 +148,11 @@ built API image; the heavier PITR drill runs manually and weekly in
 [data-durability.yml](.github/workflows/data-durability.yml), and the Sprint 26
 deployment rehearsal likewise in
 [deployment-rehearsal.yml](.github/workflows/deployment-rehearsal.yml). Two
-further workflows exist but are not on the pull-request path and have never
-been executed: [release.yml](.github/workflows/release.yml) publishes gated
-images to GHCR, and [deploy.yml](.github/workflows/deploy.yml) verifies a
-release for a GitHub Environment. Full detail, the
+further workflows exist off the pull-request path:
+[release.yml](.github/workflows/release.yml) publishes images to GHCR only
+after proving all six required checks succeeded for the exact release commit,
+and [deploy.yml](.github/workflows/deploy.yml) verifies a release for a GitHub
+Environment. Both have been executed against merged `main`. Full detail, the
 CI security policy (SHA-pinned actions, least-privilege permissions), the
 CodeQL alert policy, and failure interpretation:
 [docs/validation.md](docs/validation.md).
@@ -269,7 +270,8 @@ include the web origin. See [docs/web-demo.md](docs/web-demo.md).
   build-once/promote-by-digest contract, the release manifest, the deployment
   configuration contract, the migration lifecycle, post-deployment smoke,
   deployment evidence, and the three kinds of rollback (Sprint 26). It is
-  precise about what has been rehearsed and what has never been executed.
+  precise about what has been validated remotely and what has never been
+  deployed to a real environment.
 - [Runtime secrets](docs/runtime-secrets.md) — where secrets come from at
   runtime (env or mounted file), the validation ordering invariant, the secret
   inventory, redaction guarantees, and restart behavior (Sprint 24).
@@ -329,9 +331,10 @@ the promotion and deployment MECHANISM around them — registry publishing,
 release manifests, promote-by-digest deployment with a migrate-once contract,
 post-deployment smoke, deployment evidence, and application rollback, all
 rehearsed end to end ([docs/deployment.md](docs/deployment.md)). What still
-does not exist is an environment: no staging or production host, nothing
-published to any registry, and no deployment or release workflow has ever run
-on GitHub Actions. Backup, restore, PITR, and retention cleanup
+does not exist is an environment: no staging or production host, and no
+deployment has ever been performed against one. The release pipeline itself has
+been executed remotely — both images are published to GHCR for the merged
+Sprint 26 commit — but publishing an artifact is not deploying it. Backup, restore, PITR, and retention cleanup
 are implemented and tested since Sprint 25, but nothing SCHEDULES them: there
 is no backup schedule, no encrypted remote backup storage, no continuous WAL
 archiving on any long-lived database, and no measured RPO/RTO. The UI is

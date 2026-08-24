@@ -1,24 +1,37 @@
 # Sprint 26 Artifact Package — Production Deployment Environment and Promotion Pipeline
 
 **Sprint:** 26 · **Finding:** ORG-PR-001 (P1, production blocker) ·
-**Executed:** 2026-08-24 · **Branch state at writing:** local, uncommitted.
+**Executed:** 2026-08-24 · **Merged:** PR
+[#38](https://github.com/DanielRosenberg00/Orgistry/pull/38), merge commit
+`91664d0fd639ca6ca8b5681317757bbcf0f0209b` ·
+**Remote validation:** complete (§14).
 
-**Headline outcome.** The promotion and deployment MECHANISM is implemented,
-readable, and rehearsed end to end locally. **No finding is closed.** That is
-the specification-permitted outcome for a sprint whose closure criteria depend
-on infrastructure that does not exist: Orgistry still has no deployment target,
-nothing has been published to any container registry, and neither new workflow
-has ever executed on GitHub Actions.
+**Headline outcome. Sprint 26 DoD is MET; no finding is closed.** The promotion
+and deployment mechanism is implemented, rehearsed, merged, and **validated
+remotely**: every required check passed for the exact release commit, the
+`Release` workflow proved that authorization and published both images to GHCR,
+and the `Deploy`, `Deployment rehearsal`, and `Data durability` workflows all
+ran green against the merged source. What still does not exist is a place to
+deploy to — so ORG-PR-001 stays open.
 
 Four things this artifact keeps strictly apart, because they are routinely
 conflated:
 
 ```
-deployment mechanics implemented   — YES (this sprint)
-deployment target validated        — NO  (no target exists)
+deployment mechanics validated     — YES (locally AND remotely)
+external deployment target validated — NO (no target exists; nothing deployed)
 staging readiness                  — NO
 production readiness               — NO
 ```
+
+Publishing and authorising an artifact is not deploying it. Everything in §14 is
+evidence about a pipeline; none of it is evidence about a running environment.
+
+Closure sections: [§14 remote evidence](#14-remote-validation-evidence),
+[§20 documentation index](#20-documentation-index),
+[§21 confidence](#21-confidence-assessment),
+[§22 remaining risks](#22-remaining-risks),
+[§23 sprint changelog](#23-sprint-changelog).
 
 ---
 
@@ -156,13 +169,15 @@ a successful deployment        !=  production readiness
   only; `packages: write` on the publish job only — neither job can perform the
   other's action. Credential: the job's own short-lived `GITHUB_TOKEN`, piped to
   `docker login --password-stdin`.
-- Package visibility is an operator decision and is documented as an unperformed
-  external action (§16 of [../deployment.md](../deployment.md#external-and-operator-only-configuration)).
+- Package visibility is an operator decision; both packages remain **private**,
+  which is the safe default (§14, and
+  [../deployment.md](../deployment.md#external-and-operator-only-configuration)).
 
-**Not validated:** the workflow has never run. No image exists in GHCR, so GHCR
-authentication, package creation, visibility, and pull-from-host are all
-unproven. The publishing *mechanics* (build → push → digest capture → manifest)
-are proven against a local OCI registry by the rehearsal.
+**Validated remotely** — run `32776576782` published both images to GHCR for
+commit `91664d0`, and both were verified by authenticated registry inspection
+(§14). GHCR authentication, package creation, and digest immutability are
+proven. **Still unproven:** pull-from-a-deployment-host, because no host exists;
+and multi-architecture support, because the published images are amd64 only.
 
 ## 5. Image identity and digest policy
 
@@ -298,9 +313,10 @@ output.
 
 ## 10. Rollback evidence and its limits
 
-**Executed and passing, in the rehearsal.** After deploying release A, then
-release B over it, `tooling/deploy-rollback.sh` resolved A as the previous
-known-good release and redeployed it. Asserted afterwards: the evidence mode is
+**Executed and passing, in the rehearsal — locally and now remotely** (run
+`32777259951`). After deploying release A, then release B over it,
+`tooling/deploy-rollback.sh` resolved A as the previous known-good release and
+redeployed it. Asserted afterwards: the evidence mode is
 `rollback`; `migration.result` is `skipped`; smoke passed again; the recorded
 runtime digests are A's; and the **running containers' image IDs** match A's
 manifest references — checked against Docker, not against our own records.
@@ -313,7 +329,8 @@ manifest references — checked against Docker, not against our own records.
 - It ran on one machine, against a throwaway database, with no traffic, no TLS,
   and no proxy.
 - Rollback in a long-lived environment with real users is **untested**, and will
-  remain so until a target exists.
+  remain so until a target exists. No rollback has ever been performed against a
+  deployed environment, because no environment has ever been deployed to.
 - **Application rollback restores image digests, not configuration.** The
   environment's public browser configuration is applied fresh from the
   deployment configuration file, so a rollback across a configuration change
@@ -420,7 +437,9 @@ head `0012_shocking_warbound` (13 migrations). Release A resolved to
 `127.0.0.1:5001/orgistry-web@sha256:6830cb71d44c…`; release B produced different
 digests from identical source (the harness asserts they differ, and fails the
 run if they do not). Digests are from a throwaway registry destroyed on exit and
-are recorded as run evidence, not as reproducible identifiers.
+are recorded as run evidence, not as reproducible identifiers. The same
+rehearsal was subsequently executed on GitHub Actions with the identical
+assertion count (§14), so the capability is not machine-specific.
 
 Verified in that run:
 
@@ -442,71 +461,193 @@ Everything the rehearsal creates — containers, volumes, network, registry, and
 the temporary 0600 runtime configuration file holding its fake credentials — is
 removed on exit.
 
-### Validation not run, and why
+### Validation still outstanding, and why
+
+Every row here reflects the state **after** remote closure (§14). Nothing that
+could be validated was skipped.
 
 | Item | Status | Reason | Repository-side or external? | What would complete it |
 | --- | --- | --- | --- | --- |
-| Real GHCR publication | **BLOCKED** | The release workflow triggers on a push to `main`; this sprint is uncommitted by instruction, and the local `gh` token lacks `write:packages` | External (operator) | Merge the sprint, let `release.yml` run, then `gh api /users/<owner>/packages?package_type=container` |
+| Real GHCR publication | **DONE** (§14) | `Release` run `32776576782` published both images for `91664d0` | — | — |
+| Remote runs of `Release`, `Deploy`, `Deployment rehearsal`, `Data durability` | **DONE** (§14) | All four executed against the merged SHA and passed | — | — |
 | Deployment to a real target | **BLOCKED** | No host, provider account, or deployment credential exists | External (procurement/operator) | Provision a target per [../deployment.md](../deployment.md#remaining-staging-blockers) and run `tooling/deploy.sh` there |
-| Rollback on a real target | **BLOCKED** | Same | External | Two deployments plus `tooling/deploy-rollback.sh` on that target |
-| Remote runs of `Release`, `Deploy`, `Deployment rehearsal` | **NOT RUN** | Requires pushing a branch; the sprint specification forbids committing or pushing without explicit instruction | Repository-side, gated on operator instruction | Push the branch and dispatch each workflow (§14) |
-| GitHub Environment protection | **NOT CONFIGURED** | Cannot be represented in the repository | External (operator) | Create the environment and reviewers, then `gh api /repos/<owner>/<repo>/environments` |
+| Rollback on a real target | **BLOCKED** | Same — rollback is proven in the rehearsal only | External | Two deployments plus `tooling/deploy-rollback.sh` on that target |
+| GitHub Environment reviewer protection | **NOT CONFIGURED** | Cannot be represented in the repository. The `staging-like` environment now exists (GitHub created it on the first `Deploy` run) but carries zero protection rules | External (operator) | Add required reviewers, then `gh api /repos/DanielRosenberg00/Orgistry/environments` |
+| Pull access for the deployment host | **NOT CONFIGURED** | Both packages are private, which is the safe default; no host exists to grant access to | External (operator) | A read-only pull credential on the host, or public package visibility |
+| Multi-architecture images | **NOT BUILT** | Published images are `linux/amd64` only (§16). Out of Sprint 26 scope, deliberately | Repository-side, future sprint | A multi-arch build in a future sprint, if a non-amd64 target is ever chosen |
 | Live external email through a real provider | **BLOCKED** | Unchanged since Sprint 16; no provider credentials, verified domain, or test mailbox | External | ORG-PR-002's documented procedure |
-| Backup schedule / WAL archival health | **NOT RUN** | No long-lived database archives WAL; there is nothing to check | External, gated on a target | ORG-PR-005's remaining work |
-
-No validation step was silently skipped.
+| Backup schedule / WAL archival health | **BLOCKED** | No long-lived database archives WAL; there is nothing to check. `Data durability` `32777249673` proves the recovery MECHANICS, not a backup posture | External, gated on a target | ORG-PR-005's remaining work |
 
 ## 14. Remote validation evidence
 
-**None. No remote validation has been performed for this sprint.** The work is
-uncommitted, so there is no commit for GitHub to run, and no run ID exists for
-any workflow. No run ID, status, or green claim is manufactured anywhere in this
-package.
+Merged and validated remotely on 2026-08-24. Every claim below traces to a run
+ID; nothing is inferred from a workflow's top-level colour alone.
 
-What the four existing pull-request workflows will exercise unchanged on merge:
-`Validate (offline)` (now including the 29 new deployment-contract tests),
-`Integration (PostgreSQL + Redis)`, `Artifacts (build + smoke)`,
-`Dependency audit (pnpm)`, `Secret scan (Gitleaks)`, and
-`Analyze (javascript-typescript)`.
+### Authoritative release identity
 
-Operator commands to obtain the missing evidence, in order:
+| Field | Value |
+| --- | --- |
+| Pull request | [#38](https://github.com/DanielRosenberg00/Orgistry/pull/38) — `feat(ops): add deployment promotion pipeline`, `sprint-26-deployment-pipeline` → `main` |
+| Merged at | 2026-08-24T20:54:48Z |
+| **`SPRINT_26_RELEASE_SHA`** | **`91664d0fd639ca6ca8b5681317757bbcf0f0209b`** (merge commit; `local main == origin/main`) |
+| PR head validated pre-merge | `7740dfa59864de45da236d3be33dd2887cbdb843` — all six required checks `pass` |
 
-```sh
-# 1. Open the pull request and let the six required checks run.
-gh pr create --fill
-gh pr checks --watch
+### Required checks at the merged SHA
 
-# 2. After merge, the Release workflow runs on the push to main.
-gh run list --workflow=release.yml --limit 5
-gh run view <run-id> --log
-gh api "/users/$(gh api /user --jq .login)/packages?package_type=container"
+Every required JOB, verified through the Actions API at
+`head_sha == 91664d0fd639ca6ca8b5681317757bbcf0f0209b`:
 
-# 3. Verify the published digests independently of the manifest.
-docker buildx imagetools inspect ghcr.io/<owner>/orgistry-api:<commit-sha>
+| Required check | Workflow | Run ID | Job conclusion |
+| --- | --- | --- | --- |
+| Validate (offline) | `ci.yml` | `32776576684` | success |
+| Integration (PostgreSQL + Redis) | `ci.yml` | `32776576684` | success |
+| Artifacts (build + smoke) | `ci.yml` | `32776576684` | success |
+| Dependency audit (pnpm) | `security.yml` | `32776576586` | success |
+| Secret scan (Gitleaks) | `security.yml` | `32776576586` | success |
+| Analyze (javascript-typescript) | `codeql.yml` | `32776576905` | success |
 
-# 4. Exercise the deployment-verification workflow against that release.
-gh workflow run deploy.yml -f environment=staging-like -f release_run_id=<run-id>
-gh run list --workflow=deploy.yml --limit 3
+### Sprint 26 workflows
 
-# 5. Exercise the rehearsal remotely (proves it is not machine-specific).
-gh workflow run deployment-rehearsal.yml
-gh run list --workflow=deployment-rehearsal.yml --limit 3
+| Workflow | Run ID | Attempt | Event | Head SHA | Conclusion |
+| --- | --- | --- | --- | --- | --- |
+| Release | `32776576782` | 1 | push | `91664d0` | **success** |
+| Deploy | `32777270537` | 1 | workflow_dispatch | `91664d0` | **success** |
+| Deployment rehearsal | `32777259951` | 1 | workflow_dispatch | `91664d0` | **success** |
+| Data durability | `32777249673` | 1 | workflow_dispatch | `91664d0` | **success** |
 
-# 6. Confirm branch protection is unchanged.
-gh api /repos/<owner>/Orgistry/rulesets/19769611
+`Data durability` is a Sprint-closure requirement, not one of the six release
+gates: Sprint 26 modified `tooling/lib/pg-tools.sh` and `tooling/db-backup.sh`,
+so PITR was re-verified against the merged source. It is not in the ruleset and
+was not treated as a release gate.
+
+### The bounded-wait race, exercised for real
+
+`Release` started from the same push as CI, Security scans, and CodeQL. Its gate
+job logged `[pending]` for every check that had not yet concluded — including
+`run … is in_progress` for all six at first poll — re-polled every 20 seconds
+for roughly three minutes, and proceeded only when all six reported `success`:
+
+```
+release-gates: 91664d0… is reachable from main (identical)
+release-gates: required checks are pending for 91664d0…
+  [pending] Validate (offline) (run 32776576684): run 32776576684 is in_progress
+  …
+release-gates: required checks are satisfied for 91664d0…
+release-gates: wrote gate evidence for 6 checks to artifacts/release-gates.json
 ```
 
-Until step 2 succeeds, the correct statement is: **no Orgistry image has ever
-been published to any registry.**
+No gate was ever treated as satisfied because its run had not appeared yet.
+
+### GHCR publication
+
+Verified by authenticated registry inspection; **no package was made public to
+validate it**, and no credential was printed.
+
+| Image | Commit-SHA tag | Digest |
+| --- | --- | --- |
+| `ghcr.io/danielrosenberg00/orgistry-api` | `91664d0fd639ca6ca8b5681317757bbcf0f0209b` | `sha256:9b79d72c045fe594f3b381eb35fbd458a414ea6056acd64f4807ee2157246b8f` |
+| `ghcr.io/danielrosenberg00/orgistry-web` | `91664d0fd639ca6ca8b5681317757bbcf0f0209b` | `sha256:20dc434b7b62f933e91b3efd70c2aa5d89c559c52ff088ef28cabf98f00d2855` |
+
+Each tag resolves to exactly the digest the manifest records. Both packages are
+private. Both images are `linux/amd64` — see [Remaining blockers](#16-remaining-blockers).
+
+### Release manifest, independently validated
+
+The `release-manifest` artifact was downloaded from run `32776576782` and run
+through `pnpm release:manifest validate`, plus a field-by-field cross-check.
+All 23 invariants pass:
+
+```
+release.type == published            release.deployable == true
+source.provenance == commit          no workingTreeDigest present
+source.commit == 91664d0…            api.tag == web.tag == 91664d0…
+reference == repository@digest       both references digest-pinned
+no ":latest" anywhere                image identities carry NO environment config
+gates.headSha == 91664d0…            6/6 gates, every headSha == 91664d0…
+every gate conclusion == success     every runId numeric and matching a real run
+migrations.head == 0012_shocking_warbound (matches the merged journal, 13 migrations)
+build.artifactSmoke == passed        no credential-shaped value anywhere
+```
+
+### Build-once / promote-by-digest, proven from the real run
+
+The `publish` job's step list contains **one** build — `Artifact gate (build +
+smoke)` — followed by `Tag the gated API image`, `Tag the gated web image`, and
+`Publish both images`. There is no `docker build` step in the publication path.
+The images published are the images the gate validated; `docker tag` cannot
+change content.
+
+### Promotion proven against the PUBLISHED artifact
+
+The published web digest `sha256:20dc434b7b62…` was pulled and started twice
+with two different `ORGISTRY_PUBLIC_API_BASE_URL` values:
+
+```
+container 1 -> {"apiBaseUrl":"https://api.staging.example.test",   …}
+container 2 -> {"apiBaseUrl":"https://api.production.example.test", …}
+both containers -> image sha256:20dc434b7b62f933e91b3efd70c2aa5d89c559c52ff088ef28cabf98f00d2855
+neither origin present in /usr/share/nginx/html/assets
+```
+
+One digest, two environments, no rebuild — verified against the real release
+rather than only the local rehearsal.
+
+### Deploy workflow — what it proved, and what it did not
+
+Run `32777270537`, environment `staging-like`, success. Its steps downloaded the
+real release manifest, validated it, confirmed deployability and gate evidence
+(re-printing all six run IDs), resolved **both digests in the live registry**,
+and emitted the operator plan. It performed **no build** and **no target
+execution**, which is the designed operator-assisted boundary — not a
+deficiency. It did **not** prove that any host runs Orgistry.
+
+GitHub created the `staging-like` environment implicitly on this first use; it
+currently has **zero protection rules**. Adding required reviewers is an
+external operator action, recorded as such.
+
+### Deployment rehearsal, remotely
+
+Run `32777259951`, success, **65 assertions** — the same count as locally, so
+the capability is not machine-specific. Covered: build once, publication to the
+throwaway registry, digest capture, rehearsal provenance (`commit` on the clean
+runner checkout, still `deployable: false`), migrate exactly once, verified
+migration head, readiness, four deployments each passing all **9** smoke checks,
+evidence recording, same-web-digest promotion under a different runtime API
+origin, application rollback restoring the previous known-good digests with
+migrations skipped, and four refusals (tag-pinned manifest; rehearsal release
+offered to a `deployment`-class environment; rehearsal manifest relabelled
+published; runtime configuration file not `0600`).
+
+This is remote validation of deployment MECHANICS. It is not a staging
+deployment.
+
+### Workflow security, as merged and executed
+
+| Workflow | Permissions in the merged file | Observed |
+| --- | --- | --- |
+| `release.yml` | workflow `contents: read`; gates job `+actions: read`; publish job `+packages: write` | Split held — neither job carried the other's scope |
+| `deploy.yml` | `contents: read`, `actions: read`, `packages: read` | Read-only throughout |
+| `deployment-rehearsal.yml` | `contents: read` | No secrets required |
+
+No new workflow declares a `pull_request` trigger, so untrusted PR code has no
+path to publication or to deployment inputs. All four run logs were scanned for
+credential-shaped values: **zero hits**.
+
+### Ruleset integrity
+
+Ruleset `19769611` after the merge: `enforcement: active`, **zero bypass
+actors**, rule types `deletion`, `non_fast_forward`, `pull_request`,
+`required_status_checks`, `code_scanning`, and exactly the same six required
+checks. No check was removed, and no Sprint 26 workflow became a PR gate.
 
 ## 15. Findings reconciliation
 
 | Finding | Status | Evidence basis |
 | --- | --- | --- |
-| **ORG-PR-001** | **OPEN — materially advanced (second time)** | Mechanism implemented and rehearsed end to end locally (§13). Closure criterion — "a tagged build deploys to a target environment reproducibly" — is **not met**: no target exists, nothing published, no remote workflow run, rollback validated only locally |
+| **ORG-PR-001** | **OPEN — materially advanced** | Mechanism implemented, rehearsed locally (§13), and **executed remotely** (§14): required checks green for the exact SHA, both images published to GHCR, `Deploy`/`Rehearsal`/`Data durability` green. Closure criterion — "a tagged build **deploys to a target environment** reproducibly" — is **not met**: no target exists, nothing has been deployed to one, rollback is rehearsal-only |
 | **ORG-PR-002** | **OPEN** | Out of scope this sprint and untouched. External provider, verified sending domain, and a test mailbox are still absent |
-| **ORG-PR-005** | **OPEN** | Deployment-time backup integration added (labelled pre-migration backup, recorded recovery point, abort-on-failure, no unexplained skips). Nothing schedules, stores off-host, or encrypts a backup; no WAL archiving on a long-lived database; no measured RPO/RTO. Repository integration documentation is explicitly insufficient for closure |
-| **ORG-PR-006** | **OPEN** | Deployment-side secret *handling* enforced (§12). No secret store, no access control, no auditability, no automated rotation, no rehearsed rotation. GitHub Environment secrets are declared but not configured, and would satisfy only the injection half |
+| **ORG-PR-005** | **OPEN** | Deployment-time backup integration added, and `Data durability` run `32777249673` re-verified PITR against the merged source. **A green durability workflow is repository validation, not backup closure**: nothing schedules, stores off-host, or encrypts a backup; no WAL archiving on a long-lived database; no measured RPO/RTO |
+| **ORG-PR-006** | **OPEN** | Deployment-side secret *handling* enforced (§12) and confirmed remotely — permission split held, zero credential-shaped values in any run log. **GitHub workflow/environment controls alone are not closure**: no secret store, no access control, no auditability, no automated rotation, no rehearsed rotation; the `staging-like` environment has zero protection rules |
 | ORG-PR-042 | Closed (Sprint 23), unaffected | The two new pinned images (`registry:3.0.0`, `redis:7.4.10-alpine` in the rehearsal) follow the same tag+digest policy; `infra/compose.deploy.yml` deliberately has no pinned literals because its images come from a release manifest |
 | ORG-PR-028 | Unchanged | The bad-migration rehearsal still needs a real environment |
 | ORG-PR-016 | Unchanged | Nothing here schedules anything |
@@ -515,15 +656,22 @@ No other finding's status changed.
 
 ## 16. Remaining blockers
 
-**To close ORG-PR-001 (all external):** a host that can run Docker Compose; a
-managed or operated PostgreSQL and Redis; a real SMTP provider (the production
-config guard refuses to boot without one); TLS termination and a public origin;
-a GHCR package the host can pull; and a GitHub Environment with its protections.
-Full list: [../deployment.md](../deployment.md#remaining-staging-blockers).
+**To close ORG-PR-001 (all external, none of them repository work):** a host that
+can run Docker Compose; a managed or operated PostgreSQL and Redis; a real SMTP
+provider (the production config guard refuses to boot without one); TLS
+termination and a public origin; a pull credential for the host (or public
+package visibility — the packages now exist and are private); and required
+reviewers on the `staging-like` GitHub Environment, which currently has zero
+protection rules. Full list:
+[../deployment.md](../deployment.md#remaining-staging-blockers).
 
-**Repository-side, gated only on operator instruction:** commit, push, and merge
-this sprint so the release workflow can run and the three new workflows can be
-exercised remotely.
+**Published images are single-architecture `linux/amd64`.** Built on GitHub's
+amd64 runners with no multi-arch manifest list, so an arm64 host cannot run them
+without emulation. Adequate for the x86-64 single-host target this model assumes;
+recorded because it constrains which host may be provisioned. Surfaced by
+inspecting the first real release.
+
+**Repository-side: none.** No defect was discovered by remote execution.
 
 **Environment note for future validation runs:** host port 5432 is held by an
 unrelated local PostgreSQL, so integration validation on this machine runs
@@ -606,38 +754,49 @@ browser globals instead of being ignored.
 ## 18. Final readiness classification
 
 ```
-Deployment mechanics implemented   YES   (rehearsed end to end, locally)
-Deployment target validated        NO    (no target exists)
-Staging readiness                  NO
-Production readiness               NO
+Deployment mechanics validated       YES  (locally AND remotely — §13, §14)
+External deployment target validated NO   (no target exists; nothing deployed)
+Staging readiness                    NO
+Production readiness                 NO
 
 C — Ready to continue production implementation
 Not ready for staging
 Not ready for production
 ```
 
-Four P1 blockers remain open: ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006.
-Sprint 26's own Definition of Done is met for every category the repository can
-satisfy; that is not launch clearance, and a successful deployment would not be
-either.
+**Sprint 26 DoD: MET.** Every category the Sprint Specification scopes to this
+sprint is satisfied with executed evidence, including the requirements that only
+became checkable after merge — real GHCR publication and real remote workflow
+runs. The specification explicitly permits a target abstraction plus an
+operator-assisted deployment path when no external target is available, and that
+is exactly what was built and validated.
 
-The refinement pass **did not move any of this**. It removed the last structural
-obstacle to promotion-by-digest, made rehearsal output impossible to confuse with
-a release, and tied publication to the required checks for the exact release SHA
-— all repository-side corrections. No target was provisioned, nothing was
-published, and no workflow ran remotely.
+**Sprint DoD and ORG-PR-001 closure are different questions.** Four P1 blockers
+remain open (ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006). ORG-PR-001's own
+criterion is a tagged build **deploying to a target environment**; no target
+exists, so nothing has been deployed to one. A green pipeline is not a running
+environment, and neither is launch clearance.
 
 ## 19. Recommended next sprint
 
 **Deployment Pipeline Closure (ORG-PR-001).**
 
-Provision the smallest real staging-like target that satisfies the
-[staging blockers](../deployment.md#remaining-staging-blockers); merge this
-sprint so the release workflow runs and images genuinely exist in GHCR; create
-the `staging-like` GitHub Environment with its protections; deploy that release
-to the target; roll it back; and record the evidence. That converts every
-mechanism built here from *rehearsed* to *executed* and closes ORG-PR-001 on its
-own criterion.
+Sprint 26 state, stated plainly:
+
+```
+Sprint 26 repository work        COMPLETE
+Sprint 26 validation             COMPLETE (local + remote, §13 and §14)
+ORG-PR-001                       OPEN — materially advanced
+external deployment target       STILL REQUIRED
+```
+
+The repository half is done and executed. What remains is entirely operator and
+procurement work: provision the smallest real staging-like target that satisfies
+the [staging blockers](../deployment.md#remaining-staging-blockers); give it a
+pull credential for the two private GHCR packages (which now exist); add
+required reviewers to the `staging-like` GitHub Environment; deploy release
+`91664d0` to that target with `tooling/deploy.sh`; roll it back; and record the
+deployment evidence. That closes ORG-PR-001 on its own criterion.
 
 Chosen over the alternatives on dependency grounds: ORG-PR-001 blocks the
 deployment-dependent half of ORG-PR-005, ORG-PR-006's rehearsed rotation,
@@ -651,3 +810,130 @@ whose blockers are procurement of a different kind and which does not wait on a
 host. **Production Backup Scheduling and Recovery Operations** should not be
 attempted before a target exists: there would be nothing to schedule a backup
 of.
+
+## 20. Documentation index
+
+The authoritative documents Sprint 26 created or changed, and what each one owns.
+Where two documents could describe the same thing, exactly one is authoritative
+and the other links to it.
+
+### Created
+
+| Document | Owns |
+| --- | --- |
+| [../deployment.md](../deployment.md) | **The authoritative deployment document.** Target decision and rejected alternatives, the five-name environment taxonomy, registry publishing, runtime public configuration, build-once/promote-by-digest, release provenance (published vs rehearsal), exact-SHA gate authorization and its race behavior, the release-manifest schema, the deployment configuration contract, secret handling, the deployment workflow and operator path, migration lifecycle, backup/PITR preflight, health/readiness/smoke, deployment evidence, the three rollback categories, the rehearsal, external/operator-only configuration, branch protection, known limitations, staging and production blockers, the extension guide, the changelog, and the recorded remote evidence |
+| **This artifact package** | The official Sprint 26 closure record: what was delivered, what was validated, with which evidence, and what remains |
+
+### Updated
+
+| Document | What Sprint 26 changed |
+| --- | --- |
+| [../deployment-artifacts.md](../deployment-artifacts.md) | Web artifact section rewritten: no build arguments, runtime public configuration, and the promotability property. Migration policy now points at the enforced deployment lifecycle |
+| [../runbook.md](../runbook.md) | A third compose file exists (`infra/compose.deploy.yml`, never run by hand); how to run the local rehearsal; the rehearsal's output is not a release |
+| [../validation.md](../validation.md) | New *Deployment validation* section (deterministic contract tests + rehearsal), the `--` forwarding note, the `pnpm deploy:run` naming caveat, three new workflows described, image-pinning grep list extended, branch-protection note that Sprint 26 changed no required check |
+| [../known-limitations.md](../known-limitations.md) | The deployment bullet now separates *pipeline executed* from *no environment*; the rehearsal is recorded as not-a-deployed-environment |
+| [../../README.md](../../README.md) | Deployment doc linked; the limitations paragraph distinguishes publishing an artifact from deploying it |
+| [README.md](README.md) | Sprint 26 status block: implementation, refinement, and the remote-validation result with run IDs |
+| [findings-register.md](findings-register.md) | ORG-PR-001 progress entries (implementation, refinement, remote validation) and the summary-table row; ORG-PR-005 and ORG-PR-006 integration/handling notes |
+| [security-assessment.md](security-assessment.md) | CI/CD section: exact-SHA release authorization, the permission split as executed, zero credential-shaped values in run logs; infrastructure section: the deployment invariants |
+| [standards-matrix.md](standards-matrix.md) | SSDF Secure Build / Secure Deployment and SLSA build-service and provenance rows moved on executed evidence |
+| [production-roadmap.md](production-roadmap.md) | Phase 4 Sprint 26 entry with its outcome and the next recommended step |
+| [production-scorecard.md](production-scorecard.md) | CI/CD 3 → 4 on executed release-authorization evidence; infrastructure deliberately held at 2 |
+| [production-target.md](production-target.md) | Deployment tooling now exists and is executed; no deployment environment exists |
+| [launch-checklist.md](launch-checklist.md) | LC-1.6 advanced with remote evidence; LC-1.8 added for target provisioning; LC-2.1 and LC-2.3 note the deployment-time integration |
+| [repository-inventory.md](repository-inventory.md) | Scripts, CI, Docker, and tooling inventories for every new file, plus the executed-workflow note |
+
+## 21. Confidence assessment
+
+Staff-level confidence in each boundary, based on what was actually executed.
+**Confidence is not readiness.** High confidence that the pipeline works
+correctly says nothing about whether Orgistry may serve users — that is
+[§18](#18-final-readiness-classification).
+
+| Boundary | Confidence | Rationale |
+| --- | --- | --- |
+| Repository implementation | **HIGH** | 1013 unit + 94 web tests, 119 integration tests, artifact smoke, three durability drills, and a 65-assertion rehearsal — all green locally and, for the CI-covered subset, remotely at the exact release SHA. No defect was found by remote execution |
+| Artifact identity | **HIGH** | Both published tags resolve to exactly the digests the manifest records, verified directly against the registry. The manifest schema refuses tag-pinned references and any non-identity field on an image, and 23/23 invariants passed on the real artifact |
+| Release authorization | **HIGH** | The gate job resolved the actual runs for the exact commit, evaluated at job granularity, and its bounded wait was exercised for real — it polled for ~3 minutes and never treated an unreported run as satisfied. The manifest binds every gate to `source.commit`, and the validator enforces that |
+| Registry publication | **HIGH** | Executed once, successfully, with both images verified by authenticated inspection. Residual: single-architecture amd64, and pull-from-a-deployment-host is unproven because no host exists |
+| Deployment mechanics | **MEDIUM-HIGH** | Every stage — preflight, migrate-once, verified head, staged rollout, readiness, 9-check smoke, evidence, digest verification — is proven repeatedly, but always against throwaway infrastructure. Nothing has run against a long-lived database, real traffic, TLS, or a reverse proxy |
+| Rollback mechanics | **MEDIUM** | Application rollback is executed and asserted end to end, including running-digest restoration and migration skip. But both rehearsal releases differ only by an image label, and no rollback has ever been performed on a deployed environment. Database recovery is separately tested (PITR) but never rehearsed against a real incident |
+| Documentation correctness | **HIGH** | Every link and anchor validated mechanically; a global stale-claim sweep passes; run IDs, SHAs, and digests in the documentation were transcribed from the API and re-verified in this pass |
+
+## 22. Remaining risks
+
+Only risks that survive the validation actually performed. Risks disproven by
+evidence are deliberately absent.
+
+### Repository risks
+
+- **Required-check drift.** `REQUIRED_GATES` mirrors the `main` ruleset by hand.
+  The two matched exactly when verified, but nothing reconciles them
+  automatically: a maintainer who adds a required check to the ruleset without
+  updating the list would authorise releases against the older set. Mitigated by
+  both living in one place and being documented together; not eliminated.
+- **Single-architecture images.** `linux/amd64` only. Compatible with the
+  planned x86-64 single-host target; a non-amd64 target would need a deliberate
+  multi-architecture change in a future sprint.
+- **The rehearsal is the only end-to-end regression test for the deployment
+  path**, and it is manual/weekly rather than a pull-request gate. A change to
+  the deployment tooling merged without running it would not be caught until the
+  next scheduled run. This is the same accepted tradeoff as the PITR drill.
+
+### External infrastructure risks
+
+- **No deployment target exists**, so every environment-shaped property remains
+  unproven: TLS termination, a reverse proxy and correct `TRUST_PROXY`, DNS,
+  real managed PostgreSQL and Redis, and a real SMTP provider.
+- **Both GHCR packages are private** and no host has pull access. Correct as a
+  default; it is work that must happen before a first deployment.
+- **The `staging-like` GitHub Environment has zero protection rules.** It exists
+  only because the first `Deploy` run created it. Until reviewers are added,
+  environment binding provides no approval gate beyond the workflow being
+  manual-dispatch-only.
+- **No backup runs anywhere.** The deployment takes a pre-migration backup, but
+  nothing schedules, stores off-host, or encrypts one, and no database archives
+  WAL (ORG-PR-005).
+
+### Operational risks
+
+- **No observability.** Nothing alerts on a failed deployment, a failed
+  migration, a fail-closed rate limiter, or a readiness flap (ORG-PR-007,
+  ORG-PR-009).
+- **Rollback across a destructive migration is recovery, not rollback**, and
+  that recovery has never been rehearsed against a real incident or
+  production-sized data. RTO remains unmeasured.
+- **Secrets are plaintext files on a host.** No store, access control, read
+  auditing, or automated rotation (ORG-PR-006).
+- **Single operator.** Branch protection requires a pull request but zero
+  approving reviews, because one maintainer cannot approve their own PR. Human
+  review is a convention here, not an enforced control.
+
+## 23. Sprint changelog
+
+The quality evolution that produced this result. Each arrow is a correction or a
+validation boundary, not a work log.
+
+```
+initial deployment/promotion implementation
+  → build-once web artifact correction   (public config moved from build to runtime;
+                                          images.web.apiBaseUrl removed from the schema)
+  → release provenance correction        (published vs rehearsal; working-tree provenance
+                                          with a content fingerprint; never deployable)
+  → exact-SHA gate authorization         (required checks resolved per job for the exact
+                                          commit; run IDs recorded in the manifest)
+  → local full-lifecycle rehearsal       (65 assertions, promotion + rollback)
+  → PR validation                        (#38: six required checks green on the head)
+  → real GHCR publication                (both images, commit-SHA tags, immutable digests)
+  → exact-SHA Release validation         (bounded wait exercised; gates bound to 91664d0)
+  → remote Data Durability validation    (PITR re-verified after Sprint 25 tooling changed)
+  → remote Deployment rehearsal          (same 65 assertions; not machine-specific)
+  → operator-assisted Deploy validation  (manifest, deployability, gates, digests, plan)
+  → final evidence reconciliation        (documentation matches executed reality)
+```
+
+Two defects in Sprint 25 durability tooling were found and fixed along the way —
+a backup of a database with no migration ledger, and `pg_start_server` under
+`set -u` on bash 3.2 — both on the first-deployment path, neither previously
+reachable. Both are re-validated by the drills and by `Data durability`
+`32777249673`.

@@ -1,0 +1,50 @@
+name: Deployment rehearsal
+
+# End-to-end rehearsal of the promotion and deployment lifecycle (Sprint 26,
+# ORG-PR-001): build once, publish to a throwaway registry, capture digests,
+# generate a release manifest, deploy by digest, migrate once, verify
+# readiness, smoke, record evidence, deploy a second release, and roll back to
+# the previous known-good digests.
+#
+# WHY THIS IS NOT IN CI
+# Same reasoning as the PITR drill (.github/workflows/data-durability.yml): the
+# rehearsal builds two full image sets, starts a registry plus PostgreSQL and
+# Redis, and performs three deployments. That is minutes of mostly-serial work
+# per run, and what it validates — the deployment STRATEGY — changes only when
+# the deployment tooling, the compose topology, or the Dockerfiles change. The
+# artifact gate that a code change can realistically break already runs on
+# every push and pull request.
+#
+# Run it on demand (Actions -> Deployment rehearsal -> Run workflow) before
+# merging any change to tooling/deploy*.sh, tooling/lib/deploy-common.sh,
+# tooling/release-manifest.mjs, tooling/deploy-evidence.mjs,
+# infra/compose.deploy.yml, or either Dockerfile. The weekly schedule is the
+# freshness floor, not the only trigger.
+#
+# This workflow needs no secrets, publishes nothing outside the runner, and
+# contacts no real registry, database, or deployment target. Every credential
+# it uses is a fake value the rehearsal generates and deletes.
+on:
+  schedule:
+    # Mondays 05:10 UTC, ahead of the data-durability drill.
+    - cron: '10 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-rehearsal-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rehearsal:
+    name: Deployment rehearsal (publish, deploy, roll back)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No workspace install: the rehearsal drives Docker, the two Dockerfiles,
+      # and the repository's dependency-free Node tooling only.
+      - name: Deployment rehearsal
+        run: ./tooling/deploy-rehearsal.sh

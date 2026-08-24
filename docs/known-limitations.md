@@ -110,14 +110,33 @@ These are intentional non-goals, not bugs:
   no Content-Security-Policy hardening; that remains open.
 - **No organization lifecycle endpoints** (archive/suspend) and **no project
   hard-delete or restore** — deletes are soft.
-- **No object storage** and **no deployment automation to a real
-  environment.** Sprint 23 added production-shaped container artifacts (API +
-  web, non-root, tag+digest-pinned bases), an explicit migration entrypoint, a
+- **No object storage** and **no deployed environment.** Sprint 23 added
+  production-shaped container artifacts (API + web, non-root,
+  tag+digest-pinned bases), an explicit migration entrypoint, a
   production-like compose validation reference, and a CI build/smoke gate (see
-  [deployment-artifacts.md](deployment-artifacts.md)) — but there is still no
-  staging or production environment, no Terraform/Helm/Kubernetes, no
-  container-registry publishing, no image signing/provenance, and no release
-  or deploy pipeline (ORG-PR-001's deployment half remains open).
+  [deployment-artifacts.md](deployment-artifacts.md)). Sprint 26 added the
+  promotion and deployment MECHANISM around them
+  ([deployment.md](deployment.md)): a GHCR publishing workflow, immutable
+  commit-SHA tags with digest capture, a validated release manifest, a
+  single-host deployment topology that cannot rebuild source, an
+  operator-run deployment script with a migration-once contract and verified
+  migration head, a post-deployment smoke command, an append-only deployment
+  evidence ledger, application rollback to the previous known-good digests, and
+  an end-to-end rehearsal that exercises all of it (`pnpm deploy:rehearsal`).
+  **What still does not exist is an environment.** There is no staging or
+  production host, no provider account, no deployment credential, and no
+  GitHub Environment; the release workflow has never run, so no Orgistry image
+  has been published to any registry; neither the release nor the deployment
+  workflow has ever executed on GitHub Actions; rollback is validated only in
+  the local rehearsal; and there is still no Terraform/Helm/Kubernetes, no
+  image signing or SLSA provenance, no TLS/DNS/reverse-proxy configuration, and
+  no observability. ORG-PR-001 remains open, materially advanced.
+  A refinement pass then removed the last structural blocker to true
+  promotion-by-digest: the web image no longer bakes in its API origin, so one
+  validated web digest is deployable to any environment
+  ([deployment.md](deployment.md#runtime-public-configuration)); publication is
+  authorised by the required checks having succeeded for the exact release
+  commit; and rehearsal output is schema-marked as non-deployable.
 - **No production secret management.** Sprint 24 delivered the runtime
   *source* and *rotation* halves — secrets come from a direct environment value
   or a mounted `<NAME>_FILE` secret resolved before validation, access-token
@@ -201,6 +220,20 @@ These are intentional non-goals, not bugs:
   reference instant rather than shortening a window. Boundaries are exercised
   deterministically; a production window shorter than its floor is not
   exercised because it cannot exist.
+- **The deployment rehearsal is not a deployed environment (Sprint 26).**
+  `pnpm deploy:rehearsal` runs the entire promotion and deployment lifecycle —
+  publish, deploy by digest, migrate once, smoke, record evidence, roll back —
+  but it does so against a throwaway registry and throwaway PostgreSQL/Redis
+  containers on one machine, with fake credentials, no TLS, no reverse proxy,
+  and no persistence. Its two releases differ only by an image label, so the
+  rollback check proves digest switching rather than behavioral difference. It
+  proves the MECHANICS and nothing about GHCR, a host, or production readiness.
+  It has also never run on GitHub Actions. Its release manifests are explicitly
+  marked `release.type: rehearsal`, `deployable: false` — and, when the working
+  tree is dirty, `provenance: working-tree` with a content fingerprint instead
+  of an unqualified commit SHA — so rehearsal output can never be read as
+  evidence about a commit, and a real environment refuses to deploy it.
+
 - **Infrastructure images are tag+digest-pinned (Sprint 23, ORG-PR-042
   closed).** Every active image reference — Dockerfile bases, both compose
   files, CI service containers — is pinned `tag@sha256-digest`, immune to tag

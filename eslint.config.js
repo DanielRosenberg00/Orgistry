@@ -67,6 +67,18 @@ export default tseslint.config(
     },
   },
 
+  // ---- Static browser assets served verbatim (never bundled) ----
+  //
+  // `apps/web-demo/public/` is copied into the build output as-is, so these are
+  // classic browser scripts rather than modules in the Vite graph.
+  {
+    files: ['apps/web-demo/public/**/*.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: { ...globals.browser },
+    },
+  },
+
   // ---- Tests: relax rules that only make sense in production code ----
   {
     files: ['**/*.test.{ts,tsx}', '**/test/**/*.{ts,tsx}'],

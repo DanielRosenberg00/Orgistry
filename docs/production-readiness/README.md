@@ -338,6 +338,104 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > Not ready for staging
 > Not ready for production
 > ```
+>
+> **Sprint 26 status (2026-08-24) — production deployment environment and
+> promotion pipeline. COMPLETE in its repository scope; NO FINDING CLOSED,
+> which is the specification-permitted outcome for a sprint whose closure
+> criteria depend on infrastructure that does not exist.** Not yet merged and
+> not yet validated remotely at the time of writing.
+> **Deployment target decision:** single-host Docker Compose, operator-executed,
+> promoted by immutable image digest — following the ratified self-hosted
+> profile ([production-target.md](production-target.md)), explicitly not
+> Kubernetes. Kubernetes, a managed container platform, and an SSH-from-CI
+> deploy job were considered and rejected with recorded reasons.
+> Implemented: a gated GHCR release workflow that runs the artifact smoke gate
+> itself and then publishes the images that gate produced under an immutable
+> commit-SHA tag, capturing their registry digests (the API image is re-tagged,
+> never rebuilt); a schema-validated **release manifest** whose migration head,
+> count, and journal timestamp are DERIVED from the repository rather than
+> supplied, and which is refused if it carries anything credential-shaped; a
+> **build-once/promote-by-digest** contract enforced at four independent points
+> (manifest schema, a digest assertion in the deployment, a deployment topology
+> with no `build:` section anywhere, and a running-container image-ID check
+> after startup); `infra/compose.deploy.yml` plus a two-file deployment
+> configuration contract that keeps every secret in a 0600 operator file the
+> deployment refuses to read if it is group-readable; `tooling/deploy.sh`, a
+> thirteen-stage executor performing a labelled pre-migration backup and
+> recording its recovery point, running migrations **exactly once** from the
+> release's own image, verifying the applied migration head against the release
+> through Drizzle's ledger, deploying API then web, waiting for readiness,
+> proving the running containers are the released digests, and running smoke;
+> `tooling/deploy-smoke.sh`, eight URL-only checks including coarse-readiness
+> disclosure, the six-header security baseline, request-ID propagation, and
+> reading the API origin back out of the SERVED web bundle; an append-only
+> **deployment evidence ledger** that records failed deployments too, cannot
+> claim a validated deployment without observed runtime digests, and keeps a
+> copy of every deployed release manifest on the host; and
+> `tooling/deploy-rollback.sh`, which restores the previous known-good digests
+> — smoke passed, not currently deployed, and **not already rolled away from**,
+> the rule that stops a rollback restoring the release the last rollback was
+> escaping. `pnpm deploy:rehearsal` executes the entire lifecycle locally
+> against a throwaway registry and throwaway services and **PASSES**, including
+> a real rollback and three proven refusals (a tag-pinned manifest, a web image
+> built for another API origin, and a group-readable runtime configuration
+> file). 29 new unit tests pin the manifest and evidence contracts inside the
+> required `Validate (offline)` check.
+> Two latent defects in Sprint 25 tooling were found by the rehearsal and fixed
+> (a backup of a database with no migration ledger — the first-deployment case
+> — and `pg_start_server` under `set -u` on bash 3.2); all three durability
+> drills were re-run locally afterwards and pass.
+> **ORG-PR-001 remains OPEN — materially advanced for the second time.** Its
+> closure criterion is "a tagged build deploys to a target environment
+> reproducibly", and **no target environment exists**: no host, no provider
+> account, no deployment credential, no GitHub Environment. The release
+> workflow has never run, so **no Orgistry image has been published to any
+> registry**; `Release`, `Deploy`, and `Deployment rehearsal` have never
+> executed on GitHub Actions; and rollback is validated only in the local
+> rehearsal. **ORG-PR-005 and ORG-PR-006 gained an integration boundary and a
+> handling boundary respectively and are NOT closer to closure** — deployment-
+> time backup integration is not a backup programme, and enforced secret
+> handling is not secrets management. **ORG-PR-002 was out of scope and is
+> untouched.** Deployment mechanics implemented, deployment target validated,
+> staging readiness, and production readiness are four different things, and
+> only the first is claimed. Four P1 blockers remain open (ORG-PR-001, 002,
+> 005, 006); the binding readiness classification is unchanged:
+>
+> ```
+> C — Ready to continue production implementation
+> Not ready for staging
+> Not ready for production
+> ```
+>
+> **Refinement pass (same day).** A review found three release-integrity
+> defects; all three are fixed, and **no finding status or readiness
+> classification changed**. (1) The web image was environment-specific because
+> `VITE_API_BASE_URL` was compiled into the bundle, so one validated web digest
+> could not be promoted between environments — a contradiction of the sprint's
+> own build-once invariant. The browser's public configuration now arrives at
+> RUNTIME from container variables, `images.web.apiBaseUrl` is deleted from the
+> manifest schema, and the schema refuses any deployment configuration on an
+> image identity; promotability is proven by unit tests, by the artifact smoke
+> test running ONE image as two API origins, and by the rehearsal promoting one
+> release between two configurations with the running digests asserted
+> unchanged. (2) A dirty-tree rehearsal could describe its images with a clean
+> HEAD SHA behind only a printed warning; manifests now declare
+> `release.type` and `source.provenance`, a dirty tree yields `working-tree`
+> provenance with a content fingerprint and can never be deployable, a rehearsal
+> never carries gate evidence, and a real environment refuses a non-deployable
+> manifest. (3) Publication was not tied to the required checks for the release
+> SHA; a dedicated `gates` job now proves all six required checks concluded
+> `success` for the exact commit at job granularity, records their run IDs in the
+> manifest, and treats a missing run as pending rather than a silent pass.
+> Local validation was re-run in full and passes (1013 unit tests, 94 web tests,
+> the artifact smoke gate, all three durability drills, and the rehearsal).
+>
+> See [sprint-26-artifact-package.md](sprint-26-artifact-package.md) and
+> [../deployment.md](../deployment.md). Recommended next: **Deployment Pipeline
+> Closure** — provision the smallest real staging-like target and execute what
+> Sprint 26 built against it; its only prerequisite is an operator/procurement
+> decision, and if that is unavailable, **External Email Provider Closure and
+> Secrets Platform Integration** is the correct fallback.
 
 ## Audit context
 
@@ -378,6 +476,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [sprint-23-artifact-package.md](sprint-23-artifact-package.md) | The Sprint 23 closing artifact (deployable API/web artifacts, migration entrypoint, smoke gate, image policy; ORG-PR-042 closure). |
 | [sprint-24-artifact-package.md](sprint-24-artifact-package.md) | The official Sprint 24 closing artifact (runtime secret sources, JWT key rotation, redaction proofs, external-email evidence state, CI defect history; DoD MET, ORG-PR-002/006 remain open). |
 | [sprint-25-artifact-package.md](sprint-25-artifact-package.md) | The official Sprint 25 closing artifact (persistent-data inventory, logical backup, restore drill, **PITR VERIFIED**, retention policy and cleanup, validation evidence; ORG-PR-015 closed, ORG-PR-005 open and materially advanced). |
+| [sprint-26-artifact-package.md](sprint-26-artifact-package.md) | The official Sprint 26 closing artifact (deployment target decision, environment taxonomy, registry publishing, release manifest, promote-by-digest deployment, migration lifecycle, smoke, evidence, rollback, rehearsal evidence; **no finding closed**, ORG-PR-001 open and materially advanced). |
 
 ## Source-of-truth hierarchy
 

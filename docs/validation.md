@@ -36,6 +36,11 @@ There are two tiers:
 | `pnpm drill:pitr` | durability (Docker + pnpm) | Point-in-time recovery: base backup + verified WAL archiving + recovery to a target time, proving pre-target state survives and post-target damage does not. |
 | `pnpm db:retention -- --dry-run` | durability | Reports retention-eligible rows per category. Mutates nothing. |
 | `pnpm db:retention -- --apply` | durability | Deletes retention-eligible rows in bounded batches. **Destructive** — take a backup first. |
+| `pnpm release:manifest validate PATH` | deployment | A release manifest is well-formed, digest-pinned, tagged with its commit, and free of anything credential-shaped. |
+| `pnpm deploy:run -- --manifest PATH --config PATH` | deployment (Docker) | Deploys one release to one single-host environment and fails on any unmet stage (see [Deployment validation](#deployment-validation)). |
+| `pnpm deploy:smoke -- --api-url URL --web-url URL` | deployment | Eight post-deployment checks against a running deployment, over HTTP only. |
+| `pnpm deploy:rollback -- --config PATH [--dry-run]` | deployment (Docker) | Redeploys the previous known-good digests and re-runs smoke. |
+| **`pnpm deploy:rehearsal`** | **deployment (Docker)** | **The whole lifecycle end to end against a throwaway registry and throwaway services: build once → publish → digest → manifest → deploy → migrate → smoke → evidence → second release → rollback.** |
 
 ## Offline validation: `pnpm validate`
 
@@ -192,6 +197,15 @@ hygiene (no `.env`/git/TypeScript source), secret absence from logs and web
 assets, config-guard rejection of a development secret, clean SIGTERM exit,
 and full teardown.
 
+The Sprint 26 refinement replaced the "public API base URL is baked into the
+bundle" assertion with its opposite: the script now checks that the web
+container SERVES its public configuration at `/public-config.js`, and then
+starts a **second container from the same image** with a different
+`ORGISTRY_PUBLIC_API_BASE_URL` to prove the served configuration follows while
+the built assets contain no such origin. That is the artifact-level regression
+test for promotion-by-digest
+([deployment.md](deployment.md#runtime-public-configuration)).
+
 Sprint 24 (ORG-PR-006) added the runtime secret-source checks to the same
 script: the artifact boots with secrets supplied as mounted **files**
 (`JWT_SECRET_FILE`, `SMTP_PASSWORD_FILE`), the file-loaded secrets never appear
@@ -293,9 +307,84 @@ bumped manually in the same change):
    `docker buildx imagetools inspect <image>:<tag>` (the top-level `Digest:`
    line — the multi-arch list digest, valid on both arm64 and amd64).
 3. Update every reference to the same `tag@digest` (grep for the image name
-   across `apps/*/Dockerfile`, `infra/*.yml`, `.github/workflows/ci.yml`).
+   across `apps/*/Dockerfile`, `infra/*.yml`, `.github/workflows/ci.yml`, and
+   `tooling/` — `tooling/lib/pg-tools.sh` pins PostgreSQL for the durability
+   drills and `tooling/deploy-rehearsal.sh` pins the throwaway registry and
+   Redis).
 4. Run `pnpm artifact:smoke` (and `pnpm infra:up` if the dev stack images
    changed) to prove the pinned images still work.
+
+`infra/compose.deploy.yml` is the one file with no pinned image literals, by
+design: the images it runs are Orgistry's own release images, and their digests
+come from the release manifest at deployment time.
+
+## Deployment validation
+
+Sprint 26 (ORG-PR-001). Two tiers, matching how much infrastructure each needs.
+
+**Deterministic, no infrastructure — runs inside `pnpm validate`.**
+`tooling/release-manifest.test.ts` and `tooling/deploy-evidence.test.ts` are
+part of `pnpm test`, so every pull request already proves the release-manifest
+and deployment-evidence contracts: image references are digest-pinned and never
+tag-pinned, the image tag is the source commit, the migration head is derived
+from the repository journal rather than supplied, the web image declares the API
+origin it was built against, a record cannot claim a validated deployment
+without observed runtime digests, an unexplained backup or migration skip is
+refused, nothing credential-shaped can be written into either record, and the
+rollback target is the most recent smoke-passing release that is neither
+currently deployed nor already rolled away from.
+
+**`pnpm deploy:rehearsal`** — `tooling/deploy-rehearsal.sh`. The full lifecycle
+on one machine: it starts a throwaway OCI registry plus throwaway PostgreSQL and
+Redis, builds both images, pushes them, captures their registry digests,
+generates and validates a release manifest, deploys by digest through the real
+`tooling/deploy.sh` (backup preflight → one-shot migration → verified migration
+head → API → web → readiness → smoke → evidence), asserts the RUNNING container
+image IDs are the manifest's digests, publishes a second release, deploys it
+over the first, rolls back with `tooling/deploy-rollback.sh`, and asserts the
+rollback restored the first release's exact digests and ran no migrations. It
+also **promotes** the first release between the two: the same manifest is
+redeployed with a different public API origin, and the running digests are
+asserted unchanged while the served browser configuration follows — the
+end-to-end proof that promotion needs no rebuild. It proves four refusals: a
+tag-pinned manifest; a rehearsal release offered to a `deployment`-class
+environment; a rehearsal manifest relabelled as published; and a runtime
+configuration file that is not mode 0600.
+
+The two rehearsal releases differ only by an image label, so they have distinct
+digests from identical source — the rollback check is about digest switching,
+not application behavior. Both are pushed under the same tag, which is why a tag
+is never the identity.
+
+Requirements: Docker with compose v2, `node`, `curl`, and free host ports 5001,
+3100, 8180. No workspace install, no real secrets, no real registry, no
+deployment target. Everything it creates — including the temporary runtime
+configuration file holding its fake credentials — is destroyed on exit.
+
+**It is not staging, and its output is not a release.** It proves the deployment
+MECHANICS work. Every manifest it produces is `release.type: rehearsal`,
+`deployable: false`, carries no gate evidence, and — when the working tree is
+dirty — records `provenance: working-tree` with a fingerprint of that tree
+rather than an unqualified commit SHA. A rehearsal result must never be cited as
+evidence about a commit, and a real environment refuses to deploy one. It is not
+evidence that Orgistry has an environment, that anything has been published to
+GHCR, or that the project is ready for staging or production. See
+[deployment.md](deployment.md).
+
+Run it before merging any change to `tooling/deploy*.sh`,
+`tooling/lib/deploy-common.sh`, `tooling/release-manifest.mjs`,
+`tooling/release-gates.mjs`, `tooling/deploy-evidence.mjs`,
+`infra/compose.deploy.yml`, `apps/web-demo/nginx.conf.template`, or either
+Dockerfile.
+
+### Forwarding flags through pnpm
+
+`pnpm run <script> -- --flag` forwards a **bare `--`** to the script under
+pnpm 10. Every shell entry point in `tooling/` now treats it as the conventional
+end-of-options marker (matching the retention CLI, which already did), so the
+documented `pnpm drill:restore -- --with-artifact` form works. Note also that
+`pnpm deploy` is a **built-in pnpm command**; the deployment script is therefore
+`pnpm deploy:run`.
 
 ## Mailpit / email
 
@@ -322,10 +411,10 @@ procedure in
 
 ## CI
 
-Three workflows run on GitHub-hosted CI (Sprint 21 hardening: every action is
-pinned to a full commit SHA, every workflow declares explicit least-privilege
-permissions, and nothing publishes or deploys — see
-[CI security policy](#ci-security-policy)).
+Seven workflows exist on GitHub-hosted CI (Sprint 21 hardening: every action is
+pinned to a full commit SHA and every workflow declares explicit least-privilege
+permissions — see [CI security policy](#ci-security-policy)). Four run
+automatically on the pull-request path; three are manual or scheduled.
 
 `.github/workflows/ci.yml` mirrors this matrix as three jobs:
 
@@ -387,6 +476,45 @@ schedule, manual dispatch) runs the scanners:
   per-range CI runs and equal to the scheduled run. Untracked local files
   (tool caches, databases) are never scanned: both CI and the local command
   use git-aware scanning of tracked content.
+
+`.github/workflows/deployment-rehearsal.yml` (manual + weekly, Mondays 05:10
+UTC) runs the deployment rehearsal (see
+[Deployment validation](#deployment-validation)). Like the PITR drill it is
+deliberately outside the pull-request path — it builds two image sets and
+performs three deployments, and it validates a deployment STRATEGY that changes
+only when the deployment tooling, the compose topology, or the Dockerfiles
+change. **It has never been executed on GitHub Actions.**
+
+`.github/workflows/release.yml` (push to `main`, manual dispatch) is the only
+workflow that publishes anything (Sprint 26, ORG-PR-001), and it publishes only
+what the required checks have already authorised. Its first job resolves the
+actual workflow runs for the **exact release commit** and requires all six
+required checks — `Validate (offline)`, `Integration (PostgreSQL + Redis)`,
+`Artifacts (build + smoke)`, `Dependency audit (pnpm)`,
+`Secret scan (Gitleaks)`, `Analyze (javascript-typescript)` — to have concluded
+`success` at JOB granularity, recording their run IDs. Because it is triggered
+by the same push that starts those checks, it waits with a bounded timeout: a
+failure fails the release immediately, a missing run is pending and never
+counted as success, and a timeout fails with the pending list so an operator can
+re-dispatch. Its second job then runs the artifact gate itself, publishes the
+images that gate produced to GitHub Container Registry under an immutable
+commit-SHA tag, captures their digests, and uploads a release manifest carrying
+the gate run IDs. It never runs on pull requests, so untrusted fork code has no
+path to publishing; `actions: read` is scoped to the gate job and
+`packages: write` to the publish job, so neither can do the other's work; and
+its credential is the job's own short-lived `GITHUB_TOKEN`, passed on stdin. No
+production runtime secret is involved, and image builds take no secrets — and,
+since the refinement, no build arguments at all.
+**It has never been executed, so no Orgistry image has been published anywhere.**
+
+`.github/workflows/deploy.yml` (manual dispatch only) authorises and verifies a
+deployment: it binds to a GitHub Environment, downloads a release run's
+manifest, validates it, refuses a release that is not deployable, re-states the
+gate runs that authorised it, proves both digests still resolve in the registry,
+and emits the deployment plan and operator commands. It is read-only everywhere and does **not** contact a
+deployment target — none is reachable from CI, and target execution is the
+operator-run `tooling/deploy.sh` ([deployment.md](deployment.md)).
+**It has never been executed, and no GitHub Environment is configured.**
 
 `.github/workflows/codeql.yml` (push/PR to main, weekly schedule) runs CodeQL
 static analysis for `javascript-typescript` in source-only mode
@@ -502,6 +630,17 @@ Working-model consequence: commit directly to a branch, open a pull request,
 let the six required checks run, then merge. `git push origin main` will be
 rejected.
 
+**Sprint 26 changes none of this.** The three new workflows are deliberately not
+required checks: `Release` runs only on pushes to `main` and manual dispatch,
+`Deploy` is manual and target-dependent (a deployment must never be a universal
+pull-request gate), and `Deployment rehearsal` is manual/weekly on the same
+reasoning as `Data durability`. The deterministic half of the new deployment
+tooling — the release-manifest and evidence contracts — is already enforced on
+every pull request, because its unit tests run inside `pnpm test` and therefore
+inside the required `Validate (offline)` check. Whether to add
+`Deployment rehearsal` as a required check is a repository-settings decision for
+a maintainer; nothing here mutates remote configuration.
+
 Verify the live configuration — documentation can drift, the API cannot:
 
 ```bash
@@ -534,13 +673,20 @@ these when editing workflows:
   allowlisting it.
 - **CI installs with `--frozen-lockfile`**; the lockfile is only ever changed
   by pnpm commands.
-- **No CI workflow publishes, deploys, or writes repository contents.**
-  Dependency-update PRs (Dependabot) require human review; auto-merge is not
-  configured and must not be enabled.
+- **No workflow on the pull-request path publishes, deploys, or writes
+  repository contents.** Publishing is confined to `release.yml`, which runs
+  only on pushes to `main` and manual dispatch, holds `packages: write` on its
+  publish job alone, and uses the job's own short-lived `GITHUB_TOKEN`. The
+  deployment workflow is read-only everywhere. Dependency-update PRs
+  (Dependabot) require human review; auto-merge is not configured and must not
+  be enabled.
 - **Routine CI never consumes a real credential.** No workflow reads a
   production runtime secret, an email-provider credential, or a
   secrets-manager credential; the repository has no configured Actions
-  environments and no repository secrets. The three jobs run on fake,
+  environments and no repository secrets. `deploy.yml` declares an
+  `environment:`, which is where a future deployment credential belongs — until
+  a maintainer creates that environment in repository settings, it grants no
+  protection beyond the workflow being manual-dispatch-only. The three jobs run on fake,
   checked-in or generated values only. External email validation is a
   **manual, documented** procedure
   ([rotation-runbook.md](rotation-runbook.md#validate-external-email-delivery)),

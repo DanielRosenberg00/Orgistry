@@ -161,6 +161,16 @@ than documented — ORG-PR-037).
 > (`apps/api/src/maintenance/retention-command.ts` via tsx). The API build now
 > emits a third bundle, `dist/retention.mjs`, so the retention command ships in
 > the same image as the service.
+>
+> **Update (Sprint 26, 2026-08-24):** added the deployment surface —
+> `release:manifest` (`tooling/release-manifest.mjs`), `deploy:run`
+> (`tooling/deploy.sh`), `deploy:smoke` (`tooling/deploy-smoke.sh`),
+> `deploy:rollback` (`tooling/deploy-rollback.sh`), `deploy:evidence`
+> (`tooling/deploy-evidence.mjs`), and `deploy:rehearsal`
+> (`tooling/deploy-rehearsal.sh`). The executor is `deploy:run`, not `deploy`,
+> because `pnpm deploy` is a built-in pnpm command that shadows a package
+> script of that name. Every `tooling/` shell entry point now also tolerates
+> the bare `--` that `pnpm run <script> -- --flag` forwards.
 
 ## CI inventory
 
@@ -210,6 +220,25 @@ block (ORG-PR-019); no dependency/secret/SAST scanning, no Dependabot/Renovate
 > ORG-PR-001's "no release/deploy job" gap narrows to deployment only. See
 > [sprint-23-artifact-package.md](sprint-23-artifact-package.md).
 
+> **Update (Sprint 26, 2026-08-24):** three workflows added, none of them on
+> the pull-request path and none of them yet executed remotely.
+> `release.yml` (push to `main` + manual) runs the artifact gate itself and
+> then publishes the images that gate produced to GHCR under an immutable
+> commit-SHA tag, captures their digests, and uploads a validated release
+> manifest — the repository's **only** publishing workflow, with
+> `packages: write` on its publish job alone and the job's own short-lived
+> `GITHUB_TOKEN` as its credential. Its FIRST job additionally proves all six
+> required checks succeeded for the EXACT release commit before anything is
+> published, with `actions: read` scoped to that job alone and no publishing
+> permission. `deploy.yml` (manual only) binds to a
+> GitHub Environment and is read-only everywhere: it validates a release
+> manifest, refuses a release that does not declare itself deployable, proves
+> both digests still resolve in the registry, and emits a deployment plan — it
+> does **not** contact a target. `deployment-rehearsal.yml` (manual + weekly) runs
+> the end-to-end deployment rehearsal, following the `data-durability.yml`
+> precedent for expensive strategy-level validation. The six required checks
+> are unchanged. See [sprint-26-artifact-package.md](sprint-26-artifact-package.md).
+
 ## Docker inventory
 
 `infra/docker-compose.yml` — local Postgres 16 / Redis 7 / Mailpit (`latest`),
@@ -231,6 +260,32 @@ floating tags (ORG-PR-042). `infra/postgres-init/01-create-test-db.sql` creates
 > Every active image reference — Dockerfile bases, both compose files, CI
 > service containers — is exact-patch-tag + manifest-list-digest pinned
 > (ORG-PR-042 CLOSED). See [../deployment-artifacts.md](../deployment-artifacts.md).
+
+> **Update (Sprint 26 refinement, 2026-08-24):** the web artifact is now
+> environment-neutral. `apps/web-demo/nginx.conf` became
+> `apps/web-demo/nginx.conf.template` (installed into `/etc/nginx/templates/`
+> and rendered by the base image's own entrypoint step at container start); it
+> serves `/public-config.js` from `ORGISTRY_PUBLIC_*` container variables. The
+> web Dockerfile takes **no build arguments**. New:
+> `apps/web-demo/src/public-config.ts` (resolution rules plus the guard that
+> refuses credential-shaped keys) and `apps/web-demo/public/public-config.js`
+> (an empty assignment for the dev server; a deployed container never serves
+> it).
+>
+> **Update (Sprint 26, 2026-08-24):** a THIRD compose file exists and is not
+> interchangeable with the other two. `infra/compose.deploy.yml` is the
+> single-host DEPLOYMENT topology: only `api`, `web`, and a profile-gated
+> one-shot `migrate` service, images supplied by digest from a release
+> manifest, runtime configuration from an operator file outside the
+> repository, loopback-bound ports, and — structurally — **no `build:` section
+> anywhere**, which is what makes a target incapable of rebuilding source.
+> PostgreSQL, Redis, and SMTP are deliberately absent: they are
+> operator-provided. `infra/deploy.env.example` documents the deployment
+> configuration contract. It is the one image-bearing file with no pinned
+> literals, by design — its images are Orgistry's own releases.
+> `tooling/deploy-rehearsal.sh` pins two more images under the same policy
+> (`registry:3.0.0`, `redis:7.4.10-alpine`).
+> See [../deployment.md](../deployment.md).
 
 ## Test inventory (67 test files)
 
@@ -294,3 +349,28 @@ runtime/migration/env-contract/image-policy reference).
 >   for its identifiers; drift-guarded by `tooling/restore-drill-fixture.test.ts`).
 > - Generated and NEVER committed: `backups/`, `*.dump`, `*.dump.sha256`
 >   (git-ignored; the drills use temporary directories deleted on exit).
+
+> **Update (Sprint 26, 2026-08-24) — deployment tooling.**
+> - `tooling/lib/release-manifest.mjs` + `tooling/release-manifest.mjs` — the
+>   release identity model and its CLI (`generate`/`validate`/`read`).
+> - `tooling/lib/deploy-evidence.mjs` + `tooling/deploy-evidence.mjs` — the
+>   deployment evidence ledger and its CLI
+>   (`record`/`rollback-target`/`current`/`validate`).
+> - `tooling/lib/deploy-common.sh` — shared reporting, the non-executing
+>   deployment-config parser, HTTP probes, and digest helpers.
+> - `tooling/deploy.sh` — the thirteen-stage deployment executor.
+> - `tooling/deploy-smoke.sh` — eight URL-only post-deployment checks.
+> - `tooling/deploy-rollback.sh` — application rollback to the previous
+>   known-good release.
+> - `tooling/deploy-rehearsal.sh` — the end-to-end lifecycle rehearsal.
+> - `tooling/lib/release-gates.mjs` + `tooling/release-gates.mjs` — the
+>   required-check contract, its per-job evaluation (satisfied / pending /
+>   failed), and the GitHub Actions API boundary that verifies a release
+>   candidate's gates with a bounded wait.
+> - Tests: `tooling/release-manifest.test.ts`, `tooling/release-gates.test.ts`,
+>   `tooling/deploy-evidence.test.ts` (61 tests, inside `pnpm test`), plus
+>   `apps/web-demo/src/public-config.test.ts` (16 tests, inside `pnpm test:web`).
+> - Generated and NEVER committed: `artifacts/` (release manifests) and
+>   `deployments/` (evidence ledgers) — git-ignored because they are
+>   per-build and per-host operational state, not because they are sensitive;
+>   both are non-secret by construction and validated as such.

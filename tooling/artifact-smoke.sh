@@ -13,8 +13,9 @@
 #    4. /health and /ready succeed; the production /ready body stays coarse
 #       (no dependency inventory — Sprint 19 disclosure policy);
 #    5. readiness fails closed (503) when Redis stops, and recovers;
-#    6. the web artifact serves the built assets, the SPA fallback works, and
-#       the configured public API base URL is baked into the bundle;
+#    6. the web artifact serves the built assets, the SPA fallback works, its
+#       PUBLIC configuration is served at runtime rather than baked in, and the
+#       SAME image adopts a different API origin without being rebuilt;
 #    7. both runtimes execute as non-root;
 #    8. no .env files, git metadata, or TypeScript source reach the API image;
 #    9. the fake runtime secrets never appear in API logs;
@@ -47,6 +48,11 @@ FAKE_JWT_SECRET='orgistry-smoke-jwt-not-a-real-secret-orgistry-smoke-jwt'
 FAKE_SMTP_PASSWORD='orgistry-smoke-smtp-not-a-real-credential'
 FAKE_DB_PASSWORD='orgistry-smoke-db-not-a-real-credential'
 EXPECTED_WEB_API_BASE_URL='http://localhost:3000'
+# A second, deliberately different public API origin used to prove that one web
+# IMAGE can serve more than one environment (Sprint 26 refinement).
+PROMOTED_WEB_API_BASE_URL='https://api.promoted.orgistry.dev'
+PROMOTION_WEB_CONTAINER='orgistry-smoke-promoted-web'
+PROMOTED_WEB_URL='http://localhost:8090'
 
 # Sprint 24: fake secrets written to TEMPORARY files (never to the repository)
 # to exercise the `<NAME>_FILE` mounted-secret path. Distinct from the direct
@@ -62,7 +68,7 @@ fail() { printf 'SMOKE FAIL: %s\n' "$1" >&2; exit 1; }
 
 cleanup() {
   step 'Cleanup: removing containers, networks, volumes, and temp secret files'
-  docker rm -f "${FILE_SECRET_CONTAINER}" >/dev/null 2>&1 || true
+  docker rm -f "${FILE_SECRET_CONTAINER}" "${PROMOTION_WEB_CONTAINER}" >/dev/null 2>&1 || true
   "${COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   # Temporary secret material never outlives the run.
   if [[ -n "${SECRET_DIR}" && -d "${SECRET_DIR}" ]]; then
@@ -142,10 +148,35 @@ step 'Web SPA history fallback serves index.html for client routes'
 spa_body="$(curl -s "${WEB_URL}/organizations/some-client-route")"
 echo "${spa_body}" | grep -q '<div id="root">' || fail 'SPA fallback did not serve index.html'
 
-step 'Configured public API base URL is baked into the web bundle'
-"${COMPOSE[@]}" exec -T web sh -c \
-  "grep -rq '${EXPECTED_WEB_API_BASE_URL}' /usr/share/nginx/html/assets" \
-  || fail "web bundle does not contain ${EXPECTED_WEB_API_BASE_URL}"
+step 'Web artifact serves its PUBLIC configuration at runtime'
+# Sprint 26 refinement: the API origin is no longer compiled into the bundle.
+# It is rendered by nginx at container start from ORGISTRY_PUBLIC_API_BASE_URL,
+# which is what lets one web digest be promoted between environments.
+public_config="$(curl -s "${WEB_URL}/public-config.js")"
+grep -qF "\"apiBaseUrl\":\"${EXPECTED_WEB_API_BASE_URL}\"" <<<"${public_config}" \
+  || fail "runtime public config does not declare ${EXPECTED_WEB_API_BASE_URL}: ${public_config}"
+grep -q 'window.__ORGISTRY_PUBLIC_CONFIG__' <<<"${public_config}" \
+  || fail 'runtime public config does not assign the expected global'
+
+step 'The SAME web image serves a DIFFERENT API origin without rebuilding'
+# The promotability proof: one image, two containers, two origins, no build.
+# If this ever fails, the web artifact has become environment-specific again and
+# the build-once/promote-by-digest model is broken (docs/deployment.md).
+docker run -d --name "${PROMOTION_WEB_CONTAINER}" \
+  -p 8090:8080 \
+  -e "ORGISTRY_PUBLIC_API_BASE_URL=${PROMOTED_WEB_API_BASE_URL}" \
+  orgistry-web:production-like >/dev/null
+wait_for_status "${PROMOTED_WEB_URL}/" 200 30
+promoted_config="$(curl -s "${PROMOTED_WEB_URL}/public-config.js")"
+grep -qF "\"apiBaseUrl\":\"${PROMOTED_WEB_API_BASE_URL}\"" <<<"${promoted_config}" \
+  || fail "the same image did not adopt ${PROMOTED_WEB_API_BASE_URL}: ${promoted_config}"
+# The promoted origin must exist ONLY in the runtime config, never in the
+# immutable bundle — that is the difference between configuration and identity.
+if docker exec "${PROMOTION_WEB_CONTAINER}" sh -c \
+  "grep -rqF '${PROMOTED_WEB_API_BASE_URL}' /usr/share/nginx/html/assets"; then
+  fail 'the promoted API origin is baked into the built assets; the web image is still environment-specific'
+fi
+docker rm -f "${PROMOTION_WEB_CONTAINER}" >/dev/null
 
 step 'Server secrets are absent from the web bundle'
 if "${COMPOSE[@]}" exec -T web sh -c \

@@ -31,9 +31,9 @@ average — do not read a high domain score as launch clearance.
 | Application security | 2 | Yes | Safe error handler, no DTO leaks, in-mem token | No headers/proxy/global limit | ORG-PR-010, 011, 012, 013 | High |
 | Frontend | 1 | No (target: demo) | Exemplary token/secret handling | No error boundary/CSP | ORG-PR-023, 035, 036 | High |
 | Testing | 2 | Partly | Strong negative/isolation coverage + real-DB quota/authz concurrency races (S20) | No failure-injection/E2E | ORG-PR-026 | High |
-| CI/CD | 3 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22); deployable-artifact build+smoke gate in CI (S23) | No release pipeline | ORG-PR-001 | High |
-| Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); every active image reference tag+digest-pinned (S23, ORG-PR-042 closed); two documented advisory acceptances | No provenance/signing; no registry publishing | ORG-PR-001 | High |
-| Infrastructure | 2 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23) | No deployment environment, pipeline, or IaC; no least-privilege DB roles | ORG-PR-001, 022 | High |
+| CI/CD | 3 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22); deployable-artifact build+smoke gate in CI (S23); gated GHCR release workflow, environment-scoped deployment-verification workflow, and a deployment rehearsal workflow (S26) | The release and deployment workflows have never executed remotely; nothing has been published | ORG-PR-001 | High |
+| Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); every active image reference tag+digest-pinned (S23, ORG-PR-042 closed); build-once/promote-by-digest enforced at four points and a schema-validated release manifest (S26); two documented advisory acceptances | No provenance/signing; nothing published to a registry yet | ORG-PR-001 | High |
+| Infrastructure | 2 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23); single-host deployment topology, promote-by-digest deployment script with migrate-once + verified head, post-deploy smoke, evidence ledger, and rehearsed application rollback (S26) | **No deployment environment exists** — no host, provider account, deployment credential, or GitHub Environment; nothing published to a registry; no IaC; no TLS/DNS/proxy; no least-privilege DB roles | ORG-PR-001, 022 | High |
 | Reliability | 2 | Yes | Graceful shutdown; readiness probes; tested recovery tooling (S25) | No scheduled backups; fail-open non-sensitive limiters | ORG-PR-005, 009, 016 | High |
 | Backup & recovery | 2 | Yes | Repeatable logical backup + checksum + provenance; restore drill into a fresh DB reaching the packaged artifact incl. an authenticated read of restored data; **PITR VERIFIED** (base backup + archived WAL + recovery target); CI-gated; command-level runbooks (S25) | Nothing schedules a backup; no remote/encrypted storage; no continuous WAL archiving on a long-lived DB; no provider-managed PITR; no measured RPO/RTO; failed-migration recovery unrehearsed | ORG-PR-005, 028 | High |
 | Observability | 1 | Yes | Structured logs + request IDs | No metrics/tracing/alerts | ORG-PR-007 | High |
@@ -46,11 +46,15 @@ average — do not read a high domain score as launch clearance.
 - **Authorization/tenant isolation/documentation (level 3)** are genuine strengths
   and must not regress during remediation. They are *not* launch clearance.
 - **Backup & recovery (level 2 since S25 — the capability is proven, nothing
-  runs it)**, **infrastructure (level 2 since S23 — artifacts exist, deployment
-  does not)**, and **observability / operations (level 1)** are the domains
+  runs it)**, **infrastructure (still level 2 after S26 — artifacts and now a
+  rehearsed deployment MECHANISM exist, an environment does not)**, and
+  **observability / operations (level 1)** are the domains
   gating any real deployment — all downstream of the Phase 4/5 roadmap work.
   Backup & recovery moved 0 → 2, not to 3: a verified drill is a capability,
-  and a capability nothing schedules is not a backup posture.
+  and a capability nothing schedules is not a backup posture. Infrastructure
+  stayed at 2 after Sprint 26 for the same reason: a rehearsed deployment
+  pipeline with no target is a capability, not infrastructure. It reaches 3
+  when a real environment has been deployed to and rolled back.
 - **Authentication and application security (level 2)** carry the security-relevant
   P1/P2s that Phase 2/3 close.
 
@@ -198,3 +202,44 @@ the P1/P2 work and the launch gate (see
 > **Sprint 26 — Deployment Environment, Promotion, and Rollback (ORG-PR-001)**,
 > which is the prerequisite that unblocks the deployment-dependent half of
 > ORG-PR-005 as well as ORG-PR-006's rehearsed rotation.
+
+> **Scorecard update (Sprint 26, 2026-08-24).** **No domain changes maturity
+> level, and no finding closes.** CI/CD, supply chain, and infrastructure all
+> gain substantial evidence — a gated GHCR release workflow that publishes the
+> images its own artifact gate produced, immutable commit-SHA tags with digest
+> capture, a schema-validated release manifest, a deployment topology that
+> structurally cannot rebuild source, an operator-run deployment with a
+> migrate-exactly-once contract and a verified applied migration head,
+> post-deployment smoke, an append-only evidence ledger, application rollback to
+> the previous known-good digests, and an end-to-end rehearsal that executes the
+> whole lifecycle and passes locally. **Infrastructure deliberately stays at 2.**
+> A rehearsed deployment pipeline with no target is a capability, not
+> infrastructure: no host, provider account, deployment credential, or GitHub
+> Environment exists; the release workflow has never run, so **no Orgistry image
+> has been published to any registry**; neither the release nor the deployment
+> workflow has ever executed on GitHub Actions; and rollback is validated only
+> in the local rehearsal, between two releases differing by an image label,
+> against a throwaway database. Infrastructure reaches 3 when a real environment
+> has actually been deployed to and rolled back. **Backup & recovery stays at
+> 2**: the deployment integrates the Sprint 25 backup at the one point that
+> matters (a labelled pre-migration backup whose recovery point is recorded,
+> with an unexplained skip refused), which is integration, not a backup
+> programme. **Secrets/Ops stays where it was**: deployment-side secret
+> *handling* is enforced (0600 runtime configuration file, one secret read and
+> never logged, credential-shape guards on manifests and evidence, no long-lived
+> registry credential), but there is still no secret store, access control,
+> auditing, or automated rotation. **4 P1 blockers remain open (ORG-PR-001,
+> 002, 005, 006).** The overriding rule still yields *not production-ready*; the
+> state remains **C — Ready to continue production implementation** (not ready
+> for staging, not ready for production). Recommended next: **Deployment
+> Pipeline Closure** — provision the smallest real staging-like target, run the
+> release workflow so images actually exist in GHCR, deploy and roll back
+> against that target, and close ORG-PR-001 on evidence. It is recommended over
+> the email/secrets or backup-scheduling alternatives on dependency grounds:
+> ORG-PR-001 blocks the deployment-dependent halves of ORG-PR-005, ORG-PR-006
+> (a rehearsed rotation needs a real runtime), ORG-PR-007, and ORG-PR-008, and
+> Sprint 26 leaves it needing exactly one thing the repository cannot supply —
+> a host. Its prerequisite is an operator/procurement decision, not a code
+> change; if that decision is not available, **External Email Provider Closure
+> and Secrets Platform Integration (ORG-PR-002 + ORG-PR-006)** is the correct
+> fallback.

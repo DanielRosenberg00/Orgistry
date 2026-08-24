@@ -577,3 +577,89 @@ describe('access-token secret rotation config (Sprint 24)', () => {
     expect(config.auth.previousJwtSecret).toBe(RETIRING_SECRET);
   });
 });
+
+describe('data retention configuration (Sprint 25)', () => {
+  it('exposes documented defaults when nothing is set', () => {
+    const config = loadConfig(baseEnv());
+
+    expect(config.retention).toEqual({
+      securityEventDays: 180,
+      expiredAuthTokenDays: 30,
+      endedSessionDays: 90,
+      cleanupBatchSize: 1000,
+    });
+  });
+
+  it('accepts explicit operator values', () => {
+    const config = loadConfig({
+      ...baseEnv(),
+      RETENTION_SECURITY_EVENT_DAYS: '365',
+      RETENTION_EXPIRED_AUTH_TOKEN_DAYS: '14',
+      RETENTION_ENDED_SESSION_DAYS: '30',
+      RETENTION_CLEANUP_BATCH_SIZE: '5000',
+    });
+
+    expect(config.retention).toEqual({
+      securityEventDays: 365,
+      expiredAuthTokenDays: 14,
+      endedSessionDays: 30,
+      cleanupBatchSize: 5000,
+    });
+  });
+
+  it('rejects zero and negative retention windows', () => {
+    // A window of 0 would make `cutoff = now`, putting live rows in scope; a
+    // negative window would push the cutoff into the FUTURE and make every
+    // row eligible. Both must fail the process, not widen the predicate.
+    const dangerous = [
+      ['RETENTION_SECURITY_EVENT_DAYS', '0'],
+      ['RETENTION_SECURITY_EVENT_DAYS', '-1'],
+      ['RETENTION_EXPIRED_AUTH_TOKEN_DAYS', '0'],
+      ['RETENTION_EXPIRED_AUTH_TOKEN_DAYS', '-30'],
+      ['RETENTION_ENDED_SESSION_DAYS', '0'],
+      ['RETENTION_ENDED_SESSION_DAYS', '-7'],
+    ] as const;
+
+    for (const [name, value] of dangerous) {
+      expect(
+        () => loadConfig({ ...baseEnv(), [name]: value }),
+        `${name}=${value} must be rejected`,
+      ).toThrow(ConfigValidationError);
+    }
+  });
+
+  it('rejects windows below the documented minimum safe retention', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv(), RETENTION_SECURITY_EVENT_DAYS: '29' }),
+    ).toThrow(/at least 30 days/);
+    expect(() =>
+      loadConfig({ ...baseEnv(), RETENTION_ENDED_SESSION_DAYS: '6' }),
+    ).toThrow(/at least 7 days/);
+  });
+
+  it('rejects a batch size outside 1..50000', () => {
+    for (const value of ['0', '-1', '50001']) {
+      expect(
+        () => loadConfig({ ...baseEnv(), RETENTION_CLEANUP_BATCH_SIZE: value }),
+        `RETENTION_CLEANUP_BATCH_SIZE=${value} must be rejected`,
+      ).toThrow(ConfigValidationError);
+    }
+    expect(
+      loadConfig({ ...baseEnv(), RETENTION_CLEANUP_BATCH_SIZE: '50000' }).retention
+        .cleanupBatchSize,
+    ).toBe(50000);
+  });
+
+  it('rejects a non-numeric window without falling back to the default', () => {
+    expect(() =>
+      loadConfig({ ...baseEnv(), RETENTION_SECURITY_EVENT_DAYS: 'forever' }),
+    ).toThrow(ConfigValidationError);
+  });
+
+  it('keeps the default security-event window above the largest plan audit retention', () => {
+    // The seeded plan catalog advertises at most 90 days of audit retention
+    // (`plans.audit_retention_days`, migration 0005). The default cleanup
+    // window must not delete history a plan promises to keep.
+    expect(loadConfig(baseEnv()).retention.securityEventDays).toBeGreaterThan(90);
+  });
+});

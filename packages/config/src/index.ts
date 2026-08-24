@@ -6,7 +6,12 @@ import {
 } from './schema';
 import { resolveSecretSources, type SecretFileReader } from './secret-source';
 
-export { envSchema, parseTrustProxy, TRUST_PROXY_MAX_HOPS } from './schema';
+export {
+  envSchema,
+  parseTrustProxy,
+  RETENTION_MAX_BATCH_SIZE,
+  TRUST_PROXY_MAX_HOPS,
+} from './schema';
 export type { Env, TrustProxySetting } from './schema';
 export {
   FILE_BACKED_SECRET_NAMES,
@@ -257,6 +262,29 @@ export interface Config {
     /** Minimum seconds between `last_used_at` writes for a single key. */
     readonly lastUsedThrottleSeconds: number;
   };
+  /**
+   * Data-retention windows consumed by the one-shot retention cleanup
+   * (Sprint 25, ORG-PR-015 — `apps/api/src/maintenance/`). Each window is the
+   * minimum age, in whole days, a row must reach before it becomes eligible
+   * for deletion. Nothing reads these values except the cleanup command; the
+   * request path is unaffected.
+   */
+  readonly retention: {
+    /** Age floor for `security_events` deletion, measured on `created_at`. */
+    readonly securityEventDays: number;
+    /**
+     * Age floor for EXPIRED account-lifecycle token rows (email verification,
+     * password reset, pending registrations), measured on `expires_at`.
+     */
+    readonly expiredAuthTokenDays: number;
+    /**
+     * Age floor for ENDED session state (sessions and their refresh-token
+     * family records), measured on `expires_at`.
+     */
+    readonly endedSessionDays: number;
+    /** Rows deleted per statement per category (one batch per transaction). */
+    readonly cleanupBatchSize: number;
+  };
 }
 
 function parseOrigins(raw: string): string[] {
@@ -420,6 +448,12 @@ function toConfig(env: Env): Config {
     },
     apiKeys: {
       lastUsedThrottleSeconds: env.API_KEY_LAST_USED_THROTTLE_SECONDS,
+    },
+    retention: {
+      securityEventDays: env.RETENTION_SECURITY_EVENT_DAYS,
+      expiredAuthTokenDays: env.RETENTION_EXPIRED_AUTH_TOKEN_DAYS,
+      endedSessionDays: env.RETENTION_ENDED_SESSION_DAYS,
+      cleanupBatchSize: env.RETENTION_CLEANUP_BATCH_SIZE,
     },
   };
 }

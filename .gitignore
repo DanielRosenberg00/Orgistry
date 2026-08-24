@@ -17,6 +17,14 @@ build/
 npm-debug.log*
 pnpm-debug.log*
 
+# Database backups (Sprint 25, ORG-PR-005). A logical backup contains user,
+# organization, and audit data plus password/token/API-key hashes. It must
+# never enter version control. `tooling/db-backup.sh` writes here by default
+# and refuses to write inside .git; the drills use temporary directories.
+backups/
+*.dump
+*.dump.sha256
+
 # Local assistant/tooling state (never commit: contains local caches and
 # scanner-sensitive blobs, e.g. the tokensave WAL)
 .claude/

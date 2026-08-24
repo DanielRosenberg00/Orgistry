@@ -297,26 +297,61 @@ Phase 6: End-to-End Verification & Security Review
   security model; the chain `74f50e4` → `486bee8` → `de6780f` is preserved as
   evidence that CI worked. Closing artifact:
   [sprint-24-artifact-package.md](sprint-24-artifact-package.md).
-- **Sprint 25 (next) — Backup, PITR, Restore, and Retention Foundation.**
-  Primary focus: **ORG-PR-005** (automated backups, PITR, and a tested restore
-  drill — the mandatory launch gate) and **ORG-PR-015** (retention/cleanup
-  foundation, to the extent the Sprint 25 specification authorizes; enforcement
-  depends on the background runtime, ORG-PR-016). Authorized now that Sprint 24
-  is complete. Two Sprint 24 residuals run **alongside** it and are not absorbed
-  into it: the operator-blocked **ORG-PR-002** external-email validation
+- **Sprint 25 (complete in its repository scope, 2026-08-24) — Backup, PITR,
+  Restore, and Retention Foundation.** Delivered: a persistent-data inventory
+  fixing PostgreSQL as the only durability boundary; a repeatable logical
+  backup (`tooling/db-backup.sh`) with checksum and provenance metadata, every
+  PostgreSQL client tool run from the repository's own pinned image; a restore
+  drill (`tooling/db-restore-drill.sh`) that exercises the real backup path,
+  rejects a corrupted artifact, restores into a genuinely empty target, asserts
+  schema/migration-ledger/entity/relational/API-key-hash survival, and requires
+  a migration re-run to be a no-op — with an `--with-artifact` mode completing
+  the recovery contract through the packaged API image to `/health`, `/ready`,
+  and an API-key-authenticated read of restored data; and **PITR VERIFIED**
+  (`tooling/db-pitr-drill.sh`): base backup + demonstrably-working WAL
+  archiving + `recovery_target_time`, with pre-target rows that exist only in
+  archived WAL recovered and post-target `DELETE`/`DROP TABLE` damage undone.
+  Retention shipped as a six-category policy catalog, a dry-run-by-default
+  one-shot cleanup runnable from source and from the deployable artifact,
+  hard-floored typed configuration, four additive cleanup indexes (migration
+  `0012`), and 54 retention tests including 21 against live PostgreSQL (plus 7
+  drill-fixture drift tests).
+  **ORG-PR-015 is CLOSED. ORG-PR-005 remains OPEN — materially advanced**: its
+  repository-controlled half is complete and verified; nothing schedules a
+  backup, no artifact is stored remotely or encrypted, no long-lived database
+  archives WAL, no provider-managed PITR exists, and no RPO/RTO has been
+  measured — all dependent on Phase 4 (ORG-PR-001). ORG-PR-028's recovery
+  MECHANISM now exists but its rehearsal does not. Two Sprint 24 residuals ran
+  **alongside** Sprint 25 and were not absorbed into it: the operator-blocked
+  **ORG-PR-002** external-email validation
   ([../rotation-runbook.md](../rotation-runbook.md#validate-external-email-delivery))
   and **ORG-PR-006**'s residual secrets-management capability. Neither is
-  closed; both remain outstanding production-readiness work.
+  closed; both remain outstanding production-readiness work. Closing artifact:
+  [sprint-25-artifact-package.md](sprint-25-artifact-package.md).
+- **Sprint 26 (recommended next) — Production Deployment Environment,
+  Promotion, and Rollback (ORG-PR-001).** Now the single largest unblocker on
+  the critical path: it is the prerequisite for the deployment-dependent half
+  of ORG-PR-005 (a scheduled, encrypted, remotely-stored backup and continuous
+  WAL archiving on a real database), for ORG-PR-006's rehearsed rotation, for
+  ORG-PR-028's bad-migration rehearsal, and for any RPO/RTO measurement.
   The later Phase 5–6 work below keeps its content, ordering,
   dependencies, and exit criteria but carries no assigned sprint numbers
   yet — numbers are assigned when each item is actually scheduled.
 
 ### Phase 5 — Reliability, recovery & operations
-- **Later sprint — Backups, DR & background jobs.** Automated encrypted backups +
-  PITR, **tested restore drill**, migration-recovery rehearsal, scheduler/worker,
-  retention/expiry jobs, retention enforcement, account deletion/export.
-  Closes ORG-PR-005, 015, 016, 025, 028, 043. Exit: restore drill reconstructs DB
-  to a timestamp and passes checks; jobs observable & idempotent.
+- **Later sprint — Backups, DR & background jobs.** *Scope reduced by Sprint
+  25.* Already delivered there: the backup command, the tested restore drill,
+  the verified PITR capability, and retention policy + enforcement
+  (ORG-PR-015 **closed**). **Remaining for this sprint:** automated, encrypted,
+  remotely-stored backups on a real deployment; continuous WAL archiving with
+  archive-health monitoring; a provider-managed or self-managed PITR window;
+  measured RPO/RTO; a rehearsed migration-recovery
+  (ORG-PR-028); a scheduler/worker to invoke the existing backup and retention
+  commands with metrics and failure alerting (ORG-PR-016); and account
+  deletion/export (ORG-PR-025, 043). Closes ORG-PR-005, 016, 025, 028, 043.
+  Exit: a scheduled backup lands in encrypted remote storage, a restore from
+  that artifact reconstructs the DB to a timestamp and passes checks, and the
+  maintenance jobs are observable and idempotent.
 - **Later sprint — Observability & incident readiness.** Metrics + tracing +
   dashboards + alerts, production runbooks, incident process, ops documentation.
   Closes ORG-PR-007, 008, 027; supports ORG-PR-009 alerting. Exit: dashboard +
@@ -340,7 +375,10 @@ validation) → the backups/DR work →
 the verification/external-review work → Launch`, with
 Sprints 17/18/19 as near-critical dependencies of the launch gate. Backup/restore
 (ORG-PR-005, the backups/DR work) is the longest-pole reliability item and must
-precede production data.
+precede production data. Sprint 25 removed its repository-controlled half from
+the critical path — the capability is built and verified — so what remains of
+ORG-PR-005 now sits entirely BEHIND Phase 4 (ORG-PR-001): there is nothing left
+to build here that does not require a real deployment target.
 
 ## Parallelizable work
 

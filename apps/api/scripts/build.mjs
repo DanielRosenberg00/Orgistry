@@ -8,8 +8,9 @@ import { build } from 'esbuild';
  *
  * Bundles the EXISTING entry points — no second implementation path:
  *
- *   src/server.ts                     -> dist/server.mjs   (API process)
- *   packages/db/scripts/migrate.ts    -> dist/migrate.mjs  (operator-run migrations)
+ *   src/server.ts                          -> dist/server.mjs     (API process)
+ *   packages/db/scripts/migrate.ts         -> dist/migrate.mjs    (operator-run migrations)
+ *   src/maintenance/retention-command.ts   -> dist/retention.mjs  (operator-run retention cleanup)
  *
  * Strategy: workspace `@orgistry/*` packages are consumed as TypeScript source
  * (their package.json `exports` point at `./src/index.ts`), so they cannot be
@@ -61,6 +62,10 @@ const workspaceSourcePlugin = {
 const entryPoints = [
   { in: join(apiDir, 'src/server.ts'), out: 'server' },
   { in: join(workspaceRoot, 'packages/db/scripts/migrate.ts'), out: 'migrate' },
+  // Sprint 25 (ORG-PR-015): the retention cleanup ships in the SAME artifact
+  // as the API, so an operator runs it with the same image, the same runtime
+  // config, and the same secret-injection seam as the service itself.
+  { in: join(apiDir, 'src/maintenance/retention-command.ts'), out: 'retention' },
 ];
 
 await build({

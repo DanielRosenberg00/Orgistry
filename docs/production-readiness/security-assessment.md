@@ -177,7 +177,7 @@ active-membership and pending-invitation invariants; additive, transactional
 migrations; a thorough migrate-from-scratch integration test; keyset pagination
 everywhere with bounded limits.
 
-**Gaps:** no retention for unbounded tables (ORG-PR-015); one app+migration
+**Gaps:** one app+migration
 superuser (ORG-PR-022); no pool/statement/lock timeouts (ORG-PR-021); no
 rollback strategy (ORG-PR-028); `reset-test` guard weaker than documented
 (ORG-PR-037); dead `email_verification_tokens` (ORG-PR-048) and a redundant
@@ -293,11 +293,29 @@ roles (ORG-PR-022); image pinning (ORG-PR-042) is closed.
 
 ## Reliability, backup & DR
 
-No backups/PITR/restore (ORG-PR-005) — a P1 blocker with a **mandatory restore
-drill** before production data. No migration recovery rehearsal (ORG-PR-028). No
+**Sprint 25 (2026-08-24)** rebuilt this section's factual basis. The backup,
+restore, and PITR CAPABILITIES now exist and are verified against synthetic
+data: a repeatable `pg_dump -Fc` backup with an integrity checksum and
+provenance metadata; a restore drill that recovers into a fresh database,
+proves a corrupted artifact is rejected, asserts schema/migration-ledger/entity
+survival, requires a migration re-run to be a no-op, and (with
+`--with-artifact`) boots the packaged API against the restored database and
+reads restored data back through an API-key-authenticated request; and
+**PITR VERIFIED** — base backup plus demonstrably-working WAL archiving plus a
+recovery target time, with pre-target rows recovered from archived WAL and
+post-target `DELETE`/`DROP TABLE` damage undone. The data-layer and
+artifact drills are CI-gated; PITR runs manually and weekly.
+
+**ORG-PR-005 nevertheless remains a P1 blocker**, on its deployment-dependent
+half: nothing SCHEDULES a backup, no artifact is stored remotely or encrypted,
+no long-lived database archives WAL, no provider-managed PITR window exists,
+archive health is unmonitored, and no RPO/RTO has been measured. A verified
+drill is a capability; it is not a backup posture. No migration recovery
+rehearsal (ORG-PR-028 — the mechanism now exists, the rehearsal does not). No
 background runtime (ORG-PR-016). Redis fail-open (ORG-PR-009) and best-effort
-writes that can fail requests (ORG-PR-034) are the main runtime-resilience gaps;
-degraded-dependency behavior is untested against live services (ORG-PR-026).
+writes that can fail requests (ORG-PR-034) are the main runtime-resilience
+gaps; degraded-dependency behavior is untested against live services
+(ORG-PR-026).
 **Sprint 19 (2026-07-21):** ORG-PR-009 is materially advanced — sensitive
 rate-limit buckets fail closed in production (`RATE_LIMIT_FAILURE_MODE`
 defaults to `closed` there; the guard refuses `open`), the global bucket fails
@@ -315,27 +333,53 @@ failure, error-budget burn, rate-limit/fail-open events (now including the
 sanitized `rate-limit-store` unavailability warnings emitted since Sprint 19),
 audit-writer failure, backup failure, certificate/email health.
 
-## Maintenance jobs (required, none implemented — ORG-PR-015/016)
+## Maintenance jobs (implemented as commands — ORG-PR-015 closed; scheduling open — ORG-PR-016)
 
-| State | Data | Suggested schedule | Notes |
+The Sprint 14 audit listed the maintenance jobs a production deployment would
+need. Sprint 25 implemented the retention half as a single one-shot command and
+resolved several of the proposed rows **against the actual schema** rather than
+carrying them forward as intentions:
+
+| State | Data | Sprint 25 outcome | Notes |
 | --- | --- | --- | --- |
-| Expired sessions | `sessions` | daily | idempotent, locked; metric on rows purged |
-| Expired/used refresh tokens | `refresh_tokens` | daily | keep family history within retention |
-| Expired invitations | `invitations` | daily | already derived-on-read; reclaim storage |
-| Reset/verification tokens | `email_verification_tokens` (+ future reset) | hourly | short TTL cleanup |
-| Revoked/expired API keys | `api_keys` | weekly | optional hard-delete per policy |
-| Audit/security retention | `security_events` | daily | enforce `audit_retention_days`; PII (ORG-PR-043) |
-| Deleted accounts | `users` | on-demand + sweep | anonymize/hard-delete (ORG-PR-025) |
+| Expired sessions | `sessions` | **Implemented** — `expired_sessions` category, `expires_at < cutoff` (default 90 d), index-backed | Deletes the session's `refresh_tokens` children in the same transaction (no `ON DELETE CASCADE` exists, deliberately) |
+| Expired/used refresh tokens | `refresh_tokens` | **Implemented** — `expired_refresh_tokens`, `expires_at < cutoff` (default 90 d) | Runs before the session sweep so the child rows are gone first |
+| Expired invitations | `invitations` | **Deliberately NOT implemented** | `schema/invitations.ts` declares invitation rows durable lifecycle records ("Rows are NEVER hard-deleted"); accepted/revoked rows are the audit trail of who joined an organization. Reclaiming that storage would destroy history the product exposes |
+| Reset/verification tokens | `email_verification_tokens`, `password_reset_tokens`, `pending_registrations` | **Implemented** — three categories on `expires_at < cutoff` (default 30 d) | An expired token is already refused at use time, so an eligible row is dead state by the schema's own rules |
+| Revoked/expired API keys | `api_keys` | **Deliberately NOT implemented** | `schema/api-keys.ts`: revoked, never hard-deleted — the revoked row is what proves a key existed |
+| Audit/security retention | `security_events` | **Implemented** — `security_events`, `created_at < cutoff` (default 180 d, floor 30 d) | GLOBAL, not per plan: `audit_retention_days` remains a display-only modeled value. The default is pinned above the largest plan value (90) by a config test. PII residual: ORG-PR-043 |
+| Deleted accounts | `users` | **Out of scope, correctly** | Account deletion is a product feature with consent, export, and cascade semantics (ORG-PR-025/043) — not a maintenance sweep. No category may reach `users` |
 
-Each job needs: idempotency, a concurrency lock, metrics, failure alerts, and
-bounded batch sizes. None exist today.
+Against the Sprint 14 requirements for each job:
+
+| Requirement | Status |
+| --- | --- |
+| Idempotency | **Met** — proven by an integration test (a second apply deletes nothing) |
+| Bounded batch sizes | **Met** — one `LIMIT`-ed batch per transaction, oldest rows first, plus a `--max-batches` cap; batch and cap behavior are test-pinned |
+| Concurrency lock | **Not implemented.** Concurrent runs are SAFE (transactional batches over an idempotent predicate; worst case is wasted work) but nothing prevents them. A scheduled deployment should use its scheduler's own concurrency control |
+| Metrics | **Not implemented** — the run prints a counts-only summary to stdout |
+| Failure alerts | **Not implemented** (ORG-PR-007/016) |
+| Scheduling | **Not implemented** (ORG-PR-016) — the command is invoked by an operator |
+
+Safety properties worth recording here rather than only in
+[../retention.md](../retention.md): deletion requires `--apply` (dry-run is the
+default and no other flag combination reaches apply mode); every predicate is
+an age comparison on a timestamp column, never a status field; the comparison
+is strictly `<`, so a row at the cutoff survives; retention windows have hard
+floors so a zero or negative value fails process start instead of widening the
+predicate; and the summary emits counts and table metadata only — an
+integration test asserts no email, token hash, user id, or password-hash marker
+can appear in it.
 
 ## Privacy & data governance
 
 PII inventory: user email + password hash; session/security IP + user-agent;
 invited email in invitations and audit metadata; audit/security event bodies.
-**Gaps:** no export/deletion (ORG-PR-025), email PII retained with no retention
-(ORG-PR-043), no retention enforcement (ORG-PR-015). All legal determinations
+**Gaps:** no export/deletion (ORG-PR-025); email PII in `security_events`
+metadata is now bounded by the global retention window (default 180 days,
+Sprint 25) but is neither anonymized nor subject to a legally-reviewed period
+(ORG-PR-043) — retention bounds growth, it is not erasure. All legal
+determinations
 (applicable regime, retention periods, subprocessor list, breach timelines) are
 marked **Legal review required** and are out of scope for this audit.
 

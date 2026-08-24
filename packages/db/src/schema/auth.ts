@@ -92,7 +92,9 @@ export const sessions = pgTable(
   (table) => [
     // Lookup all sessions for a user (future session-list/revocation).
     index('ix_sessions_user_id').on(table.userId),
-    // Expiry sweep for background cleanup.
+    // Retention sweep (Sprint 25, ORG-PR-015): the ended-session cleanup
+    // predicate is `expires_at < cutoff`, so an expired session is selected
+    // through this index rather than a sequential scan.
     index('ix_sessions_expires_at').on(table.expiresAt),
   ],
 );
@@ -125,6 +127,11 @@ export const refreshTokens = pgTable(
     uniqueIndex('uq_refresh_tokens_token_hash').on(table.tokenHash),
     index('ix_refresh_tokens_session_id').on(table.sessionId),
     index('ix_refresh_tokens_family_id').on(table.familyId),
+    // Retention sweep (Sprint 25, ORG-PR-015): the expired-refresh-token
+    // cleanup predicate is `expires_at < cutoff`, and the expired-session
+    // cleanup deletes a session's tokens before the session row. Both scan
+    // this index instead of the whole table.
+    index('ix_refresh_tokens_expires_at').on(table.expiresAt),
   ],
 );
 
@@ -162,6 +169,10 @@ export const emailVerificationTokens = pgTable(
   (table) => [
     uniqueIndex('uq_email_verification_tokens_token_hash').on(table.tokenHash),
     index('ix_email_verification_tokens_user_id').on(table.userId),
+    // Retention sweep (Sprint 25, ORG-PR-015): cleanup deletes on
+    // `expires_at < cutoff` — an expired token is unusable by definition, so
+    // the predicate needs no lifecycle column beyond expiry.
+    index('ix_email_verification_tokens_expires_at').on(table.expiresAt),
   ],
 );
 
@@ -204,8 +215,12 @@ export const passwordResetTokens = pgTable(
   (table) => [
     // Lookup of a presented token by hash; uniqueness also guards insert races.
     uniqueIndex('uq_password_reset_tokens_token_hash').on(table.tokenHash),
-    // Active-token invalidation and future retention sweeps scan by user.
+    // Active-token invalidation scans by user.
     index('ix_password_reset_tokens_user_id').on(table.userId),
+    // Retention sweep (Sprint 25, ORG-PR-015): cleanup deletes on
+    // `expires_at < cutoff` — an expired token is unusable by definition, so
+    // the predicate needs no lifecycle column beyond expiry.
+    index('ix_password_reset_tokens_expires_at').on(table.expiresAt),
   ],
 );
 
@@ -238,9 +253,9 @@ export const passwordResetTokens = pgTable(
  * invitation lifecycle is re-checked authoritatively at completion.
  *
  * The row stores NO request metadata (no IP, no user agent, no URL) — the
- * security-events seam owns sanitized request context. Consumed and expired
- * rows are retained for now; a cleanup sweep can later delete on
- * `expires_at` (indexed below) without any schema change.
+ * security-events seam owns sanitized request context. Expired rows are
+ * deleted by the Sprint 25 retention cleanup on `expires_at` (indexed below);
+ * see `apps/api/src/maintenance/retention-policy.ts`.
  */
 export const pendingRegistrations = pgTable(
   'pending_registrations',
@@ -279,7 +294,8 @@ export const pendingRegistrations = pgTable(
     uniqueIndex('uq_pending_registrations_usable_email')
       .on(table.normalizedEmail)
       .where(sql`used_at IS NULL AND invalidated_at IS NULL`),
-    // Future retention/cleanup sweeps scan by expiry.
+    // Retention sweep (Sprint 25, ORG-PR-015): cleanup deletes on
+    // `expires_at < cutoff`; this index backs that predicate.
     index('ix_pending_registrations_expires_at').on(table.expiresAt),
   ],
 );
@@ -311,6 +327,12 @@ export const securityEvents = pgTable(
     index('ix_security_events_user_id').on(table.userId),
     index('ix_security_events_event_type').on(table.eventType),
     index('ix_security_events_created_at').on(table.createdAt),
+    // Retention sweep (Sprint 25, ORG-PR-015). `security_events.session_id`
+    // is one of only two inbound foreign keys on `sessions`, so the
+    // ended-session cleanup must ask, per candidate session, whether any
+    // RETAINED event still references it. Without this index that question is
+    // a sequential scan of the platform's largest table.
+    index('ix_security_events_session_id').on(table.sessionId),
     // Backs the organization-scoped audit read path (Sprint 20, ORG-PR-014):
     // `WHERE organization_id = ? … ORDER BY created_at DESC, id DESC` with
     // keyset pagination scans this index directly.

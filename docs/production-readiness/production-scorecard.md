@@ -27,28 +27,30 @@ average — do not read a high domain score as launch clearance.
 | Authentication | 2 | Yes | Argon2id, hardened login, immediate revocation | Recovery absent; prod secret guards | ORG-PR-003, 004, 009 | High |
 | Authorization | 3 | Partly | Permission-first, path-derived tenancy, DG-2 Owner-transition guard in-transaction (S20), negative tests | (Owner-transition gap closed S20) | — | High |
 | Tenant isolation | 3 | No | Repo org-scoping, uniform 404, real-DB tests; read paths permission-aligned (S20) | (read-path divergence closed S20) | — | High |
-| Data integrity | 3 | Partly | Partial-unique invariants (incl. at-most-one-active-personal-workspace, S20), Last-Owner locking, serialized quota transactions with in-tx plan snapshots and race proofs (S20) | Retention absent | ORG-PR-015 | High |
+| Data integrity | 3 | Partly | Partial-unique invariants (incl. at-most-one-active-personal-workspace, S20), Last-Owner locking, serialized quota transactions with in-tx plan snapshots and race proofs (S20), retention policy + tested batched cleanup with active-row preservation (S25, ORG-PR-015 closed) | Cleanup is operator-invoked; no scheduler | ORG-PR-016 | High |
 | Application security | 2 | Yes | Safe error handler, no DTO leaks, in-mem token | No headers/proxy/global limit | ORG-PR-010, 011, 012, 013 | High |
 | Frontend | 1 | No (target: demo) | Exemplary token/secret handling | No error boundary/CSP | ORG-PR-023, 035, 036 | High |
 | Testing | 2 | Partly | Strong negative/isolation coverage + real-DB quota/authz concurrency races (S20) | No failure-injection/E2E | ORG-PR-026 | High |
 | CI/CD | 3 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22); deployable-artifact build+smoke gate in CI (S23) | No release pipeline | ORG-PR-001 | High |
 | Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); every active image reference tag+digest-pinned (S23, ORG-PR-042 closed); two documented advisory acceptances | No provenance/signing; no registry publishing | ORG-PR-001 | High |
 | Infrastructure | 2 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23) | No deployment environment, pipeline, or IaC; no least-privilege DB roles | ORG-PR-001, 022 | High |
-| Reliability | 1 | Yes | Graceful shutdown; readiness probes | No backups/DR; fail-open | ORG-PR-005, 009 | High |
-| Backup & recovery | 0 | Yes | (none) | No backup/PITR/restore drill | ORG-PR-005, 028 | High |
+| Reliability | 2 | Yes | Graceful shutdown; readiness probes; tested recovery tooling (S25) | No scheduled backups; fail-open non-sensitive limiters | ORG-PR-005, 009, 016 | High |
+| Backup & recovery | 2 | Yes | Repeatable logical backup + checksum + provenance; restore drill into a fresh DB reaching the packaged artifact incl. an authenticated read of restored data; **PITR VERIFIED** (base backup + archived WAL + recovery target); CI-gated; command-level runbooks (S25) | Nothing schedules a backup; no remote/encrypted storage; no continuous WAL archiving on a long-lived DB; no provider-managed PITR; no measured RPO/RTO; failed-migration recovery unrehearsed | ORG-PR-005, 028 | High |
 | Observability | 1 | Yes | Structured logs + request IDs | No metrics/tracing/alerts | ORG-PR-007 | High |
 | Operations | 1 | Yes | Local runbook, strong DX | No incident process/prod runbook | ORG-PR-008, 027 | High |
-| Privacy | 1 | Partly | Sanitized metadata, soft-delete | No export/delete; retention unenforced | ORG-PR-025, 043, 015 | Medium |
+| Privacy | 1 | Partly | Sanitized metadata, soft-delete, bounded `security_events` history (S25) | No export/delete; retention is global growth control, not per-plan enforcement or erasure | ORG-PR-025, 043 | Medium |
 | Documentation | 3 | No | Honest, thorough, extension recipes | Stale subsystem docs; no prod ops docs | ORG-PR-027, 046 | High |
 
 ## Reading the scorecard
 
 - **Authorization/tenant isolation/documentation (level 3)** are genuine strengths
   and must not regress during remediation. They are *not* launch clearance.
-- **Backup & recovery (level 0)**, **infrastructure (level 2 since S23 —
-  artifacts exist, deployment does not)**, and **reliability / observability /
-  operations (level 1)** are the domains gating any real deployment — all
-  downstream of the Phase 4/5 roadmap work.
+- **Backup & recovery (level 2 since S25 — the capability is proven, nothing
+  runs it)**, **infrastructure (level 2 since S23 — artifacts exist, deployment
+  does not)**, and **observability / operations (level 1)** are the domains
+  gating any real deployment — all downstream of the Phase 4/5 roadmap work.
+  Backup & recovery moved 0 → 2, not to 3: a verified drill is a capability,
+  and a capability nothing schedules is not a backup posture.
 - **Authentication and application security (level 2)** carry the security-relevant
   P1/P2s that Phase 2/3 close.
 
@@ -171,3 +173,26 @@ the P1/P2 work and the launch gate (see
 > Restore, and Retention Foundation**, with ORG-PR-002's external-email
 > validation and ORG-PR-006's residual secrets-management capability running
 > alongside it as outstanding workstreams.
+
+> **Scorecard update (Sprint 25, 2026-08-24).** **Backup & recovery moves
+> 0 → 2**: a repeatable logical backup with checksum and provenance, a restore
+> drill that recovers into a fresh database and reaches the packaged API
+> artifact through an API-key-authenticated read of restored data, and a
+> **VERIFIED** PostgreSQL PITR drill (base backup + demonstrably-working WAL
+> archiving + recovery to a target time, with post-target damage proven undone)
+> — all CI-gated, with command-level runbooks. It does NOT reach 3: nothing
+> schedules a backup, no artifact is stored remotely or encrypted, no
+> long-lived database archives WAL, no provider-managed PITR exists, and no
+> RPO/RTO has been measured. **Reliability moves 1 → 2** on the same evidence.
+> **Data integrity keeps level 3 and loses its retention gap**: ORG-PR-015 is
+> **closed** — policy, a dry-run-by-default one-shot cleanup runnable from both
+> source and the deployable artifact, index-backed batched deletion, and
+> PostgreSQL-backed safety tests; the residual is scheduling (ORG-PR-016).
+> **Privacy stays at 1**: retention bounds growth, it is not erasure, and no
+> export/delete capability exists. **4 P1 blockers remain open (ORG-PR-001,
+> 002, 005, 006).** The overriding rule still yields *not production-ready*;
+> the state remains **C — Ready to continue production implementation** (not
+> ready for staging, not ready for production). Recommended next:
+> **Sprint 26 — Deployment Environment, Promotion, and Rollback (ORG-PR-001)**,
+> which is the prerequisite that unblocks the deployment-dependent half of
+> ORG-PR-005 as well as ORG-PR-006's rehearsed rotation.

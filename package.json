@@ -35,7 +35,11 @@
     "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
     "db:generate": "pnpm --filter @orgistry/db run generate",
     "db:migrate": "pnpm --filter @orgistry/db run migrate",
-    "db:reset:test": "pnpm --filter @orgistry/db run reset:test"
+    "db:reset:test": "pnpm --filter @orgistry/db run reset:test",
+    "db:retention": "pnpm --filter @orgistry/api run retention",
+    "db:backup": "bash tooling/db-backup.sh",
+    "drill:restore": "bash tooling/db-restore-drill.sh",
+    "drill:pitr": "bash tooling/db-pitr-drill.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

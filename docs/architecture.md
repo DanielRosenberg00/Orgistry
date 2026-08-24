@@ -200,10 +200,17 @@ The audit read API is the only public projection of the action subset.
 - **Offline gate** (`pnpm validate`): typecheck, ESLint, unit tests, web tests,
   web build, schema-drift check, whitespace check — no services required.
 - **Integration gate** (`pnpm validate:integration`): test-DB reset plus DB
-  migration-from-scratch and live API readiness/route tests against PostgreSQL +
-  Redis.
-- **CI** mirrors both as separate jobs. Mailpit/SMTP is exercised manually, not in
-  CI. Full detail in the [validation matrix](./validation.md).
+  migration-from-scratch, live API readiness/route tests, and the retention
+  cleanup safety suite against PostgreSQL + Redis.
+- **Artifact gate** (`pnpm artifact:smoke`): the production-shaped images built
+  and validated against the production-like compose reference.
+- **Durability gate** (`pnpm drill:restore`, `pnpm drill:pitr`): a real backup
+  restored into a fresh database and driven through the packaged API artifact,
+  and point-in-time recovery to a target time. See
+  [backup & restore](./backup-and-restore.md) and [PITR](./pitr.md).
+- **CI** mirrors all of these. Mailpit/SMTP is exercised manually, not in CI;
+  the PITR drill runs manually and weekly rather than per pull request. Full
+  detail in the [validation matrix](./validation.md).
 
 ## Key design decisions and trade-offs
 
@@ -216,4 +223,14 @@ The audit read API is the only public projection of the action subset.
 - **Fixed roles and demo plans, no billing/RLS/workers.** Deliberate scope
   boundary for a reference foundation; see [known limitations](./known-limitations.md).
 - **Soft deletes and derived expiry over background jobs.** Avoids a worker/queue
-  runtime at the cost of not reclaiming storage or enforcing retention.
+  runtime. Since Sprint 25 storage IS reclaimed and retention IS enforced — by a
+  one-shot command an operator invokes (`pnpm db:retention`, or
+  `node dist/retention.mjs` from the deployable artifact), not by a resident
+  process. The remaining cost is that the enforcement cadence is the operator's
+  (no scheduler; see [retention](./retention.md)).
+- **PostgreSQL is the only durability boundary.** Redis holds nothing but
+  TTL-bounded rate-limit counters, images and bundles are rebuildable from
+  source, logs are stdout-only, and there is no object storage. That single
+  boundary is what makes a `pg_dump`-based backup a complete backup — the
+  inventory and the evidence behind it are in
+  [backup & restore](./backup-and-restore.md).

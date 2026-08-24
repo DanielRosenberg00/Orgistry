@@ -372,6 +372,43 @@ The full design and evidence live in
   while secrets, hashes, tokens, headers, cookies, and IP/user-agent/session data
   are stripped. Authentication/session security events are kept out of the default
   stream.
+- **Bounded history (Sprint 25).** `security_events` is no longer unbounded: the
+  retention cleanup deletes rows older than `RETENTION_SECURITY_EVENT_DAYS`
+  (default 180) on an index-backed `created_at` predicate. The window is a
+  security decision, not just a storage one — it is the period over which an
+  investigation can reconstruct authentication and authorization activity. The
+  default sits above every plan's advertised `audit_retention_days`, and the
+  configured floor (30 days) prevents an operator from accidentally reducing
+  the forensic window to nothing. See [retention.md](retention.md).
+
+## Data durability and backups (Sprint 25)
+
+- **One durable store.** PostgreSQL holds every piece of state whose loss is
+  unrecoverable. Redis holds only TTL-bounded rate-limit counters; images and
+  bundles are rebuildable from source; logs are evidence, not a restore source;
+  there is no object storage. The inventory and the evidence behind each
+  classification are in
+  [backup-and-restore.md](backup-and-restore.md#1-persistent-data-inventory).
+- **A backup is a credential-grade artifact.** A logical backup contains every
+  user and organization record, the full security-event history, Argon2id
+  password hashes, and the SHA-256 hashes behind every refresh token,
+  verification/reset/registration token, invitation, and API key. Repository
+  controls: `backups/`, `*.dump`, and `*.dump.sha256` are git-ignored; the
+  backup tool refuses to write inside `.git`; artifacts are created under
+  `umask 077` and `chmod 600`; the connection URL is passed by environment
+  variable and never reaches a filename, a log line, or the metadata sidecar;
+  the drills delete their artifacts on exit.
+- **The checksum is integrity, not confidentiality.** Nothing in this
+  repository encrypts a backup, and the metadata sidecar records
+  `"encrypted": false` explicitly. Encryption at rest and least-privilege
+  backup/restore identities are deployment responsibilities (ORG-PR-001,
+  ORG-PR-006 — both open).
+- **Recovery is proven, not asserted.** The restore drill recovers into a fresh
+  database and drives the packaged API artifact against it, including an
+  API-key-authenticated read whose credential hash came out of the restored
+  database — and asserts that an unknown key is still rejected, so a restore
+  cannot silently widen authentication. PITR is verified separately
+  ([pitr.md](pitr.md)).
 
 ## Known non-production limitations
 
@@ -382,9 +419,12 @@ has been validated), any secrets manager or automated secret rotation (Sprint
 24 delivered runtime secret sources plus manual rotation procedures — not a
 manager), a platform-wide session-invalidation API (operator SQL only),
 verification **enforcement** (the flag is
-advisory), cleanup/retention jobs for consumed or expired token and
-pending-registration rows, database RLS, audit retention enforcement/export,
-custom roles, and resource-level permissions. Quota checks are serialized
+advisory), any SCHEDULER for the retention and backup commands (both are
+real, tested, one-shot commands since Sprint 25 — nothing invokes them
+periodically, and nothing alerts on a failed run), scheduled or encrypted
+remote backup storage, continuous WAL archiving on any long-lived database,
+database RLS, per-plan audit retention enforcement, audit export, custom
+roles, and resource-level permissions. Quota checks are serialized
 in-transaction since Sprint 20 (no race-window trade-off remains — see
 [entitlements](./entitlements-plans-quotas.md)); non-sensitive rate limiting
 fails open on a Redis outage (sensitive endpoints fail closed in production,

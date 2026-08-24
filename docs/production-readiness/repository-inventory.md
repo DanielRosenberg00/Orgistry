@@ -118,6 +118,17 @@ quotas); AT MOST one active personal workspace per user is DB-enforced (partial 
 seeds/backfill); **no destructive ops, no down-migrations** (ORG-PR-028).
 Migrate-from-scratch is tested (`packages/db/src/migrate.integration.test.ts`).
 
+> **Update (Sprint 25, 2026-08-24):** the baseline is `0000…0012` (13
+> migrations). `0012_shocking_warbound.sql` is additive and INDEX-ONLY —
+> `ix_refresh_tokens_expires_at`,
+> `ix_email_verification_tokens_expires_at`,
+> `ix_password_reset_tokens_expires_at`, and `ix_security_events_session_id` —
+> one index per retention cleanup predicate that lacked one (ORG-PR-015); the
+> last backs the ended-session category's inbound-foreign-key check. No
+> speculative index was added and no table or column changed.
+> Migrate-from-scratch, schema-drift, and the restore drill's
+> migration-no-op check all cover it.
+
 ## Configuration inventory
 
 `packages/config/src/schema.ts` — one Zod schema over all env keys (runtime, HTTP,
@@ -143,6 +154,13 @@ than documented — ORG-PR-037).
 > bundle via `apps/api/scripts/build.mjs`), `artifact:build` (compose build of
 > both production images), and `artifact:smoke` (`tooling/artifact-smoke.sh`
 > — the deterministic artifact smoke gate).
+>
+> **Update (Sprint 25, 2026-08-24):** added `db:backup`
+> (`tooling/db-backup.sh`), `drill:restore` (`tooling/db-restore-drill.sh`),
+> `drill:pitr` (`tooling/db-pitr-drill.sh`), and `db:retention`
+> (`apps/api/src/maintenance/retention-command.ts` via tsx). The API build now
+> emits a third bundle, `dist/retention.mjs`, so the retention command ships in
+> the same image as the service.
 
 ## CI inventory
 
@@ -154,6 +172,14 @@ block (ORG-PR-019); no dependency/secret/SAST scanning, no Dependabot/Renovate
 (ORG-PR-020); Mailpit/SMTP not exercised (ORG-PR-041); no release/deploy job
 (ORG-PR-001).
 
+> **Update (Sprint 25, 2026-08-24):** a FOURTH workflow exists —
+> `.github/workflows/data-durability.yml` (manual `workflow_dispatch` +
+> weekly schedule), which runs the PITR drill. It is deliberately outside the
+> pull-request path on cost grounds (two PostgreSQL servers plus an archive
+> recovery wait) and is NOT a required check. `ci.yml` gained two steps: the
+> data-layer restore drill in the `integration` job and
+> `db-restore-drill.sh --with-artifact` in the `artifacts` job.
+>
 > **Update (Sprint 21, 2026-07-26):** the CI surface is now THREE workflows —
 > `ci.yml` (unchanged jobs, hardened), `security.yml` (pnpm dependency audit
 > gates + Gitleaks secret scan), `codeql.yml` (JS/TS SAST) — plus
@@ -245,3 +271,26 @@ runtime/migration/env-contract/image-policy reference).
   (build output, git-ignored).
 - **No maintenance jobs exist** (ORG-PR-015/016) — this is an inventory absence,
   not an artifact.
+
+> **Update (Sprint 25, 2026-08-24):** maintenance WORK now exists as one-shot
+> commands; a SCHEDULER still does not (ORG-PR-016 open).
+>
+> - `apps/api/src/maintenance/` — the retention cleanup: `retention-policy.ts`
+>   (the six-category catalog and every deletion predicate), `retention.ts`
+>   (dry-run/apply executor, one transaction per bounded batch, per-category
+>   failure isolation), `retention-cli.ts` (argument surface + report; pure),
+>   `retention-command.ts` (process entry point). Bundled to `dist/retention.mjs`.
+> - `tooling/db-backup.sh` — `pg_dump -Fc` logical backup + SHA-256 sidecar +
+>   provenance `meta.json`.
+> - `tooling/db-restore-drill.sh` — backup → verify → restore into a fresh
+>   database → schema/data/migration assertions → optional packaged-artifact
+>   verification.
+> - `tooling/db-pitr-drill.sh` — base backup + WAL archiving + recovery to a
+>   target time (**PITR VERIFIED**).
+> - `tooling/lib/pg-tools.sh` — shared helpers running every PostgreSQL client
+>   tool from the repository's pinned image.
+> - `tooling/lib/restore-drill-fixture.sh` + `tooling/fixtures/restore-drill-seed.sql`
+>   — the drill's deterministic synthetic Orgistry data (single source of truth
+>   for its identifiers; drift-guarded by `tooling/restore-drill-fixture.test.ts`).
+> - Generated and NEVER committed: `backups/`, `*.dump`, `*.dump.sha256`
+>   (git-ignored; the drills use temporary directories deleted on exit).

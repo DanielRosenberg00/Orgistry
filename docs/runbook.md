@@ -15,6 +15,12 @@ handling an email-provider incident — is a separate document:
 [rotation-runbook.md](rotation-runbook.md). The design behind it is
 [runtime-secrets.md](runtime-secrets.md).
 
+Data-durability and lifecycle operations — taking and verifying a backup,
+restoring one, recovering to a point in time, and running the retention
+cleanup — are likewise separate:
+[backup-and-restore.md](backup-and-restore.md), [pitr.md](pitr.md), and
+[retention.md](retention.md) each carry their own runbook section.
+
 ## Services
 
 | Service | Image | Host port(s) | Purpose |
@@ -50,6 +56,12 @@ No credentials. Backs the fixed-window rate-limit buckets (auth + external API)
 and the readiness probe. Rate limiting **fails open**: if Redis is unavailable,
 requests are allowed rather than blocked, so a Redis outage never breaks
 authentication — but `/ready` reports the outage. Data persists in `redis_data`.
+
+Redis holds **no durable state**: the only writes are `INCR` + `EXPIRE` on
+TTL-bounded rate-limit counters. It is deliberately excluded from the backup
+scope — losing it re-opens the current rate-limit windows and nothing else. See
+the persistent-data inventory in
+[backup-and-restore.md](backup-and-restore.md).
 
 ### Mailpit
 
@@ -100,6 +112,30 @@ migrations or tests.
   and Mailpit volumes. After this, `pnpm infra:up` recreates empty services and
   the test database is provisioned again from `infra/postgres-init/`. Re-run
   `pnpm db:migrate` to rebuild the dev schema.
+
+## Backing up and restoring the local database
+
+```bash
+pnpm db:backup                        # writes to ./backups (git-ignored)
+pnpm drill:restore                    # full backup -> restore -> verify drill
+pnpm drill:restore -- --with-artifact # + the packaged API artifact
+pnpm drill:pitr                       # point-in-time recovery drill
+```
+
+The drills create and destroy their own PostgreSQL containers; they never touch
+`orgistry-postgres-1` or its volume. Backup artifacts contain real user,
+organization, and hash data even locally — see the security rules in
+[backup-and-restore.md](backup-and-restore.md#7-backup-security).
+
+## Running the retention cleanup locally
+
+```bash
+pnpm db:retention -- --dry-run   # report only (default)
+pnpm db:retention -- --apply     # delete eligible rows
+```
+
+Nothing in a normal local database is old enough to be eligible, so both are
+usually no-ops. Full policy: [retention.md](retention.md).
 
 ## Inspecting Mailpit
 

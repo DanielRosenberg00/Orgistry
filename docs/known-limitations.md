@@ -67,12 +67,14 @@ These are intentional non-goals, not bugs:
   connections (conventionally port 465). Also intentionally absent: bounce
   processing, complaint processing, suppression lists, marketing/bulk email,
   templates/CMS, and notification preferences.
-- **No background processing.** No workers, queues, schedulers, or cron. Anything
-  that would need a background job (e.g. expiry sweeps, retention deletion) is
-  instead derived on read or simply not performed. In particular there is no
-  cleanup scheduler for consumed/expired token rows, including the Sprint 18
-  `pending_registrations` table — rows accumulate; the `expires_at` index
-  exists to support a future sweep.
+- **No background processing.** No workers, queues, schedulers, or cron.
+  Anything that would need a background job runs as an explicit one-shot
+  command or is derived on read. Since Sprint 25 the retention cleanup is real,
+  runnable, and tested (`pnpm db:retention`, or `node dist/retention.mjs` from
+  the deployable artifact — see [retention.md](retention.md)); what is still
+  missing is anything that INVOKES it on a schedule, plus metrics and failure
+  alerting for such a run. The same applies to backups: `pnpm db:backup` exists,
+  nothing schedules it.
 - **No PostgreSQL row-level security (RLS).** Tenant isolation is enforced in the
   application layer (every query is scoped by the route organization ID), not by
   database policies.
@@ -87,9 +89,15 @@ These are intentional non-goals, not bugs:
   endpoint is read-only `GET /v1/external/projects`. No API key rotation,
   secret-reveal, or update endpoints; no service accounts, OAuth client
   credentials, or personal access tokens; no published SDK or OpenAPI spec.
-- **No audit retention enforcement.** The audit log is **read-only**. The plan's
-  `audit_retention_days` is surfaced as a display-only field; there is no
-  deletion/cleanup job. There is no audit export, webhook, SIEM, or alerting.
+- **No PER-PLAN audit retention enforcement.** The audit log is **read-only**.
+  Since Sprint 25 a GLOBAL retention window for `security_events` exists and is
+  enforced by the retention cleanup (`RETENTION_SECURITY_EVENT_DAYS`, default
+  180 days — [retention.md](retention.md)), but the plan's
+  `audit_retention_days` is still a display-only modeled value: retention is
+  not per organization. There is no audit export, webhook, SIEM, or alerting.
+- **Retention is not erasure.** The cleanup bounds table growth. It is not
+  account deletion, data export, or PII minimization, and it deliberately never
+  touches `invitations`, `api_keys`, or account/tenant rows.
 - **No alerting on rate-limiter store failure.** When Redis fails and the
   limiters degrade (fail open) or reject (fail closed, the production
   default for sensitive endpoints — Sprint 19), the state is logged
@@ -127,9 +135,13 @@ These are intentional non-goals, not bugs:
   and obviously weak secrets under `NODE_ENV=production`, but **config
   validation does not prove real entropy** — a determined operator can still
   supply a weak-but-passing value. Platform-wide session invalidation has no
-  API and is operator SQL only. External email delivery is unvalidated, and no
-  backup/PITR/restore system exists. The project remains **not ready for
-  staging or production** (see the
+  API and is operator SQL only. External email delivery is unvalidated. Backup,
+  restore, and PITR tooling now exists and is tested (Sprint 25 —
+  [backup-and-restore.md](backup-and-restore.md), [pitr.md](pitr.md)), but
+  **nothing schedules or stores backups**: there is no backup schedule, no
+  encrypted remote backup storage, no continuous WAL archiving on any
+  long-lived database, no provider-managed PITR, and no measured RPO/RTO. The
+  project remains **not ready for staging or production** (see the
   [production-readiness audit](production-readiness/README.md)).
 
 ## Testing and validation limitations
@@ -175,6 +187,20 @@ These are intentional non-goals, not bugs:
   client-only SPA with no RSC usage; the fix is a major upgrade) and
   brace-expansion GHSA-mh99-v99m-4gvg (DoS in a dev-only eslint transitive
   with no compatible fixed release).
+- **The drills prove recoverability, not recovery objectives (Sprint 25).**
+  The backup/restore drill and the PITR drill run against fixture-sized
+  databases in throwaway containers on a laptop or a CI runner. They prove the
+  procedures work; they say nothing about how long a restore takes at
+  production data volume, and no RPO/RTO has been measured against real
+  infrastructure. PITR runs manually and weekly rather than per pull request
+  (rationale: [pitr.md](pitr.md)), so a change to the PITR tooling merged
+  without running it would not be caught until the next scheduled run.
+- **Retention integration tests use aged fixtures, not short windows.** The
+  configured retention floors (30/7/1 days) deliberately prevent sub-floor
+  production values, so the suite seeds rows with explicit ages against a fixed
+  reference instant rather than shortening a window. Boundaries are exercised
+  deterministically; a production window shorter than its floor is not
+  exercised because it cannot exist.
 - **Infrastructure images are tag+digest-pinned (Sprint 23, ORG-PR-042
   closed).** Every active image reference — Dockerfile bases, both compose
   files, CI service containers — is pinned `tag@sha256-digest`, immune to tag
@@ -249,3 +275,7 @@ These are intentional non-goals, not bugs:
 - Scope boundary per sprint: the `docs/sprint-*-artifact-package.md` artifacts.
 - Security posture and its non-production caveats: [security model](./security-model.md).
 - Architecture rationale: [architecture overview](./architecture.md).
+- Data durability boundary and backup security rules:
+  [backup & restore](./backup-and-restore.md) and [PITR](./pitr.md).
+- Retention policy, cleanup safety invariants, and their residuals:
+  [retention](./retention.md).

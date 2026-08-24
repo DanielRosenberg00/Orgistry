@@ -1,0 +1,173 @@
+name: Deploy
+
+# Protected deployment entry point (Sprint 26, ORG-PR-001).
+#
+# WHAT THIS WORKFLOW DOES — AND DELIBERATELY DOES NOT DO
+# It authorises and verifies a deployment: it resolves a release produced by the
+# `Release` workflow, validates the release manifest, proves both image digests
+# are really present in the registry, and emits the exact deployment plan and
+# operator commands for the selected environment.
+#
+# It does NOT contact a deployment target, because Orgistry has no reachable
+# one: there is no staging host, no production host, and no deployment
+# credential anywhere in this repository or its environments
+# (docs/deployment.md, "Deployment target decision"). Target execution is
+# performed by an operator running `tooling/deploy.sh` on the host — the same
+# script, with the same invariants, that the deployment rehearsal exercises end
+# to end (`pnpm deploy:rehearsal`).
+#
+# WHY NOT SHIP AN UNEXERCISED SSH DEPLOY JOB
+# A job that opens an SSH session to a host that does not exist could never be
+# run, reviewed against reality, or trusted — and its presence would read as a
+# deployment pipeline this project does not have. When a target exists, the
+# execution step is added here and calls the same `tooling/deploy.sh`; the
+# environment-scoped protection below is already the place its credential
+# belongs.
+#
+# PROTECTION
+#   * `workflow_dispatch` only — never triggered by a pull request, so no
+#     untrusted code path reaches it.
+#   * A release must declare itself deployable, which the manifest schema grants
+#     only to a published release whose required checks succeeded for its exact
+#     commit. This workflow re-states that refusal in its own log.
+#   * `environment:` binds the run to a GitHub Environment, which is where
+#     required reviewers, deployment branch restrictions, and any future
+#     deployment credential are configured. Those settings live in repository
+#     settings, not here; docs/deployment.md lists the exact operator steps and
+#     records that they are NOT configured yet.
+#   * Permissions are read-only everywhere, including the registry.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy to.
+        required: true
+        type: choice
+        options:
+          - staging-like
+          - production
+      release_run_id:
+        description: >-
+          Run ID of the `Release` workflow run that published the release
+          (the number in its Actions URL).
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deployment at a time per environment: two concurrent deployments of
+  # different releases would leave the ledger ambiguous about what is running.
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Verify release and produce deployment plan
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      # `actions: read` downloads the release manifest artifact from the
+      # release run; `packages: read` resolves the published digests.
+      actions: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the release manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          set -euo pipefail
+          gh run download "${RELEASE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name release-manifest \
+            --dir artifacts
+
+      - name: Validate the release manifest
+        run: node tooling/release-manifest.mjs validate artifacts/release-manifest.json
+
+      # The manifest schema already refuses a published release without complete
+      # gate evidence for its own commit, so validation above is the real gate.
+      # These two assertions make the refusal explicit in the workflow log,
+      # which is where an operator looks when a deployment is blocked.
+      - name: Confirm this release is deployable and gate-authorised
+        run: |
+          set -euo pipefail
+          read_field() {
+            node tooling/release-manifest.mjs read artifacts/release-manifest.json --field "$1"
+          }
+          if [[ "$(read_field release.deployable)" != 'true' ]]; then
+            echo "This is a $(read_field release.type) release and is not deployable." >&2
+            exit 1
+          fi
+          if [[ "$(read_field gates.headSha)" != "$(read_field source.commit)" ]]; then
+            echo 'Gate evidence names a different commit than the release source.' >&2
+            exit 1
+          fi
+          echo "Release $(read_field source.commit) is authorised by:"
+          node -e 'for (const gate of require("./artifacts/release-manifest.json").gates.required) { process.stdout.write("  " + gate.check + ": run " + gate.runId + " (" + gate.conclusion + ")\n"); }'
+
+      - name: Log in to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${GITHUB_TOKEN}" | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+
+      # A manifest is a claim about the registry; this is the check that the
+      # claim is still true. A digest that no longer resolves means the release
+      # is not deployable, whatever the manifest says.
+      - name: Prove both digests resolve in the registry
+        run: |
+          set -euo pipefail
+          for field in images.api.reference images.web.reference; do
+            reference="$(node tooling/release-manifest.mjs read artifacts/release-manifest.json --field "${field}")"
+            echo "resolving ${reference}"
+            docker buildx imagetools inspect "${reference}" >/dev/null
+          done
+
+      - name: Emit the deployment plan
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          set -euo pipefail
+          read_field() {
+            node tooling/release-manifest.mjs read artifacts/release-manifest.json --field "$1"
+          }
+          {
+            echo "## Deployment plan — ${TARGET_ENVIRONMENT}"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| release run | \`${RELEASE_RUN_ID}\` |"
+            echo "| commit | \`$(read_field source.commit)\` |"
+            echo "| API image | \`$(read_field images.api.reference)\` |"
+            echo "| web image | \`$(read_field images.web.reference)\` |"
+            echo "| migration head | \`$(read_field migrations.head)\` |"
+            echo "| provenance | \`$(read_field source.provenance)\` |"
+            echo "| deployable | \`$(read_field release.deployable)\` |"
+            echo "| artifact gate | \`$(read_field build.artifactSmoke)\` |"
+            echo
+            echo '### Required checks that authorised this release'
+            echo
+            echo '| Check | Run | Conclusion |'
+            echo '| --- | --- | --- |'
+            node -e 'for (const gate of require("./artifacts/release-manifest.json").gates.required) { process.stdout.write("| " + gate.check + " | [" + gate.runId + "](" + gate.url + ") | " + gate.conclusion + " |\n"); }'
+            echo
+            echo '### Execute on the target host'
+            echo
+            echo 'Download this release manifest onto the host, then (indented block = shell):'
+            echo
+            echo '    tooling/deploy.sh --manifest release-manifest.json --config /etc/orgistry/deploy.env'
+            echo
+            echo 'Current runtime digests and the rollback target come from the host ledger:'
+            echo
+            echo "    pnpm deploy:evidence current --dir /var/lib/orgistry/deployments --environment ${TARGET_ENVIRONMENT}"
+            echo '    tooling/deploy-rollback.sh --config /etc/orgistry/deploy.env --dry-run'
+            echo
+            echo '> This workflow verified the release. It did not contact a deployment'
+            echo '> target: none is reachable from CI. See docs/deployment.md.'
+          } >>"${GITHUB_STEP_SUMMARY}"

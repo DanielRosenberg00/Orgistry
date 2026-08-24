@@ -84,6 +84,9 @@ usage() { sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^#\{1,2\} \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    # `pnpm run <script> -- --flag` forwards a bare `--`. Treat it as the
+    # conventional end-of-options marker, matching the retention CLI.
+    --) shift ;;
     --with-artifact) WITH_ARTIFACT=1; shift ;;
     --keep) KEEP_STATE=1; shift ;;
     --help|-h) usage; exit 0 ;;

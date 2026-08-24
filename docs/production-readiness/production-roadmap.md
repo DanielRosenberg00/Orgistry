@@ -331,12 +331,57 @@ Phase 6: End-to-End Verification & Security Review
   and **ORG-PR-006**'s residual secrets-management capability. Neither is
   closed; both remain outstanding production-readiness work. Closing artifact:
   [sprint-25-artifact-package.md](sprint-25-artifact-package.md).
-- **Sprint 26 (recommended next) — Production Deployment Environment,
-  Promotion, and Rollback (ORG-PR-001).** Now the single largest unblocker on
-  the critical path: it is the prerequisite for the deployment-dependent half
-  of ORG-PR-005 (a scheduled, encrypted, remotely-stored backup and continuous
-  WAL archiving on a real database), for ORG-PR-006's rehearsed rotation, for
-  ORG-PR-028's bad-migration rehearsal, and for any RPO/RTO measurement.
+- **Sprint 26 (COMPLETE in its repository scope, 2026-08-24) — Production
+  Deployment Environment and Promotion Pipeline (ORG-PR-001).** Delivered the
+  promotion and deployment MECHANISM: a gated GHCR release workflow that
+  publishes the images its own artifact gate produced under an immutable
+  commit-SHA tag and captures their registry digests; a schema-validated
+  release manifest whose migration identity is DERIVED from the repository
+  journal; a build-once/promote-by-digest contract enforced at four independent
+  points (schema, digest assertion, a deployment topology with no `build:`
+  section, and a running-container digest check); a single-host deployment
+  topology (`infra/compose.deploy.yml`) plus the deployment configuration
+  contract; an operator-run deployment script with thirteen named stages,
+  including a backup/recovery-point preflight, migrations exactly once from the
+  release's own image, and verification of the applied migration head against
+  the manifest; a reusable URL-only post-deployment smoke command; an
+  append-only deployment evidence ledger; application rollback to the previous
+  known-good digests; an environment-scoped, read-only deployment-verification
+  workflow; and an end-to-end rehearsal (`pnpm deploy:rehearsal`) that executes
+  the whole lifecycle — including a rollback and three refusals — and passes.
+  A same-day refinement pass then corrected three release-integrity defects
+  without changing the architecture: the web artifact became environment-neutral
+  (public browser configuration applied at container start, so one validated web
+  digest is promotable instead of rebuilt per environment); rehearsal manifests
+  became schema-marked non-deployable with explicit `working-tree` provenance
+  and a content fingerprint when the tree is dirty; and publication became
+  authorised by proof that all six required checks succeeded for the exact
+  release commit, with their run IDs recorded in the manifest.
+  **No finding closed** (the permitted outcome for a sprint whose closure
+  criteria depend on infrastructure that does not exist). **ORG-PR-001 remains
+  OPEN — materially advanced for the second time:** there is still no
+  deployment target of any kind, no image has been published to any registry,
+  neither new workflow has executed on GitHub Actions, no GitHub Environment is
+  configured, and rollback is validated only in the local rehearsal.
+  ORG-PR-005 and ORG-PR-006 gained integration and handling boundaries
+  respectively; neither moves toward closure. Closing artifact:
+  [sprint-26-artifact-package.md](sprint-26-artifact-package.md); docs:
+  [../deployment.md](../deployment.md).
+- **Next (recommended) — Deployment Pipeline Closure (ORG-PR-001).** Provision
+  the smallest real staging-like target that satisfies the
+  [staging blockers](../deployment.md#remaining-staging-blockers), run the
+  release workflow so images genuinely exist in GHCR, create the GitHub
+  Environment with its protections, deploy the release to that target, roll it
+  back, and record the evidence. That converts every Sprint 26 mechanism from
+  rehearsed to executed and closes ORG-PR-001 on its own criterion. It stays
+  the single largest unblocker on the critical path: the deployment-dependent
+  half of ORG-PR-005 (scheduled, encrypted, remotely-stored backups and
+  continuous WAL archiving on a real database), ORG-PR-006's rehearsed
+  rotation, ORG-PR-028's bad-migration rehearsal, and any RPO/RTO measurement
+  all wait on it. **Its one prerequisite is not a code change** — it is an
+  operator/procurement decision to provide a host and a mail provider. If that
+  decision is unavailable, the correct parallel work is **External Email
+  Provider Closure and Secrets Platform Integration (ORG-PR-002 + ORG-PR-006)**.
   The later Phase 5–6 work below keeps its content, ordering,
   dependencies, and exit criteria but carries no assigned sprint numbers
   yet — numbers are assigned when each item is actually scheduled.

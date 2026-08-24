@@ -55,8 +55,8 @@ not at the individual task identifier level.
 | Governance — Policy & Compliance | ~1 | known-limitations, honest scope; a documented, enforced ENGINEERING retention policy (S25) | no privacy/LEGAL retention policy or review — ORG-PR-025/043 |
 | Design — Threat Assessment | ~1→2 | this threat model (new) | no prior model; keep current |
 | Design — Security Architecture | ~2 | permission/entitlement/quota separation, tenant model | RLS absent (defense-in-depth, deferred) |
-| Implementation — Secure Build | ~1→2 | reproducible via lockfile; CI-built non-root container artifacts + smoke gate (S23) | no release pipeline/provenance — ORG-PR-001 |
-| Implementation — Secure Deployment | ~0→1 | production-shaped artifacts + smoke gate (S23); runtime secret sources + manual rotation runbooks (S24) | no deploy automation, no secrets manager, no automated rotation — ORG-PR-001/006 |
+| Implementation — Secure Build | ~2 | reproducible via lockfile; CI-built non-root container artifacts + smoke gate (S23); build-once/promote-by-digest with a schema-validated release manifest whose migration identity is derived, not supplied; environment-neutral images (no build arguments); publication authorised only by the required checks succeeding for the exact release SHA, with their run IDs recorded in the manifest (S26) | no signing or SLSA provenance attestation; the release workflow has never executed — ORG-PR-001 |
+| Implementation — Secure Deployment | ~1→2 | production-shaped artifacts + smoke gate (S23); runtime secret sources + manual rotation runbooks (S24); deployment mechanism with digest-only promotion, a target that cannot rebuild source, migrate-once with verified applied head, post-deploy smoke, an evidence ledger, and rehearsed application rollback (S26) | **no deployment target exists**, nothing published to a registry, no GitHub Environment, no secrets manager, no automated rotation — ORG-PR-001/006 |
 | Verification — Security Testing | ~2 | strong functional/negative tests; SAST (CodeQL) running remotely with triaged findings (S22) | no DAST/E2E/pentest — ORG-PR-026 |
 | Operations — Incident Mgmt | ~0→1 | data-loss and PITR recovery procedures with executed evidence (S25) | no incident process, on-call, severity model, or alerting — ORG-PR-008 |
 | Operations — Environment Mgmt | ~1 | local runbook; backup/restore/PITR and retention runbooks with executed evidence (S25) | no prod runbook; nothing SCHEDULES backup or retention; no remote/encrypted backup storage — ORG-PR-005/016/027 |
@@ -65,11 +65,11 @@ not at the individual task identifier level.
 
 | Requirement (practice-level) | Class | Evidence | Gap | Findings |
 | --- | --- | --- | --- | --- |
-| Scripted/consistent build | Partially | `pnpm build:web`; reproducible via lockfile | no server build/artifact | ORG-PR-001 |
+| Scripted/consistent build | Satisfied | `pnpm build:web`, `pnpm build:api`, both Dockerfiles; reproducible via lockfile; one scripted release path (S26) | — | — |
 | Version-controlled source | Satisfied | git; PR-triggered CI; `main` ruleset requires a PR and the CI/Security/CodeQL checks (Sprint 22) | ruleset lives in GitHub config, not in the repository tree | — |
-| Build service (not local) | Partially | CI builds and smoke-tests the container artifacts (S23) but publishes/releases nothing | no release pipeline or registry | ORG-PR-001 |
-| Provenance generated | Not satisfied | none | no provenance/attestation | ORG-PR-001 |
-| Provenance/dependencies signed | Not satisfied | images tag+digest-pinned (S23, ORG-PR-042 closed) | no signing/SBOM/provenance | ORG-PR-001 |
+| Build service (not local) | Partially | CI builds and smoke-tests the container artifacts (S23); a release workflow publishes them to GHCR under an immutable commit-SHA tag with digest capture, only after proving all six required checks succeeded for that exact commit, and refuses to publish from a dirty tree (S26) | the release workflow has never executed, so nothing has actually been published | ORG-PR-001 |
+| Provenance generated | Partially | the release manifest records source provenance (`commit` vs `working-tree`), deployability, image digests, derived migration identity, and the required-check run IDs that authorised publication (S26) — a verifiable build record, but unsigned and self-asserted | no signed, independently verifiable attestation | ORG-PR-001 |
+| Provenance/dependencies signed | Not satisfied | images tag+digest-pinned (S23, ORG-PR-042 closed); releases promoted by digest with the digest recorded in a validated manifest and in deployment evidence (S26) — identity, not authenticity | no signing/SBOM/provenance | ORG-PR-001 |
 
 Indicative build-integrity maturity: a scripted, version-controlled build with **no
 provenance or signing** (roughly the lowest SLSA tier). Higher tiers require a

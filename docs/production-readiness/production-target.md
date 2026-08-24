@@ -25,8 +25,13 @@ would change under a different target.
   *(Sprint 25 update: backup, restore, PITR, and retention TOOLING now exist
   and are tested — see [../backup-and-restore.md](../backup-and-restore.md),
   [../pitr.md](../pitr.md), [../retention.md](../retention.md). Nothing
-  schedules or stores them, and deployment and observability tooling remain
-  absent.)*
+  schedules or stores them.)*
+  *(Sprint 26 update: deployment TOOLING now exists too — registry publishing,
+  release manifests, a single-host deployment topology, a deployment executor,
+  post-deployment smoke, an evidence ledger, and application rollback, all
+  rehearsed end to end ([../deployment.md](../deployment.md)). No deployment
+  ENVIRONMENT exists, nothing has been published to a registry, and
+  observability tooling remains absent.)*
 
 ## Explicit assumptions
 
@@ -108,7 +113,12 @@ established requirement.
   (ORG-PR-001), production config guards (ORG-PR-003), secrets/rotation guidance
   (ORG-PR-006), a real mailer adapter (ORG-PR-002), and operations docs
   (ORG-PR-027). Availability/backup/DR become the operator's responsibility, but
-  Orgistry must make them *possible and documented*. Sprint 23 shipped the
+  Orgistry must make them *possible and documented*. Sprint 26 shipped the
+  deployment path a self-hosting operator actually needs — a single-host
+  Compose topology, a promote-by-digest deployment script, post-deployment
+  smoke, deployment evidence, and rollback, matching the profile chosen here
+  and explicitly not Kubernetes; it is rehearsed, not executed against any
+  host. Sprint 23 shipped the
   artifact; Sprint 15 the config guards; Sprint 24 the runtime secret
   injection sources (direct env or mounted `<NAME>_FILE`), graceful
   access-token key rotation, and the rotation/incident guidance

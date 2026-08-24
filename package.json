@@ -39,7 +39,13 @@
     "db:retention": "pnpm --filter @orgistry/api run retention",
     "db:backup": "bash tooling/db-backup.sh",
     "drill:restore": "bash tooling/db-restore-drill.sh",
-    "drill:pitr": "bash tooling/db-pitr-drill.sh"
+    "drill:pitr": "bash tooling/db-pitr-drill.sh",
+    "release:manifest": "node tooling/release-manifest.mjs",
+    "deploy:run": "bash tooling/deploy.sh",
+    "deploy:smoke": "bash tooling/deploy-smoke.sh",
+    "deploy:rollback": "bash tooling/deploy-rollback.sh",
+    "deploy:evidence": "node tooling/deploy-evidence.mjs",
+    "deploy:rehearsal": "bash tooling/deploy-rehearsal.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

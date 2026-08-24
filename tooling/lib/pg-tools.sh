@@ -129,7 +129,10 @@ pg_wait_ready() {
 #
 # Arguments before `--` are passed to `docker run` (extra volumes, published
 # ports); arguments after `--` are passed to the `postgres` server itself
-# (e.g. `-c archive_mode=on`).
+# (e.g. `-c archive_mode=on`). Both groups are expanded with the `+` guard:
+# under `set -u`, bash 3.2 (the system bash on macOS) treats an unguarded
+# `"${empty[@]}"` as an unbound variable, so a caller that passes neither group
+# would fail there and nowhere else.
 #
 # Credentials are the fixed LOCAL-ONLY drill values below: these servers live
 # and die with the drill and are never reachable from outside the drill
@@ -163,7 +166,7 @@ pg_start_server() {
     --env "POSTGRES_USER=${ORGISTRY_DRILL_PG_USER}" \
     --env "POSTGRES_PASSWORD=${ORGISTRY_DRILL_PG_PASSWORD}" \
     --env "POSTGRES_DB=${ORGISTRY_DRILL_PG_DB}" \
-    "${docker_args[@]}" \
+    "${docker_args[@]+"${docker_args[@]}"}" \
     "${ORGISTRY_PG_IMAGE}" \
     "${server_args[@]+"${server_args[@]}"}" >/dev/null
 }

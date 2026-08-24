@@ -1,0 +1,101 @@
+# Orgistry single-host deployment topology (Sprint 26, ORG-PR-001).
+#
+# WHAT THIS IS
+# The runtime definition an operator deploys on ONE host with Docker Compose.
+# It is driven entirely by tooling/deploy.sh — do not run it by hand, because
+# the deployment invariants (digest pinning, migrate-once, readiness gating,
+# smoke, evidence) live in that script, not here.
+#
+# WHAT IT DELIBERATELY DOES NOT CONTAIN
+#   * No `build:` anywhere. The images are BUILT ONCE by the release workflow,
+#     published to a registry, and deployed BY DIGEST. A build section here
+#     would let a target rebuild source and run an image nothing validated —
+#     the exact failure this model exists to prevent. tooling/deploy.sh asserts
+#     the rendered configuration contains no build section.
+#   * No PostgreSQL, Redis, or SMTP service. Those are operator-provided
+#     (managed or separately operated) — see docs/production-target.md. Only
+#     Orgistry's own artifacts are deployed here.
+#   * No secret values. Every runtime secret comes from the runtime env file
+#     referenced below, which lives outside the repository
+#     (docs/runtime-secrets.md, docs/deployment.md).
+#
+# CONTRAST WITH infra/compose.production-like.yml
+# That file is a VALIDATION topology: it builds images, runs its own database,
+# and boots with checked-in fake credentials. This file deploys published
+# digests with operator-supplied configuration. They are not interchangeable
+# and neither one is "staging".
+#
+# Required environment (exported by tooling/deploy.sh from the release manifest
+# and the deployment configuration file):
+#   ORGISTRY_API_IMAGE          digest-pinned API image reference
+#   ORGISTRY_WEB_IMAGE          digest-pinned web image reference
+#   ORGISTRY_RUNTIME_ENV_FILE   absolute path to the runtime configuration file
+#   ORGISTRY_DEPLOY_NETWORK     pre-existing Docker network to attach to
+#   ORGISTRY_PUBLIC_API_BASE_URL  the browser-facing API origin for this
+#                                 environment (public, not a secret)
+name: ${ORGISTRY_COMPOSE_PROJECT:-orgistry}
+
+services:
+  # One-shot migration runner: the SAME API image, a different command.
+  # `profiles` keeps it out of `docker compose up`; tooling/deploy.sh invokes it
+  # explicitly with `docker compose run --rm`, exactly once per deployment.
+  migrate:
+    image: ${ORGISTRY_API_IMAGE:?ORGISTRY_API_IMAGE must be a digest-pinned reference from the release manifest}
+    command: ['node', 'dist/migrate.mjs']
+    profiles: ['migration']
+    restart: 'no'
+    env_file:
+      - ${ORGISTRY_RUNTIME_ENV_FILE:?ORGISTRY_RUNTIME_ENV_FILE must point at the operator runtime configuration file}
+
+  api:
+    image: ${ORGISTRY_API_IMAGE:?ORGISTRY_API_IMAGE must be a digest-pinned reference from the release manifest}
+    restart: unless-stopped
+    env_file:
+      - ${ORGISTRY_RUNTIME_ENV_FILE:?ORGISTRY_RUNTIME_ENV_FILE must point at the operator runtime configuration file}
+    ports:
+      # Bound to loopback by default: a single-host deployment terminates TLS
+      # in the operator's reverse proxy, which is the only thing that should
+      # reach these ports. Set ORGISTRY_API_BIND=0.0.0.0 only deliberately.
+      - '${ORGISTRY_API_BIND:-127.0.0.1}:${ORGISTRY_API_HOST_PORT:-3000}:3000'
+    healthcheck:
+      # The runtime image is debian-slim without curl/wget; Node's fetch is the
+      # probe. /health is liveness-only and touches no dependency.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # The API's shutdown is bounded and idempotent (Sprint 19); give it room to
+    # drain in-flight requests before Docker escalates to SIGKILL.
+    stop_grace_period: 30s
+
+  web:
+    image: ${ORGISTRY_WEB_IMAGE:?ORGISTRY_WEB_IMAGE must be a digest-pinned reference from the release manifest}
+    restart: unless-stopped
+    environment:
+      # PUBLIC browser configuration, applied at container start. This is the
+      # environment identity that used to be compiled into the bundle; keeping
+      # it here is what makes one web digest promotable across environments.
+      # Every value is served to every browser — never put a secret here.
+      ORGISTRY_PUBLIC_API_BASE_URL: ${ORGISTRY_PUBLIC_API_BASE_URL:?the browser-facing API origin must be set for this environment}
+      ORGISTRY_PUBLIC_CSRF_HEADER_NAME: ${ORGISTRY_PUBLIC_CSRF_HEADER_NAME:-x-orgistry-csrf}
+      ORGISTRY_PUBLIC_MAILPIT_URL: ${ORGISTRY_PUBLIC_MAILPIT_URL:-http://localhost:8025}
+    ports:
+      - '${ORGISTRY_WEB_BIND:-127.0.0.1}:${ORGISTRY_WEB_HOST_PORT:-8080}:8080'
+    depends_on:
+      api:
+        condition: service_healthy
+
+# The network is created by tooling/deploy.sh before compose runs, and declared
+# external here so operator-provided services (a database container on the same
+# host, a reverse proxy) can be attached to it independently of this project's
+# lifecycle.
+networks:
+  default:
+    name: ${ORGISTRY_DEPLOY_NETWORK:-orgistry-deploy}
+    external: true

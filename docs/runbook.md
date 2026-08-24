@@ -7,7 +7,14 @@ reference (production-shaped API/web images + one-shot migrations), normally
 exercised via `pnpm artifact:smoke` — see
 [deployment-artifacts.md](deployment-artifacts.md); it publishes the same
 3000/8080 ports as a running dev stack, so stop one before starting the other.
-There is still no production deployment automation here.
+`infra/compose.deploy.yml` is a third, unrelated file: the single-host
+DEPLOYMENT topology, driven only by `tooling/deploy.sh`
+([deployment.md](deployment.md)) and never started by hand.
+
+Deploying a release to a host — publishing images, promoting a release by
+digest, running migrations, validating a deployment, and rolling one back — is
+[deployment.md](deployment.md) (Sprint 26). No Orgistry deployment target
+exists yet; that document is precise about what has and has not been executed.
 
 Operating a deployed process — injecting runtime secrets, rotating the
 access-token signing secret or SMTP credentials, invalidating sessions,
@@ -126,6 +133,25 @@ The drills create and destroy their own PostgreSQL containers; they never touch
 `orgistry-postgres-1` or its volume. Backup artifacts contain real user,
 organization, and hash data even locally — see the security rules in
 [backup-and-restore.md](backup-and-restore.md#7-backup-security).
+
+## Rehearsing a deployment locally
+
+```bash
+pnpm deploy:rehearsal      # build -> publish -> deploy -> smoke -> roll back
+```
+
+Runs the entire promotion and deployment lifecycle against a throwaway registry
+and throwaway PostgreSQL/Redis containers, then destroys everything. It needs
+host ports 5001, 3100, and 8180 free, and it is not staging — see
+[deployment.md](deployment.md#the-deployment-rehearsal). Run it before merging
+any change to the deployment tooling, `infra/compose.deploy.yml`,
+`apps/web-demo/nginx.conf.template`, or either Dockerfile.
+
+Its output is **not** a release: every manifest it writes is
+`release.type: rehearsal`, `deployable: false`, and — when your working tree is
+dirty — records `provenance: working-tree` with a fingerprint of that tree
+instead of an unqualified commit SHA. A real environment refuses to deploy one,
+and a rehearsal result must never be quoted as evidence about a commit.
 
 ## Running the retention cleanup locally
 

@@ -264,27 +264,89 @@ bumped manually per [../validation.md](../validation.md#image-pinning-policy)).
 
 ## CI/CD & release readiness
 
-Three workflows: `ci.yml` mirrors local validation across two jobs with
-PG+Redis service containers; `security.yml` runs the pnpm dependency-audit
-gates and the Gitleaks secret scan; `codeql.yml` runs JS/TS SAST. All actions
-are pinned to verified full commit SHAs with explicit least-privilege
-permissions (ORG-PR-019 closed, Sprint 21); all three run remotely and are
-required checks on `main` via a repository ruleset, with the secret gate
-proved to fail on a seeded finding (ORG-PR-020 closed, Sprint 22).
-**Gaps:** ORG-PR-041 (SMTP untested), ORG-PR-001 (no release/deploy pipeline,
-no registry publishing, no tags, no versioning — the artifacts themselves and
-a CI build+smoke gate exist since Sprint 23: `ci.yml` `artifacts` job runs
-`tooling/artifact-smoke.sh` against the production-shaped images). The minimum
-release pipeline for the target is defined in
-[production-roadmap.md](production-roadmap.md).
+Workflows: `ci.yml` mirrors local validation across three jobs with PG+Redis
+service containers; `security.yml` runs the pnpm dependency-audit gates and the
+Gitleaks secret scan; `codeql.yml` runs JS/TS SAST; `data-durability.yml`
+(manual + weekly) runs the PITR drill. All actions are pinned to verified full
+commit SHAs with explicit least-privilege permissions (ORG-PR-019 closed,
+Sprint 21); the pull-request workflows run remotely and are required checks on
+`main` via a repository ruleset, with the secret gate proved to fail on a
+seeded finding (ORG-PR-020 closed, Sprint 22).
+
+**Sprint 26 added three workflows and, with them, the repository's first
+publishing capability.** Security-relevant properties, all verified by reading
+the workflow definitions:
+
+- `release.yml` is the **only** workflow that publishes, and publication is
+  **authorised per source SHA**. A dedicated `gates` job resolves the actual
+  workflow runs for the exact release commit and requires all six required
+  checks to have concluded `success` at JOB granularity — the same granularity
+  branch protection uses — recording their run IDs into the release manifest,
+  which the manifest validator then binds to `source.commit`. "The commit is on
+  main" is explicitly not accepted as evidence, a run that has not reported yet
+  is `pending` rather than a silent pass, and a failed check fails the release
+  immediately. `actions: read` is scoped to that job and `packages: write` to
+  the publish job, so neither can perform the other's action. It never runs on
+  `pull_request`, so untrusted fork code has no path to it; its credential is
+  the job's own short-lived `GITHUB_TOKEN`, piped to
+  `docker login --password-stdin` so it never appears in a command line or a
+  log; and no image build receives a secret build argument — since the Sprint 26
+  refinement, no build argument at all. It is additionally gated on its own
+  artifact-smoke run, and publishes the very images that gate produced: both
+  images are re-tagged, never rebuilt.
+- **A published release must be exactly its commit.** The publish job asserts a
+  clean checkout, and the manifest schema refuses a deployable release with
+  working-tree provenance. Local rehearsal output is schema-marked
+  non-deployable and carries no gate evidence, so it can be neither deployed to
+  a real environment nor cited as evidence about a commit.
+- `deploy.yml` is manual-dispatch only, **read-only everywhere**
+  (`contents: read`, `actions: read`, `packages: read`), and refuses a release
+  that does not declare itself deployable. It declares a GitHub
+  `environment:`, which is where required reviewers and any future deployment
+  credential belong; **no environment is configured yet**, so today it provides
+  no protection beyond being manual. It contacts no deployment target.
+- `deployment-rehearsal.yml` is manual + weekly, needs no secrets, and
+  publishes only to a throwaway in-runner registry.
+- Deployment secret handling is covered under
+  [Secrets & cryptography](#secrets--cryptography) and
+  [../deployment.md](../deployment.md#deployment-secret-handling): a
+  0600-enforced runtime configuration file, exactly one secret read by the
+  deployment itself and never logged or passed as an argument, `docker compose
+  config` never invoked (it would expand `env_file` into plaintext), and
+  credential-shape guards that refuse to write anything secret-looking into a
+  release manifest or a deployment evidence record.
+
+**Gaps:** ORG-PR-041 (SMTP untested), ORG-PR-001 (the release and deployment
+workflows have **never executed remotely**, nothing has been published to any
+registry, no GitHub Environment exists, and there is no deployment target). No
+artifact signing and no provenance attestation. The minimum release pipeline
+for the target is defined in
+[production-roadmap.md](production-roadmap.md); what now exists is described in
+[../deployment.md](../deployment.md).
 
 ## Infrastructure & deployment
 
 App Dockerfiles EXIST since Sprint 23 (non-root API + web artifacts, explicit
 migration entrypoint, production-like compose validation reference, CI smoke
-gate — see [../deployment-artifacts.md](../deployment-artifacts.md)); IaC and
-environment provisioning still do not (ORG-PR-001 open for the deployment
-half). The recommended
+gate — see [../deployment-artifacts.md](../deployment-artifacts.md)). Sprint 26
+added the promotion and deployment mechanism around them
+([../deployment.md](../deployment.md)) with several security-relevant
+invariants: images are promoted **by digest only** (a tag-pinned reference is
+refused at four independent points), the deployment topology has no `build:`
+section so a target cannot rebuild source, migrations run exactly once from the
+release's own image and their applied head is verified against the release
+before traffic is served, the running containers' image IDs are checked against
+the release digests, and post-deployment smoke asserts the security-header
+baseline, coarse readiness disclosure, and request-ID propagation on the
+deployed instance. Both images are also **environment-neutral**: the browser's
+public configuration is served by the running web container from container
+variables rather than compiled into the bundle, so one validated digest is
+promotable rather than rebuilt per environment. That configuration channel is
+public by construction — the application refuses to start if it receives a
+credential-shaped key, and the deployment evidence ledger refuses to record
+anything outside the published public contract. **Environment provisioning and IaC still do not exist**, no
+image has been published to any registry, and no deployment has ever run
+against a real host (ORG-PR-001 open). The recommended
 simplest architecture (reverse proxy + TLS + 2 API replicas + managed Postgres/
 Redis + real SMTP + scheduler + secrets manager, **not Kubernetes**) is in
 [production-target.md](production-target.md). Depends on: security headers/proxy

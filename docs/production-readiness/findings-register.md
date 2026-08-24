@@ -273,11 +273,62 @@ production. See
 [../backup-and-restore.md](../backup-and-restore.md), [../pitr.md](../pitr.md),
 and [../retention.md](../retention.md).
 
+**Status update (Sprint 26, 2026-08-24):** no finding is closed. This is the
+specification-permitted outcome for a sprint whose closure criteria depend on
+infrastructure that does not exist.
+
+[ORG-PR-001](#org-pr-001) (P1) **remains Open, materially advanced — second
+time**. Sprint 23 delivered the artifact half; Sprint 26 delivers the promotion
+and deployment MECHANISM: GHCR publishing under immutable commit-SHA tags with
+digest capture, a schema-validated release manifest, a build-once/promote-by-
+digest contract enforced at four independent points, a single-host deployment
+topology that structurally cannot rebuild source, an operator-run deployment
+script with a migrate-exactly-once contract and a verified applied migration
+head, a reusable post-deployment smoke command, an append-only deployment
+evidence ledger that answers "what is running?" and "what would a rollback
+restore?", application rollback to the previous known-good digests, and an
+end-to-end rehearsal that executes all of it locally and passes. **Why it stays
+open:** the finding's required validation is "a tagged build deploys to a
+target environment reproducibly". No target environment exists — no host, no
+provider account, no deployment credential, no GitHub Environment — the release
+workflow has never run, so no image has been published to any registry, and
+neither new workflow has ever executed on GitHub Actions. Rollback is validated
+only in the local rehearsal. Deployment mechanics implemented is not deployment
+target validated, and neither is staging readiness.
+
+[ORG-PR-005](#org-pr-005) (P1) **remains Open**, unchanged in substance. Sprint
+26 integrated the Sprint 25 backup tooling at the one point where a deployment
+creates a new recovery-point requirement — a labelled pre-migration backup whose
+artifact and recovery point are recorded in deployment evidence, with an
+unexplained skip refused outright. That is integration, not a backup posture:
+nothing schedules backups, nothing stores them off-host or encrypted, no
+long-lived database archives WAL, no archive-health check exists (there is no
+archiving database to check), and no RPO/RTO has been measured. Repository
+integration documentation is explicitly insufficient for closure.
+
+[ORG-PR-006](#org-pr-006) (P1) **remains Open**, unchanged in substance. Sprint
+26 added deployment-side secret HANDLING — a 0600-enforced runtime configuration
+file, `<NAME>_FILE` compatibility preserved, exactly one secret read by the
+deployment itself and never logged or passed as an argument, credential-shape
+guards on the release manifest and every evidence record, and a publishing
+workflow that consumes no long-lived credential. None of that is secrets
+management: there is still no secret store, no least-privilege access control,
+no read auditing, no automated rotation or expiry tracking, and no rotation
+rehearsed against a real runtime. GitHub Environment secrets are documented as
+the intended home for a future deployment credential and are **not configured**.
+
+[ORG-PR-002](#org-pr-002) (P1) was explicitly out of scope and is untouched.
+
+**Open P1 production blockers: ORG-PR-001, ORG-PR-002, ORG-PR-005,
+ORG-PR-006 — unchanged.** The repository remains not ready for staging or
+production. See [sprint-26-artifact-package.md](sprint-26-artifact-package.md)
+and [../deployment.md](../deployment.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
 | --- | --- | --- | --- | --- | --- |
-| [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Open; materially advanced (Sprint 23): non-root artifacts + CI build/smoke gate exist; deployment pipeline to a target environment does not** | Infrastructure | Production blocker | P1 | High |
+| [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Open; materially advanced (Sprint 23 artifacts + CI build/smoke gate; Sprint 26 registry publishing, release manifest, promote-by-digest deployment, migration contract, smoke, evidence, rollback, rehearsed end to end): no deployment target exists, nothing has been published to a registry, and neither new workflow has run remotely** | Infrastructure | Production blocker | P1 | High |
 | [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16 adapter + guard; Sprint 24 runtime credential source, failure-mode redaction proofs, family matrix, operator validation procedure): external delivery, inbox receipt, and sender-domain authentication all still unvalidated** | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
 | [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
@@ -384,6 +435,96 @@ Standards · Threats.
   migration orchestration and rollback" — still has no environment, no
   registry publishing, no promotion/deploy pipeline, and no rollback beyond
   forward-only migrations. Docs: [../deployment-artifacts.md](../deployment-artifacts.md).
+- **Progress (Sprint 26, 2026-08-24): Open — materially advanced (second
+  time).** The promotion and deployment MECHANISM now exists, is readable, and
+  is exercised end to end locally. Implemented:
+  `.github/workflows/release.yml` (runs the artifact gate itself, then publishes
+  the images that gate produced to `ghcr.io/<owner>/orgistry-{api,web}` under an
+  immutable commit-SHA tag, captures registry digests, generates and validates
+  the release manifest, uploads it as a workflow artifact; never runs on pull
+  requests; `packages: write` on the publish job only; credential is the job's
+  own short-lived `GITHUB_TOKEN` on stdin; no secret enters any image build);
+  `.github/workflows/deploy.yml` (manual dispatch, bound to a GitHub
+  Environment, read-only everywhere — validates a release manifest, refuses a
+  release whose artifact gate did not pass, proves both digests still resolve in
+  the registry, emits the deployment plan and operator commands);
+  `.github/workflows/deployment-rehearsal.yml` (manual + weekly);
+  `tooling/release-manifest.mjs` + `tooling/lib/release-manifest.mjs` (the
+  release identity: digest-only image references, image tag == source commit,
+  migration head/count/journal-timestamp DERIVED from the repository rather than
+  supplied, the web image's build-time API origin recorded as part of its
+  identity, and a credential-shape guard that refuses anything secret-looking);
+  `tooling/deploy-evidence.mjs` + `tooling/lib/deploy-evidence.mjs` (an
+  append-only per-environment ledger recording the deployed release, the
+  migration outcome and verified head, the backup preflight and its recovery
+  point, the smoke result, the digests OBSERVED running on the target, and the
+  rollback target — with failed deployments recorded too, and a record unable to
+  claim a validated deployment without observed digests);
+  `infra/compose.deploy.yml` (deploys only Orgistry's own artifacts, by digest,
+  with **no `build:` section anywhere**); `infra/deploy.env.example` (the
+  deployment configuration contract, secrets deliberately in a separate
+  0600 runtime file); `tooling/deploy.sh` (thirteen named stages: manifest
+  validation → no-build assertion → web-origin match → runtime-config
+  permission and presence checks → digest pull → backup preflight → migrate
+  exactly once from the release's own image → verify the applied head against
+  the manifest via Drizzle's ledger → API → web → readiness → verify the RUNNING
+  container image IDs are the manifest's digests → smoke → evidence);
+  `tooling/deploy-smoke.sh` (eight URL-only checks incl. coarse-readiness
+  disclosure, six security headers, request-ID propagation, and reading the API
+  origin back out of the SERVED web bundle); `tooling/deploy-rollback.sh`
+  (resolves the previous known-good release — smoke passed, not current, not
+  already rolled away from — and redeploys those exact digests from that
+  release's own manifest, stored on the host, with migrations off); and
+  `tooling/deploy-rehearsal.sh` (`pnpm deploy:rehearsal`), which executed the
+  whole lifecycle locally and PASSED: build once → publish → digest capture →
+  manifest → deploy → migrate once → verified head → readiness → 8/8 smoke →
+  evidence → second release → rollback to the previous known-good digests →
+  running-container digest verification, plus three proven refusals (a
+  tag-pinned manifest, a web image built for another API origin, and a
+  group-readable runtime configuration file). 29 new unit tests pin the manifest
+  and evidence contracts inside the required `Validate (offline)` check.
+  **Why still open — the closure criterion is not met.** The finding requires
+  "a tagged build deploys to a target environment reproducibly". **No target
+  environment exists**: no host, no provider account, no deployment credential,
+  no GitHub Environment. The release workflow has never run, so **no Orgistry
+  image has been published to any registry**; `Release`, `Deploy`, and
+  `Deployment rehearsal` have never executed on GitHub Actions (they are
+  `actionlint`-clean and their scripts run locally); and rollback is validated
+  only in the local rehearsal, between two releases that differ by an image
+  label, on a throwaway database. Deployment mechanics implemented is not
+  deployment target validated, and neither is staging or production readiness.
+  Docs: [../deployment.md](../deployment.md),
+  [sprint-26-artifact-package.md](sprint-26-artifact-package.md).
+- **Refinement (Sprint 26, 2026-08-24): still Open — three release-integrity
+  defects found in review and fixed.** (1) *The web artifact was not actually
+  promotable.* `VITE_API_BASE_URL` was compiled into the bundle, so the manifest
+  had to record the baked origin and the deployment had to refuse a mismatch —
+  safe, but it meant one validated web digest could not move between
+  environments, contradicting build-once/promote-by-digest. The browser's public
+  configuration now arrives at RUNTIME (`/public-config.js`, rendered by nginx
+  from `ORGISTRY_PUBLIC_*` container variables at container start); the web
+  Dockerfile takes **no build arguments at all**; `images.web.apiBaseUrl` is gone
+  and the schema now refuses ANY non-identity field on an image. Proven at three
+  levels: unit tests over the resolver, the artifact smoke test running one image
+  as two origins, and the rehearsal promoting one release between two
+  configurations with the running digests asserted unchanged. (2) *Rehearsal
+  provenance was ambiguous.* A dirty working tree produced images described by a
+  clean HEAD SHA with only a printed warning. Manifests now declare
+  `release.type` and `source.provenance`; a dirty tree yields `working-tree`
+  provenance plus a content fingerprint and can never be `deployable`; a
+  rehearsal never carries gate evidence; the release workflow asserts a clean
+  checkout; and `deploy.sh` refuses a non-deployable manifest unless the
+  environment explicitly declares itself a rehearsal. (3) *Publication was not
+  tied to the required checks for the release SHA.* A dedicated `gates` job now
+  resolves the actual workflow runs for the exact commit and requires all six
+  required checks to have concluded `success` at JOB granularity, recording their
+  run IDs in the manifest — which the validator binds to `source.commit`. The
+  race is handled explicitly with a bounded wait: a failure fails immediately, a
+  missing run is `pending` and never a silent pass, and a timeout publishes
+  nothing. `actions: read` is scoped to the gate job and `packages: write` to the
+  publish job. **None of this changes the finding's status**: there is still no
+  deployment target, nothing has been published to any registry, and no workflow
+  has executed remotely.
 
 <a id="org-pr-002"></a>
 ### ORG-PR-002 — No production email provider (Mailpit-only)
@@ -583,6 +724,31 @@ Standards · Threats.
   Closing this finding on repository-controlled capability alone would assert
   that the backup/DR launch gate is satisfied while no backup runs anywhere.
   The capability is proven; the production posture is not.
+- **Progress (Sprint 26, 2026-08-24): Open — integration boundary advanced,
+  substance unchanged.** The deployment lifecycle now has exactly one
+  backup/PITR integration point, at the only moment a deployment creates a new
+  recovery-point requirement: before migrations, `tooling/deploy.sh` runs the
+  REAL `tooling/db-backup.sh` with the label `pre-deploy`, records the artifact
+  name and the resulting recovery point in the deployment evidence record, and
+  **aborts the deployment before migrations if the backup fails** — leaving the
+  target unchanged. A skip is permitted for an operator relying on
+  provider-managed backups but **requires a recorded reason**: an unexplained
+  skip is refused, because during an incident it is indistinguishable from an
+  oversight. A rollback skips the preflight automatically, with that reason
+  recorded. Two latent defects on this path were found and fixed by the
+  rehearsal: `tooling/db-backup.sh` could not back up a database with no
+  migration ledger (PostgreSQL resolves relation names at parse time, so the
+  `coalesce(...)` guard never ran) — which is exactly the first-deployment case
+  — and `pg_start_server` failed under `set -u` on bash 3.2 when called with no
+  extra Docker arguments. The restore drill, the `--with-artifact` drill, and
+  the PITR drill were all re-run locally after those fixes and pass. **Nothing
+  about closure changes.** Verifying WAL-archival health before a migration is
+  NOT implemented, because no long-lived archiving database exists to verify;
+  and every bullet in the "why this stays OPEN" list above is still true —
+  nothing schedules a backup, nothing stores one off-host or encrypted, no
+  provider PITR window is configured, no archive health is monitored, and no
+  RPO/RTO has been measured. Deployment-time integration is not a backup
+  programme.
 
 <a id="org-pr-006"></a>
 ### ORG-PR-006 — No secrets management or rotation procedure
@@ -650,6 +816,30 @@ Standards · Threats.
   (ORG-PR-049), dual-credential support for `DATABASE_URL`/`REDIS_URL`, and a
   rehearsal against a real deployment — which cannot happen until ORG-PR-001
   provides one. File-based injection plus runbooks is not secrets management.
+- **Progress (Sprint 26, 2026-08-24): Open — deployment-side HANDLING added,
+  substance unchanged.** The deployment now enforces several secret-handling
+  rules the Sprint 24 boundary could only describe: the runtime configuration
+  file holding every runtime secret must be mode **0600** or the deployment
+  refuses to run (proven by a rehearsal negative check); the deployment reads
+  exactly one secret for itself (`DATABASE_URL`, honouring `DATABASE_URL_FILE`)
+  and passes it only through a container environment variable, never as a
+  command argument, a filename, or a log line; `docker compose config` is
+  deliberately never invoked anywhere, because it expands `env_file` entries
+  into plaintext; the release manifest and every deployment evidence record are
+  validated against a credential-shape guard that refuses a URL with inline
+  credentials or an inline credential assignment; the publishing workflow
+  consumes no long-lived registry credential (the job's own `GITHUB_TOKEN`,
+  passed on stdin) and no image build takes a secret argument. `<NAME>_FILE`
+  compatibility is preserved end to end. **None of this is secrets
+  management.** The finding's expected behavior — a manager or platform secret
+  store, least-privilege access, and a *rehearsed* rotation — is untouched:
+  secrets are still plaintext files on a host, with no store, no access control,
+  no read auditing, no automated rotation or expiry tracking, no hot reload, and
+  no rotation rehearsed against a real runtime (still blocked on ORG-PR-001).
+  The deployment workflow declares a GitHub `environment:` as the intended home
+  for a future deployment credential; **no GitHub Environment is configured**,
+  so that is a documented intention, not a control. GitHub Environment secrets
+  would in any case satisfy only the injection half of this finding.
 
 <a id="org-pr-007"></a>
 ### ORG-PR-007 — No observability (metrics/tracing/dashboards/alerts)

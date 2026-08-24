@@ -4,11 +4,12 @@ Sprint 23 (ORG-PR-001). How Orgistry's production-shaped artifacts are built,
 what they contain, how they run, and where the operator boundary sits.
 
 Scope guard: this document describes **buildable, locally/CI-validated
-artifacts and a validation runtime**. There is no staging environment, no
-production deployment, no registry publishing, no secrets manager, and no
-deploy pipeline to a target environment — see
+artifacts and a validation runtime**. How those artifacts are published,
+promoted, and deployed is a separate document — [deployment.md](deployment.md)
+(Sprint 26). There is still no staging environment, no production deployment,
+no image published to any registry, and no secrets manager — see
 [known-limitations.md](known-limitations.md) and the findings register
-(ORG-PR-001 remains open for the deployment-automation half).
+(ORG-PR-001 remains open, materially advanced).
 
 ## Artifact strategy
 
@@ -96,18 +97,37 @@ not writable by the runtime user).
 
 Stage 1 runs the existing `vite build` in the workspace; stage 2 serves
 `apps/web-demo/dist` with non-root nginx and an SPA history fallback
-(`apps/web-demo/nginx.conf`). The runtime contains no Node, no source, no
-workspace.
+(`apps/web-demo/nginx.conf.template`, rendered to
+`/etc/nginx/conf.d/default.conf` at container start). The runtime contains no
+Node, no source, no workspace.
 
-**Public configuration vs secrets.** The `VITE_*` build arguments
-(`VITE_API_BASE_URL`, `VITE_CSRF_HEADER_NAME`, `VITE_MAILPIT_URL`) are
-compiled into the browser bundle and are public by definition — they are
-configuration, not secrets. Server-only secrets must never be passed as build
-args to either Dockerfile; the smoke test asserts the server secret values do
-not appear in the static assets. `VITE_API_BASE_URL` is **build-time** config:
-serving one built web artifact against a different API origin requires a
-rebuild (accepted for the demo frontend; a runtime-injected config file is a
-future option if it ever matters).
+**Public configuration is applied at RUNTIME, and the image carries no
+environment identity.** The web Dockerfile takes **no build arguments at all**
+since the Sprint 26 refinement. The three public browser values — the API
+origin, the CSRF header name, and the Mailpit UI — are served to the browser by
+the running container:
+
+- `apps/web-demo/nginx.conf.template` declares an exact-match
+  `location = /public-config.js` that returns
+  `window.__ORGISTRY_PUBLIC_CONFIG__ = {…}` built from `ORGISTRY_PUBLIC_*`
+  container variables. The base image's own template step renders it at
+  container start, with `NGINX_ENVSUBST_FILTER=^ORGISTRY_PUBLIC_` so nginx's own
+  `$uri`/`$host` are untouched.
+- `apps/web-demo/src/public-config.ts` resolves runtime → `import.meta.env.VITE_*`
+  (development only) → built-in localhost defaults, and **refuses to start** if
+  the runtime object carries a credential-shaped key.
+- `apps/web-demo/public/public-config.js` is an empty assignment shipped in the
+  bundle purely so the Vite dev server resolves the script tag; a deployed
+  container never serves it.
+
+This is what makes one validated web digest promotable between environments
+instead of rebuildable per environment
+([deployment.md](deployment.md#runtime-public-configuration)). Server-only
+secrets must never be passed as build args to either Dockerfile, and never into
+the public configuration; the smoke test asserts server secret values do not
+appear in the static assets, that the runtime configuration reflects the
+container's variables, and that the SAME image adopts a different API origin
+without being rebuilt.
 
 **Security-header boundary.** When web and API are served from separate
 origins, the API's security headers (`apps/api/src/plugins/security-headers.ts`)
@@ -187,7 +207,11 @@ docker run --rm -e DATABASE_URL=... <api-image> node dist/migrate.mjs
   is explicitly labelled as unrehearsed guidance.
 - A migration failure exits non-zero and must abort the deploy; the running
   old API is unaffected (it never observes a half-applied transaction —
-  drizzle applies each migration transactionally).
+  drizzle applies each migration transactionally). Sprint 26 makes that
+  mandatory rather than advisory: `tooling/deploy.sh` runs this entrypoint
+  exactly once per deployment, aborts before starting any application
+  container if it fails, and then verifies the applied head against the release
+  manifest ([deployment.md](deployment.md#migration-lifecycle)).
 
 ## Environment contract (deployable API artifact)
 
@@ -296,7 +320,9 @@ bumped manually with the same digests. Update procedure:
 `infra/compose.production-like.yml` is a **validation topology**, not a
 deployment: it proves the built artifacts fit together (build → migrate →
 boot → serve) under `NODE_ENV=production` with fake guard-passing
-configuration. PostgreSQL/Redis run in containers here only for validation; a
+configuration. The deployment topology is a different file with different
+rules — `infra/compose.deploy.yml` has no `build:` section at all and runs
+published digests supplied by a release manifest ([deployment.md](deployment.md)). PostgreSQL/Redis run in containers here only for validation; a
 real deployment provides managed stateful services, replaces Mailpit with a
 real email provider, and injects real secrets at runtime.
 

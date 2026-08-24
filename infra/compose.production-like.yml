@@ -129,11 +129,13 @@ services:
     build:
       context: ..
       dockerfile: apps/web-demo/Dockerfile
-      args:
-        # Public frontend configuration (compiled into the browser bundle —
-        # non-secret by definition). Points at the API port published above.
-        VITE_API_BASE_URL: http://localhost:3000
     image: orgistry-web:production-like
+    environment:
+      # Public frontend configuration, applied at CONTAINER START rather than at
+      # image build time (Sprint 26 refinement) — which is what lets one web
+      # digest be promoted between environments instead of rebuilt for each.
+      # Non-secret by definition: every browser receives it.
+      ORGISTRY_PUBLIC_API_BASE_URL: http://localhost:3000
     ports:
       - '8080:8080'
     depends_on:

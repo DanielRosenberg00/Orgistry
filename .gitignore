@@ -25,6 +25,14 @@ backups/
 *.dump
 *.dump.sha256
 
+# Deployment artifacts (Sprint 26, ORG-PR-001). Release manifests and
+# deployment evidence describe a specific build or a specific environment;
+# they are workflow artifacts and host-side operational state, never
+# repository content. Neither contains secrets — they are ignored because they
+# are per-build/per-host, not because they are sensitive.
+artifacts/
+deployments/
+
 # Local assistant/tooling state (never commit: contains local caches and
 # scanner-sensitive blobs, e.g. the tokensave WAL)
 .claude/

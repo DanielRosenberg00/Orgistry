@@ -56,6 +56,9 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    # `pnpm run <script> -- --flag` forwards a bare `--`. Treat it as the
+    # conventional end-of-options marker, matching the retention CLI.
+    --) shift ;;
     --database-url) DATABASE_URL_ARG="${2:-}"; shift 2 ;;
     --output-dir) OUTPUT_DIR="${2:-}"; shift 2 ;;
     --docker-network) DOCKER_NETWORK="${2:-}"; shift 2 ;;
@@ -115,7 +118,17 @@ DATABASE_NAME="$(pg_query 'SELECT current_database()' | tr -d '[:space:]')"
 # Drizzle records applied migrations in `drizzle.__drizzle_migrations`. A
 # database with no such table is not an Orgistry database (or has never been
 # migrated) — recorded as `null` rather than guessed.
-MIGRATION_COUNT="$(pg_query "SELECT coalesce((SELECT count(*)::text FROM drizzle.__drizzle_migrations), 'null')" | tr -d '[:space:]')"
+#
+# The existence check must be its OWN statement: PostgreSQL resolves relation
+# names when it parses a statement, so any single query that merely mentions
+# the ledger — even inside a CASE branch that would not be taken — fails on a
+# database that does not have it. Backing up an unmigrated database is a
+# legitimate case (the first deployment into an empty database takes one), and
+# it must produce a backup with a null migration count, not an error.
+MIGRATION_COUNT='null'
+if [[ "$(pg_query "SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL" | tr -d '[:space:]')" == 't' ]]; then
+  MIGRATION_COUNT="$(pg_query 'SELECT count(*)::text FROM drizzle.__drizzle_migrations' | tr -d '[:space:]')"
+fi
 CLIENT_VERSION="$(pg_client 'pg_dump --version' | tr -d '\r')"
 
 # ---- Dump -----------------------------------------------------------------

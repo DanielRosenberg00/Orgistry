@@ -1,0 +1,269 @@
+name: Release
+
+# Container registry publishing and release-manifest production (Sprint 26,
+# ORG-PR-001; exact-SHA gate authorization added in the refinement pass).
+#
+# WHAT THIS WORKFLOW IS
+# The single place where a source commit becomes deployable artifacts. It proves
+# the required checks succeeded FOR THIS EXACT COMMIT, then publishes the
+# validated images to GitHub Container Registry under an IMMUTABLE commit-SHA
+# tag, captures their registry digests, and produces the release manifest every
+# deployment consumes.
+#
+# AUTHORIZATION IS PER-SHA, NOT PER-BRANCH
+# "The commit is on main" is not evidence. The `gates` job below resolves the
+# actual workflow runs for this commit and requires all six required checks —
+# Validate (offline), Integration, Artifacts (build + smoke), Dependency audit,
+# Secret scan, and CodeQL Analyze — to have concluded `success` at JOB
+# granularity, which is the granularity branch protection uses. Their run IDs
+# are recorded in the release manifest, and the manifest validator refuses a
+# published release whose gate evidence names any other commit.
+#
+# RACE BEHAVIOR (deliberate, documented in docs/deployment.md)
+# This workflow starts from the same push that starts those gates, so they are
+# normally still running. `gates` POLLS with a bounded timeout: a failure fails
+# the release immediately, a still-missing run is `pending` and never treated as
+# success, and a timeout fails with the pending list so an operator can
+# re-dispatch once the checks finish. Nothing is published in either failure
+# case.
+#
+# BUILD ONCE, PROMOTE BY DIGEST
+# The API image is BUILT ONCE — by tooling/artifact-smoke.sh, which is also what
+# validates it here — and then merely re-tagged for the registry. The web image
+# is built once too and carries NO environment identity: its public API origin
+# is applied at container start by the deployment, so one web digest is
+# promotable between environments (docs/deployment.md, "Runtime public
+# configuration").
+#
+# SECURITY POSTURE
+#   * Never runs on pull requests, so untrusted fork code can never publish.
+#   * `actions: read` is scoped to the `gates` job; `packages: write` is scoped
+#     to the `publish` job. Neither job holds the other's permission.
+#   * Uses the automatic GITHUB_TOKEN. No long-lived registry credential, no
+#     repository secret, and no production runtime secret is involved: image
+#     BUILDS take no secrets at all (docs/deployment-artifacts.md).
+#   * The release manifest is non-secret by construction and is validated
+#     against a schema that refuses anything credential-shaped.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      gate_timeout_seconds:
+        description: >-
+          How long to wait for the required checks to finish for this commit
+          before failing the release. Re-dispatching after they complete is the
+          intended retry path.
+        required: false
+        default: '1800'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- Authorization: prove the required checks passed for THIS commit ----
+  gates:
+    name: Verify required checks for this commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Read-only listing of workflow runs and their jobs. This is the only job
+      # that needs it, and it holds no publishing permission.
+      actions: read
+    outputs:
+      evidence: ${{ steps.verify.outputs.evidence }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A commit that never sat on the release branch was never subject to the
+      # branch's protections. The verifier also re-checks reachability via the
+      # compare API; this is the cheap local half.
+      - name: Confirm this run targets the release branch
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != 'main' ]]; then
+            echo "Release runs only from main; this run is on ${GITHUB_REF_NAME}." >&2
+            exit 1
+          fi
+
+      - name: Verify required checks for ${{ github.sha }}
+        id: verify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GATE_TIMEOUT_SECONDS: ${{ inputs.gate_timeout_seconds || '1800' }}
+        run: |
+          set -euo pipefail
+          node tooling/release-gates.mjs verify \
+            --repository "${GITHUB_REPOSITORY}" \
+            --sha "${GITHUB_SHA}" \
+            --release-branch main \
+            --timeout-seconds "${GATE_TIMEOUT_SECONDS}" \
+            --output artifacts/release-gates.json
+          # Compact, single-line JSON so it travels safely as a job output. It
+          # contains only check names, run IDs, conclusions, and URLs.
+          {
+            echo "evidence<<GATE_EVIDENCE"
+            node -e 'process.stdout.write(JSON.stringify(require("./artifacts/release-gates.json")))'
+            echo
+            echo 'GATE_EVIDENCE'
+          } >>"${GITHUB_OUTPUT}"
+
+  # ---- Publication: build once, publish, describe ----
+  publish:
+    name: Publish images and release manifest
+    needs: gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The only elevated grant in this repository besides CodeQL's SARIF
+      # upload. Required to push packages to ghcr.io.
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Defence in depth alongside the proven CI artifact gate: the images that
+      # ship are the images this job just validated, in this job.
+      - name: Artifact gate (build + smoke)
+        run: ./tooling/artifact-smoke.sh
+
+      - name: Restore the gate evidence
+        env:
+          GATE_EVIDENCE: ${{ needs.gates.outputs.evidence }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          printf '%s' "${GATE_EVIDENCE}" >artifacts/release-gates.json
+
+      - name: Resolve release identity
+        id: identity
+        run: |
+          set -euo pipefail
+          # GHCR repository paths must be lowercase; GitHub owner names are not.
+          owner="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "api_repository=ghcr.io/${owner}/orgistry-api"
+            echo "web_repository=ghcr.io/${owner}/orgistry-web"
+          } >>"${GITHUB_OUTPUT}"
+
+      # A published release must be exactly the recorded commit. A checkout is
+      # clean by construction, so this is a cheap assertion rather than a
+      # judgement call — and it is what lets the manifest claim `commit`
+      # provenance honestly.
+      - name: Confirm the source tree is clean
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo 'The checkout is dirty; a published release must be exactly its commit.' >&2
+            git status --porcelain >&2
+            exit 1
+          fi
+
+      # No rebuild: the API image that passed the gate is the API image that
+      # ships. `docker tag` cannot change image content.
+      - name: Tag the gated API image for the registry
+        run: |
+          set -euo pipefail
+          docker tag orgistry-api:production-like \
+            '${{ steps.identity.outputs.api_repository }}:${{ github.sha }}'
+
+      - name: Tag the gated web image for the registry
+        run: |
+          set -euo pipefail
+          docker tag orgistry-web:production-like \
+            '${{ steps.identity.outputs.web_repository }}:${{ github.sha }}'
+
+      # Least-privilege, short-lived credential: the job's own GITHUB_TOKEN,
+      # passed on stdin so it never appears in a command line or a log.
+      - name: Log in to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${GITHUB_TOKEN}" | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+
+      - name: Publish both images
+        run: |
+          set -euo pipefail
+          docker push '${{ steps.identity.outputs.api_repository }}:${{ github.sha }}'
+          docker push '${{ steps.identity.outputs.web_repository }}:${{ github.sha }}'
+
+      - name: Capture registry digests and write the release manifest
+        env:
+          API_REPOSITORY: ${{ steps.identity.outputs.api_repository }}
+          WEB_REPOSITORY: ${{ steps.identity.outputs.web_repository }}
+        run: |
+          set -euo pipefail
+
+          # RepoDigests can hold entries for several repositories, so the entry
+          # for THIS repository is selected explicitly rather than by position.
+          published_digest() {
+            local repository="$1" entry
+            entry="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+              "${repository}:${GITHUB_SHA}" | grep "^${repository}@" | head -n 1)"
+            printf '%s' "${entry#*@}"
+          }
+
+          node tooling/release-manifest.mjs generate \
+            --output artifacts/release-manifest.json \
+            --release-type published \
+            --provenance commit \
+            --gates artifacts/release-gates.json \
+            --commit "${GITHUB_SHA}" \
+            --ref "${GITHUB_REF}" \
+            --api-repository "${API_REPOSITORY}" \
+            --api-digest "$(published_digest "${API_REPOSITORY}")" \
+            --web-repository "${WEB_REPOSITORY}" \
+            --web-digest "$(published_digest "${WEB_REPOSITORY}")" \
+            --artifact-smoke passed \
+            --workflow "${GITHUB_WORKFLOW}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --repository "${GITHUB_REPOSITORY}"
+
+          # The manifest a deployment will trust must pass the same validation
+          # the deployment applies to it.
+          node tooling/release-manifest.mjs validate artifacts/release-manifest.json
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: release-manifest
+          path: artifacts/release-manifest.json
+          if-no-files-found: error
+          # Long enough that a rollback target stays retrievable well past a
+          # normal incident window. The deployment host keeps its own copy of
+          # every manifest it deployed, so this is a convenience, not the
+          # system of record.
+          retention-days: 90
+
+      # The summary is deployment input for an operator, so it contains only
+      # release identity — never configuration and never a credential.
+      - name: Publish the release summary
+        run: |
+          set -euo pipefail
+          read_field() {
+            node tooling/release-manifest.mjs read artifacts/release-manifest.json --field "$1"
+          }
+          {
+            echo '## Orgistry release'
+            echo
+            echo "- commit: \`${GITHUB_SHA}\` (\`$(read_field source.provenance)\` provenance)"
+            echo "- API image: \`$(read_field images.api.reference)\`"
+            echo "- web image: \`$(read_field images.web.reference)\`"
+            echo "- migration head: \`$(read_field migrations.head)\`"
+            echo "- deployable: \`$(read_field release.deployable)\`"
+            echo
+            echo '### Required checks that authorised this release'
+            echo
+            echo '| Check | Run |'
+            echo '| --- | --- |'
+            # Plain concatenation rather than template literals: this JS is
+            # embedded in a single-quoted shell string, where a `$` would be a
+            # shell expansion trap rather than a JS one.
+            node -e 'for (const gate of require("./artifacts/release-manifest.json").gates.required) { process.stdout.write("| " + gate.check + " | [" + gate.runId + "](" + gate.url + ") |\n"); }'
+            echo
+            echo "Deploy it with the \`Deploy\` workflow (release verification and plan), then run"
+            echo "\`tooling/deploy.sh\` on the target host. See \`docs/deployment.md\`."
+          } >>"${GITHUB_STEP_SUMMARY}"

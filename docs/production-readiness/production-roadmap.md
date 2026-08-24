@@ -297,8 +297,11 @@ Phase 6: End-to-End Verification & Security Review
   security model; the chain `74f50e4` → `486bee8` → `de6780f` is preserved as
   evidence that CI worked. Closing artifact:
   [sprint-24-artifact-package.md](sprint-24-artifact-package.md).
-- **Sprint 25 (complete in its repository scope, 2026-08-24) — Backup, PITR,
-  Restore, and Retention Foundation.** Delivered: a persistent-data inventory
+- **Sprint 25 (COMPLETE — DoD MET, merged to `main` 2026-08-24 as PR #34,
+  merge commit `b267f70`) — Backup, PITR, Restore, and Retention Foundation.**
+  All seven PR checks green, the merged state of `main` re-validated green, and
+  the `Data durability` PITR workflow dispatched against `main` and passed
+  (run 32702918307). Delivered: a persistent-data inventory
   fixing PostgreSQL as the only durability boundary; a repeatable logical
   backup (`tooling/db-backup.sh`) with checksum and provenance metadata, every
   PostgreSQL client tool run from the repository's own pinned image; a restore
@@ -317,7 +320,7 @@ Phase 6: End-to-End Verification & Security Review
   `0012`), and 54 retention tests including 21 against live PostgreSQL (plus 7
   drill-fixture drift tests).
   **ORG-PR-015 is CLOSED. ORG-PR-005 remains OPEN — materially advanced**: its
-  repository-controlled half is complete and verified; nothing schedules a
+  repository-controlled half is complete and verified, locally and remotely; nothing schedules a
   backup, no artifact is stored remotely or encrypted, no long-lived database
   archives WAL, no provider-managed PITR exists, and no RPO/RTO has been
   measured — all dependent on Phase 4 (ORG-PR-001). ORG-PR-028's recovery

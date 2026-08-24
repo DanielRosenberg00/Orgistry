@@ -130,6 +130,34 @@ Executed on 2026-08-24 (macOS, Docker 29.2.0, `postgres:16.14-alpine`):
 runs, against a database carrying the real Orgistry schema. See §6 for what
 that does and does not license.
 
+### Recorded remote evidence (`Data durability` on `main`)
+
+The same drill was dispatched on GitHub Actions after Sprint 25 merged, so the
+evidence is not confined to one developer's machine:
+
+| Field | Value |
+| --- | --- |
+| Workflow | `Data durability` (`.github/workflows/data-durability.yml`) |
+| Branch | `main` · Event `workflow_dispatch` |
+| Run | [32702918307](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702918307) |
+| Job | `PITR drill (base backup + WAL archive + recovery target)` — `97357955641` |
+| Result | **PASS**, 42 s |
+
+Its behavioral assertions match the local transcript, with the boundary proven
+in both directions on a clean runner:
+
+```
+ok  archived_count=2, 2 file(s) on the archive volume, no archive failures
+ok  recovery target: 2026-08-24 07:45:25.13389+00
+ok  the target restored WAL segments from the archive
+ok  the target log records stopping at the recovery target
+ok  user rows at the target time (post-target DELETE undone) = 1
+ok  post-target-only row absent = 0
+ok  post-target DROP TABLE undone = t
+ok  migration metadata intact = 13
+== PITR drill PASSED
+```
+
 ---
 
 ## 4. Why PITR is not in normal CI
@@ -157,6 +185,13 @@ GitHub → Actions → "Data durability" → Run workflow
 ```
 
 or locally with `pnpm drill:pitr`.
+
+The measured cost of the first remote run was **42 s**, so the tradeoff is
+smaller than originally estimated. It is still kept off the per-PR path
+deliberately — a gate earns its place by how often the thing it guards changes,
+and `ci.yml` already runs three jobs on every pull request. The residual is
+real and is recorded as such: a PITR-tooling change merged without a dispatch
+is not caught until the weekly run.
 
 ---
 
@@ -259,13 +294,29 @@ check `/health` and `/ready` — the pattern
 
 ## 6. What this proves — and what it does not
 
+Three statements, kept distinct — conflating them is the specific way PITR
+documentation becomes dishonest:
+
+```
+LOCAL PITR VERIFIED                        — pnpm drill:pitr
+REMOTE REPOSITORY-CONTROLLED PITR VERIFIED — Data durability run 32702918307 on main
+PRODUCTION PITR NOT VERIFIED               — nothing below is in place
+```
+
 **Proven, repository-controlled:**
 
 - Orgistry's schema and data recover correctly through PostgreSQL-native PITR.
 - WAL archiving works and archived WAL is genuinely consumed during recovery.
 - A recovery target boundary is honoured in both directions.
 - The recovered database is schema-valid, migration-consistent, and queryable.
-- The procedure above is executable and has been executed.
+- The procedure above is executable and has been executed — on a developer
+  machine **and** on GitHub Actions against `main`, so it does not depend on
+  one host's local state.
+
+The remote run is **not** a production recovery rehearsal. It recovers a
+fixture-sized database inside throwaway containers the workflow creates and
+destroys. No production database, no continuous archive, no provider recovery
+window, and no recovery-time measurement is involved.
 
 **Not proven — deployment- and provider-dependent:**
 

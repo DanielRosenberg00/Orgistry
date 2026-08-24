@@ -180,7 +180,9 @@ the P1/P2 work and the launch gate (see
 > artifact through an API-key-authenticated read of restored data, and a
 > **VERIFIED** PostgreSQL PITR drill (base backup + demonstrably-working WAL
 > archiving + recovery to a target time, with post-target damage proven undone)
-> — all CI-gated, with command-level runbooks. It does NOT reach 3: nothing
+> — verified both locally and on GitHub Actions against `main`
+> (`Data durability` run 32702918307), all CI-gated, with command-level
+> runbooks. It does NOT reach 3: nothing
 > schedules a backup, no artifact is stored remotely or encrypted, no
 > long-lived database archives WAL, no provider-managed PITR exists, and no
 > RPO/RTO has been measured. **Reliability moves 1 → 2** on the same evidence.

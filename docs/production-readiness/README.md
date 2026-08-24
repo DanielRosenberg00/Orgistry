@@ -275,8 +275,25 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > capability remain outstanding workstreams alongside it, not inside it.
 >
 > **Sprint 25 status (2026-08-24) — backup, PITR, restore, and retention
-> foundation. Implementation complete in its repository scope; remote CI has
-> not yet run for this change set.** Implemented: a persistent-data inventory
+> foundation. COMPLETE — Sprint 25 DoD MET.** Merged to `main` as PR
+> [#34](https://github.com/DanielRosenberg00/Orgistry/pull/34) (merge commit
+> `b267f70`, implementation commits `e7d5710` + `e55c5a8`) with all seven PR
+> checks green — CI Validate/Integration/Artifacts
+> ([32702593281](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593281)),
+> Security scans dependency audit + Gitleaks
+> ([32702593268](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593268)),
+> CodeQL analyze
+> ([32702593273](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593273))
+> and the CodeQL PR **security gate**
+> ([97357238278](https://github.com/DanielRosenberg00/Orgistry/runs/97357238278)) —
+> and the merged state of `main` independently re-validated green. The
+> `Data durability` PITR workflow was then dispatched against `main` and
+> **passed** ([32702918307](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702918307),
+> job `97357955641`, 42 s), so PITR is verified locally **and** on GitHub
+> Actions. Note for the record: the FIRST remote run failed on the CodeQL
+> security gate (a test-side duplicate SHA-256 flow over an API-key fixture);
+> it was corrected in `e55c5a8` by removing the redundant crypto — no
+> suppression, no change to API-key or password hashing. Implemented: a persistent-data inventory
 > establishing PostgreSQL as the sole durability boundary (Redis holds only
 > TTL-bounded rate-limit counters; no object storage or upload path exists);
 > a repeatable logical backup (`tooling/db-backup.sh`) producing a
@@ -311,9 +328,16 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > See [sprint-25-artifact-package.md](sprint-25-artifact-package.md),
 > [../backup-and-restore.md](../backup-and-restore.md),
 > [../pitr.md](../pitr.md), and [../retention.md](../retention.md).
-> Four P1 blockers remain open (ORG-PR-001/002/005/006); the repository is
-> still **not ready for staging or production** — the state remains
-> **C — Ready to continue production implementation**.
+> Four P1 blockers remain open (ORG-PR-001/002/005/006). Sprint 25's own
+> Definition of Done is MET and remote repository validation is complete;
+> neither is launch clearance, and the binding readiness classification is
+> unchanged:
+>
+> ```
+> C — Ready to continue production implementation
+> Not ready for staging
+> Not ready for production
+> ```
 
 ## Audit context
 

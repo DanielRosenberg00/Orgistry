@@ -1,18 +1,36 @@
 # Sprint 25 Artifact Package — Backup, PITR, Restore, and Retention Foundation
 
-**Sprint:** 25 · **Executed:** 2026-08-24 · **Findings targeted:** ORG-PR-005
-(backup/PITR/tested restore, P1), ORG-PR-015 (retention/cleanup, P2).
+**Sprint:** 25 · **Executed and closed:** 2026-08-24 · **Findings targeted:**
+ORG-PR-005 (backup/PITR/tested restore, P1), ORG-PR-015 (retention/cleanup, P2).
+
+**Merged:** PR [#34](https://github.com/DanielRosenberg00/Orgistry/pull/34)
+(`sprint-25-backup-pitr-retention` → `main`) at 2026-08-24T07:44:07Z, merge
+commit `b267f70`, over implementation commits `e7d5710` and `e55c5a8`.
+
+```
+SPRINT 25 DEFINITION OF DONE: MET
+REMOTE SPRINT 25 REPOSITORY VALIDATION COMPLETE
+
+C — Ready to continue production implementation
+Not ready for staging
+Not ready for production
+```
 
 This is the official Sprint 25 closing artifact. It records what was built,
 what was actually executed, what each result proves, and — with equal weight —
 what remains unproven.
 
 **Outcome in one line:** the repository-controlled half of data durability is
-complete and verified (**PITR VERIFIED**), retention enforcement is real and
-tested (**ORG-PR-015 CLOSED**), and **ORG-PR-005 remains OPEN** on the
-deployment-dependent half. Readiness classification is unchanged:
-**C — Ready to continue production implementation. Not ready for staging. Not
-ready for production.**
+complete and verified — **PITR VERIFIED locally AND on GitHub Actions against
+`main`** — retention enforcement is real and tested (**ORG-PR-015 CLOSED**),
+and **ORG-PR-005 remains OPEN** on the deployment-dependent half.
+
+**Sprint completion is not production readiness.** The Definition of Done
+covers this sprint's repository-controlled objectives and its validation gates,
+all of which are met (§12). It says nothing about production infrastructure:
+no backup is scheduled anywhere, no artifact is stored remotely or encrypted,
+no long-lived database archives WAL, and no RPO/RTO has been measured. Four P1
+blockers remain open (§18), so the readiness classification is unchanged.
 
 ---
 
@@ -247,15 +265,74 @@ Three properties make this evidence rather than a demonstration:
 **Status: PITR VERIFIED** — locally, on the PostgreSQL version this repository
 runs, against a database carrying the real Orgistry schema.
 
+### Remote evidence (`Data durability`, `main`)
+
+Once Sprint 25 reached `main` the workflow became dispatchable from the default
+branch, and the same drill was executed on GitHub Actions:
+
+| Field | Value |
+| --- | --- |
+| Workflow | `Data durability` (`.github/workflows/data-durability.yml`) |
+| Branch | `main` |
+| Event | `workflow_dispatch` |
+| Run | [32702918307](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702918307) |
+| Job | `PITR drill (base backup + WAL archive + recovery target)` — ID `97357955641` |
+| Result | **PASS**, 42 s |
+
+The behavioral assertions from that remote run, not merely its exit status:
+
+```
+ok  wal_level=replica archive_mode=on
+ok  applied migrations: 13
+ok  archived_count=2, 2 file(s) on the archive volume, no archive failures
+ok  base backup taken (PG_VERSION 16)
+ok  pre-target rows committed (users=1)
+ok  recovery target: 2026-08-24 07:45:25.13389+00
+ok  post-target damage applied (users deleted, projects dropped, marker overwritten)
+ok  recovery completed and the target promoted
+ok  the target restored WAL segments from the archive
+ok  the target log records stopping at the recovery target
+ok  pre-target marker recovered = pre-target
+ok  user rows at the target time (post-target DELETE undone) = 1
+ok  post-target-only row absent = 0
+ok  post-target DROP TABLE undone = t
+ok  migration metadata intact = 13
+ok  seeded role baseline intact = 4
+ok  relational read over recovered data = 23
+== PITR drill PASSED
+```
+
+### The three PITR statements, kept distinct
+
+```
+LOCAL PITR VERIFIED                        — pnpm drill:pitr, this machine
+REMOTE REPOSITORY-CONTROLLED PITR VERIFIED — Data durability run 32702918307 on main
+PRODUCTION PITR NOT VERIFIED               — see §17
+```
+
+The remote run proves the repository's containerized PITR drill works on
+clean, reproducible infrastructure that is not a developer laptop. It is **not**
+a production recovery rehearsal: it recovers a fixture-sized database inside
+throwaway containers the workflow itself creates and destroys. No production
+database, no continuous WAL archive, no provider recovery window, and no
+recovery-time measurement is involved.
+
 ### Why PITR is not in per-PR CI
 
-The drill starts two servers and waits on archive recovery (~1 minute of mostly
-idle time) and cannot be parallelised. The split: the logical backup/restore
-drill — what a code change can realistically break — runs on every push and
-pull request; the PITR drill validates the recovery *strategy*, which changes
-only when the tooling, the pinned image, or the migration baseline changes, and
-runs manually plus weekly in `.github/workflows/data-durability.yml`. Command
-to execute it: `pnpm drill:pitr`, or Actions → "Data durability" → Run workflow.
+The drill starts two servers and waits on archive recovery and cannot be
+parallelised. The split: the logical backup/restore drill — what a code change
+can realistically break — runs on every push and pull request; the PITR drill
+validates the recovery *strategy*, which changes only when the tooling, the
+pinned image, or the migration baseline changes, and runs manually plus weekly
+in `.github/workflows/data-durability.yml`. Command to execute it:
+`pnpm drill:pitr`, or Actions → "Data durability" → Run workflow.
+
+The measured cost of the remote run was 42 s, so the tradeoff is smaller than
+estimated. It is nevertheless kept out of the per-PR path deliberately: the
+value of a gate is proportional to how often the thing it guards changes, and
+`ci.yml` already carries three jobs on every pull request. The residual —
+a PITR-tooling change merged without a dispatch is not caught until the weekly
+run — is recorded in §17 rather than resolved.
 
 ---
 
@@ -466,7 +543,11 @@ above the largest advertised plan value (90), pinned by a config test.
 
 ## 11. Local validation evidence
 
-Every command below was executed on the final working tree.
+**Historical — recorded during the implementation and refinement passes, on the
+working tree that became `e7d5710` + `e55c5a8`.** These runs are not re-executed
+by the closing pass; the authoritative evidence for the merged code is the
+remote validation in §12. They are retained because they carry detail the CI
+summary does not (per-suite counts, drill transcripts, the environment note).
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -502,66 +583,75 @@ client-newer-than-server combination `pg_dump` supports, and CI runs both at
 
 ## 12. Remote validation evidence
 
-**First remote run: `e7d5710` on PR #34, branch `sprint-25-backup-pitr-retention`.**
-Every functional and scanner check passed; the CodeQL **security gate** did
-not.
+### Final state — all gates green
 
-| Check | Result | Run |
+PR [#34](https://github.com/DanielRosenberg00/Orgistry/pull/34) was merged to
+`main` on 2026-08-24T07:44:07Z (merge commit `b267f70`) only after every check
+turned green.
+
+| Gate | Final result | Run |
 | --- | --- | --- |
-| Validate (offline) | **pass** | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352832447) |
-| Integration (PostgreSQL + Redis) | **pass** | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352831555) |
-| Artifacts (build + smoke) | **pass** | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352832473) |
-| Dependency audit (pnpm) | **pass** | [32701180733](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180733/job/97352833283) |
-| Secret scan (Gitleaks) | **pass** | [32701180733](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180733/job/97352831465) |
-| Analyze (javascript-typescript) | **pass** | [32701180767](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180767/job/97352831699) |
+| CI — Validate (offline) | **PASS** | [32702593281](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593281/job/97357016080) |
+| CI — Integration (PostgreSQL + Redis) | **PASS** | [32702593281](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593281/job/97357015933) |
+| CI — Artifacts (build + smoke) | **PASS** | [32702593281](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593281/job/97357016189) |
+| Security scans — Dependency audit (pnpm) | **PASS** | [32702593268](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593268/job/97357015906) |
+| Security scans — Secret scan (Gitleaks) | **PASS** | [32702593268](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593268/job/97357015770) |
+| CodeQL — Analyze (javascript-typescript) | **PASS** | [32702593273](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702593273/job/97357016213) |
+| **CodeQL — PR security gate** | **PASS** | [97357238278](https://github.com/DanielRosenberg00/Orgistry/runs/97357238278) |
+| **Data durability — PITR drill** | **PASS** | [32702918307](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702918307) (`main`, `workflow_dispatch`) |
+
+The merge commit was then independently re-validated on `main` itself by the
+push-triggered workflows: CI [32702856226](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702856226),
+CodeQL [32702856317](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702856317),
+and Security scans [32702856236](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702856236) — all success. So the
+evidence is not only "the branch was green before merge" but "the merged state
+of `main` is green".
+
+```
+REMOTE SPRINT 25 REPOSITORY VALIDATION COMPLETE
+```
+
+That statement is bounded exactly as written: **repository** validation is
+complete. It does **not** mean production infrastructure validation is
+complete, and nothing in this artifact should be read that way.
+
+### What the remote runs actually exercised
+
+| Workflow / job | Sprint 25 coverage |
+| --- | --- |
+| `ci.yml` → `validate` | Retention unit/config/fixture tests; schema-drift check over migration `0012`. |
+| `ci.yml` → `integration` | The 21 retention integration cases against live PostgreSQL, plus `./tooling/db-restore-drill.sh` (data layer). |
+| `ci.yml` → `artifacts` | `./tooling/db-restore-drill.sh --with-artifact` against the freshly built image — including the API-key-authenticated read of restored data. |
+| `data-durability.yml` | The PITR drill (§6). Manual/scheduled; **not** a required check. |
+
+### First remote run — retained as historical evidence
+
+The first push of `e7d5710` did **not** pass. Every functional and scanner
+check succeeded and the CodeQL *analysis job* succeeded, but the CodeQL
+**security gate** failed on one new High alert:
+
+| Check | Result (first run) | Run |
+| --- | --- | --- |
+| Validate (offline) | pass | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352832447) |
+| Integration (PostgreSQL + Redis) | pass | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352831555) |
+| Artifacts (build + smoke) | pass | [32701180732](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180732/job/97352832473) |
+| Dependency audit (pnpm) | pass | [32701180733](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180733/job/97352833283) |
+| Secret scan (Gitleaks) | pass | [32701180733](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180733/job/97352831465) |
+| Analyze (javascript-typescript) | pass | [32701180767](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32701180767/job/97352831699) |
 | **CodeQL (security gate)** | **fail** — one new High alert | [97353010855](https://github.com/DanielRosenberg00/Orgistry/runs/97353010855) |
 
-Note what this does and does not say. The **integration** and **artifacts**
-jobs passing is the first remote evidence that the backup/restore drill and the
-packaged-artifact restore drill — including the API-key-authenticated read of
-restored data — work outside this machine. The CodeQL *analysis* also
-succeeded; the **gate** failed on a single new High alert, addressed in §13
-finding 3 and the CodeQL refinement pass in §21. `Data durability` (PITR) does
-not appear because it is `workflow_dispatch` + schedule only and a push does
-not trigger it.
-
-**Sprint 25 is NOT officially complete.** The correct status is:
-
-```
-LOCAL IMPLEMENTATION VALIDATED
-REMOTE CODEQL REVALIDATION PENDING
-NOT READY FOR STAGING
-NOT READY FOR PRODUCTION
-```
-
-Remote evidence still required before this artifact may record completion:
-
-| Workflow | Required |
-| --- | --- |
-| `CodeQL` (`codeql.yml`) — the **security gate**, not just the analyze job | green on the corrected commit (the only outstanding check) |
-| `CI` (`ci.yml`) — Validate / Integration / Artifacts | re-confirmed green on the corrected commit |
-| `Security scans` (`security.yml`) — dependency audit + Gitleaks | re-confirmed green on the corrected commit |
-| `Data durability` (`data-durability.yml`) — the PITR drill | green on a **manual dispatch** against the branch (a push does not trigger it) |
-
-Backup/restore, retention, and artifact-restore evidence is carried by the
-existing `CI` jobs rather than a new workflow; only the PITR drill needs a
-separate dispatch.
-
-What remote CI will exercise once this is pushed:
-
-| Workflow / job | New coverage |
-| --- | --- |
-| `ci.yml` → `validate` | The retention unit/config/fixture tests and the schema-drift check over migration `0012`. |
-| `ci.yml` → `integration` | The 15 retention integration cases, plus `./tooling/db-restore-drill.sh` (data layer). |
-| `ci.yml` → `artifacts` | `./tooling/db-restore-drill.sh --with-artifact` against the freshly built image. |
-| `data-durability.yml` | The PITR drill — manual dispatch or the weekly schedule; **not** a required check. |
+That failure and its correction (`e55c5a8`) are the subject of §13 finding 3
+and the CodeQL refinement pass in §21. It is kept here because a security gate
+that fired, was diagnosed, and was fixed by removing the offending code rather
+than by suppressing the analyzer is part of this sprint's evidence — not
+something to tidy away now that the final state is green.
 
 **Operator follow-up (not repository-controlled):** the Sprint 25 steps run
 inside the existing `integration` and `artifacts` jobs, so they inherit those
 jobs' required-check configuration. The new `Data durability` workflow is
-intentionally not required. If a maintainer later wants it enforced, that is a
-GitHub branch-protection change made in repository settings — nothing here
-mutates remote configuration.
+intentionally not a required check. If a maintainer later wants it enforced,
+that is a GitHub branch-protection change made in repository settings — nothing
+in this repository mutates remote configuration.
 
 ---
 
@@ -723,7 +813,15 @@ entry point. The three new indexes are additive; the only edits to
 | [../pitr.md](../pitr.md) | Why a logical restore is not PITR, the strategy table, the twelve-check drill with its recorded transcript, the CI cost tradeoff, four runbooks, and the proven/not-proven boundary. |
 | [../retention.md](../retention.md) | Schema analysis (covered / deliberately excluded / non-existent), the policy matrix, configuration and its floors, the command contract, transaction and batching safety, eight invariants, test evidence, limitations, and five runbooks. |
 
-**Reconciled (20):** `README.md`, `docs/architecture.md`,
+**Reconciled at closure (7):** `docs/production-readiness/README.md`,
+`findings-register.md`, `production-roadmap.md`, `production-scorecard.md`,
+`docs/pitr.md`, `docs/backup-and-restore.md`, `docs/validation.md` — each to
+replace transitional "pending" current-state language with the final merge and
+remote-validation evidence, and to record the `Data durability` PITR run
+against `main`. Historical changelog and refinement narratives were left intact
+as historical facts.
+
+**Reconciled during implementation (20):** `README.md`, `docs/architecture.md`,
 `docs/audit-log.md`, `docs/database-foundation.md`,
 `docs/deployment-artifacts.md`, `docs/known-limitations.md`,
 `docs/roadmap.md`, `docs/runbook.md`, `docs/security-model.md`,
@@ -743,16 +841,18 @@ verified PITR drill is a capability rather than a backup posture.
 
 ## 16. Findings reconciliation
 
-| Finding | Status | Justification |
-| --- | --- | --- |
-| **ORG-PR-005** | **OPEN — materially advanced** | All four closure preconditions exist (repeatable backup, tested restore, documented operational process, actual PITR validation), but the finding's expected production behavior is *automated encrypted backups + PITR meeting a target RPO/RTO*. Nothing schedules a backup; no artifact is stored remotely or encrypted; no long-lived database archives WAL; no provider-managed PITR exists; archive health is unmonitored; no RPO/RTO is measured. All depend on ORG-PR-001. Closing on capability alone would assert that the backup/DR launch gate is satisfied while no backup runs anywhere. |
-| **ORG-PR-015** | **CLOSED** | A retention policy exists (six categories, evidence-backed, with durable tables deliberately excluded); runnable cleanup exists (source mode and deployable artifact); cleanup safety is tested against live PostgreSQL. Documentation alone would have been insufficient, and this is enforcement. Scheduling remains deployment-dependent under ORG-PR-016, which the finding's own remediation anticipated. |
-| **ORG-PR-016** | **OPEN** | The maintenance WORK now exists as one-shot commands; the scheduler, metrics, alerting, and concurrency control do not. |
-| **ORG-PR-028** | **OPEN** | The recovery MECHANISM now exists (restore and PITR, both tested, plus a pre-migration backup step in the deployment guide); the rehearsal against a real environment does not, and no staging environment exists to rehearse in. |
-| **ORG-PR-055** | **OPEN (residual narrowed)** | One of its two durable fixes — retention on `security_events` — now exists and caps how far back a `targetId` scan can reach. The metadata index still does not. |
-| **ORG-PR-001** | **OPEN** | Out of scope; untouched. |
-| **ORG-PR-002** | **OPEN** | Out of scope; untouched. No email work was performed. |
-| **ORG-PR-006** | **OPEN** | Out of scope; untouched. The retention command reuses the existing secret-source seam without extending it. |
+| Finding | Final status | Sprint 25 effect | Remaining closure requirement |
+| --- | --- | --- | --- |
+| **ORG-PR-005** | **OPEN — materially advanced** | Delivered the entire repository-controlled half: repeatable logical backup with integrity + provenance, tested fresh-target restore, deployable-artifact restore compatibility with an authenticated restored-data read, and PITR verified both locally and remotely on `main`. | A **production backup posture**: a scheduled backup, encrypted remote storage with a lifecycle policy, continuous WAL archiving on a long-lived database with archive-health monitoring, a provider-managed or self-managed PITR window, a least-privilege backup/restore identity, a restore rehearsal on real deployment infrastructure, and measured RPO/RTO against DG-5. All depend on ORG-PR-001. |
+| **ORG-PR-015** | **CLOSED** | Six-category retention policy read from the real schema; runnable dry-run/apply cleanup from source **and** the deployable artifact; hard-floored typed configuration; index-backed, batched, referrer-safe predicates; 54 tests including 21 against live PostgreSQL. | None for this finding. Scheduling, metrics, and alerting were never part of it and are tracked under ORG-PR-016. |
+| **ORG-PR-016** | **OPEN** | The maintenance *work* now exists as idempotent one-shot commands (`db:backup`, `db:retention`) runnable from the production image. | Something that INVOKES them periodically, plus run metrics, failure alerting, and concurrency control. No worker or queue runtime was added. |
+| **ORG-PR-028** | **OPEN** | The recovery *mechanism* now exists and is tested — restore and PITR — plus a documented pre-migration backup step in the artifact deployment guide. | A rehearsed bad-migration recovery against a real environment. There is no staging environment to rehearse in (ORG-PR-001). |
+| **ORG-PR-055** | **OPEN (residual narrowed)** | One of its two durable fixes landed: retention on `security_events` caps how far back a `targetId` scan can reach. | An index over the target-id metadata keys. Untouched. |
+| **ORG-PR-001** | **OPEN** | None — explicitly out of scope and untouched. | A production deployment environment, promotion, and rollback. |
+| **ORG-PR-002** | **OPEN** | None — explicitly out of scope. No email work was performed. | External-provider delivery, inbox receipt, and SPF/DKIM/DMARC validation; blocked on provider credentials, a verified sending domain, and a test mailbox. |
+| **ORG-PR-006** | **OPEN** | None beyond reuse: the retention command consumes the existing runtime secret-source seam without extending it. | A secrets manager or platform store, least-privilege secret access, secret-access auditability, automated rotation, and a rehearsed rotation against a real runtime. |
+
+No other finding was closed, reopened, or re-severitied by Sprint 25.
 
 ---
 
@@ -764,8 +864,10 @@ verified PITR drill is a capability rather than a backup posture.
   (transactional batches over an idempotent predicate) but not prevented.
 - Per-plan `audit_retention_days` is still not enforced; retention is global.
 - The `targetId` audit filter is still unindexed (ORG-PR-055).
-- The PITR drill runs manually and weekly, so a change to the PITR tooling
-  merged without running it would not be caught until the next scheduled run.
+- The PITR drill is not a per-PR gate. It has now been executed remotely and
+  passed on `main` (run 32702918307), but a *future* change to the PITR
+  tooling merged without a manual dispatch would not be caught until the
+  weekly scheduled run.
 - The failed-migration runbook is unrehearsed guidance, and is labelled as such.
 
 **Deployment / cloud / provider-dependent (cannot be addressed here):**
@@ -799,15 +901,30 @@ ORG-PR-006 — Complete secrets-management and operational rotation capability
 ## 19. Final readiness classification
 
 ```
+SPRINT 25 DEFINITION OF DONE: MET
+```
+
+Sprint 25's repository-controlled objectives and every validation gate it is
+answerable for are complete: the implementation is merged to `main`, all seven
+PR checks are green, the merged state of `main` re-validated green, and the
+`Data durability` PITR drill passed on `main`.
+
+**That is not production readiness, and the two must not be conflated.**
+
+```
 C — Ready to continue production implementation
 Not ready for staging
 Not ready for production
 ```
 
-Unchanged. Four P1 blockers remain open; under the overriding rule any one of
-them is independently disqualifying. Sprint 25 removed the
+Unchanged. Four P1 blockers remain open (§18); under the overriding rule any
+one of them is independently disqualifying. Sprint 25 removed the
 repository-controlled half of ORG-PR-005 from the critical path and closed
-ORG-PR-015 — neither is launch clearance.
+ORG-PR-015 — neither is launch clearance. A sprint's Definition of Done asks
+"did this sprint deliver and prove what it promised?"; readiness asks "can this
+system take real users' data?". The first is now yes. The second is still no,
+and the gap is deployment infrastructure that no amount of repository work can
+substitute for.
 
 ---
 
@@ -867,3 +984,119 @@ inside, that sprint.
 | Extended the no-hash-literal guard to `db-restore-drill.sh`, excluding pinned image digests | The drill is now where the hash is derived, so a literal could regress there; `@sha256:<digest>` is required by ORG-PR-042 and is the one legitimate 64-hex string. |
 | Added a guard that the drill *derives* its hash (`sha256_hex`) rather than carrying one | Protects the original Gitleaks correction structurally rather than by convention. |
 | **No** CodeQL suppression, query exclusion, or Gitleaks allowlist entry; **no** change to API-key or password hashing | The gate had to be removed by correct code structure, not by silencing the analyzer or weakening a deliberate security contract. |
+
+### Chronology
+
+The sprint's quality evolution, in order:
+
+```
+initial implementation
+  → backup / restore foundation (tooling + fixture + drill)
+  → retention policy, cleanup command, indexes, migration 0012
+  → local PITR drill VERIFIED
+  → refinement: retention foreign-key safety (security_events.session_id)
+  → refinement: missing-backup rejection added to the restore drill
+  → first remote CI on e7d5710 — all checks green EXCEPT the CodeQL security gate
+  → CodeQL finding diagnosed: test-side duplicate SHA-256 on an API-key fixture
+  → correction e55c5a8 — redundant crypto removed, no suppression, no contract change
+  → final PR validation: all seven checks green
+  → merged to main (b267f70, PR #34)
+  → merged state re-validated green on main (CI / CodeQL / Security scans)
+  → Data durability PITR dispatched on main — run 32702918307 PASS
+  → official artifact closure (this document)
+```
+
+Two of those steps are worth keeping visible rather than smoothing over: a
+foreign-key defect that would have failed every production retention run was
+found by *deriving* the constraint set from `pg_constraint` instead of trusting
+a schema reading, and a security gate that fired was resolved by deleting the
+offending code rather than by silencing the analyzer.
+
+---
+
+## 22. Documentation index
+
+Where to go, by question. All paths are repository-relative.
+
+| I need… | Document |
+| --- | --- |
+| Backup design, persistent-store inventory, backup security rules | [`docs/backup-and-restore.md`](../backup-and-restore.md) |
+| Backup / restore runbooks (take, verify, restore, validate, protect, failed migration) | [`docs/backup-and-restore.md` §9](../backup-and-restore.md) |
+| PITR design, the drill, recorded evidence, recovery runbooks | [`docs/pitr.md`](../pitr.md) |
+| Retention policy matrix, windows, floors, invariants | [`docs/retention.md`](../retention.md) |
+| The retention command — flags, exit codes, batching, runbooks | [`docs/retention.md` §5, §10](../retention.md) |
+| What to run locally and what each command proves | [`docs/validation.md`](../validation.md) |
+| Deployable artifact behavior, entrypoints, environment contract, migration policy | [`docs/deployment-artifacts.md`](../deployment-artifacts.md) |
+| Local infrastructure operations | [`docs/runbook.md`](../runbook.md) |
+| Runtime secrets and rotation | [`docs/runtime-secrets.md`](../runtime-secrets.md), [`docs/rotation-runbook.md`](../rotation-runbook.md) |
+| Security constraints, durability boundary, backup secret handling | [`docs/security-model.md`](../security-model.md) |
+| Honest scope boundary and what is deliberately absent | [`docs/known-limitations.md`](../known-limitations.md) |
+| Production-readiness status and sprint history | [`docs/production-readiness/README.md`](README.md) |
+| Authoritative findings (IDs, severity, evidence, resolutions) | [`docs/production-readiness/findings-register.md`](findings-register.md) |
+| Maturity levels per domain | [`docs/production-readiness/production-scorecard.md`](production-scorecard.md) |
+| Launch gates | [`docs/production-readiness/launch-checklist.md`](launch-checklist.md) |
+| Dependency-ordered plan and next sprint | [`docs/production-readiness/production-roadmap.md`](production-roadmap.md) |
+| Sprint 25 evidence (this document) | [`docs/production-readiness/sprint-25-artifact-package.md`](sprint-25-artifact-package.md) |
+
+Implementation entry points, for the same questions in code:
+
+| Concern | Path |
+| --- | --- |
+| Logical backup | `tooling/db-backup.sh` |
+| Restore drill (+ packaged artifact) | `tooling/db-restore-drill.sh` |
+| PITR drill | `tooling/db-pitr-drill.sh` |
+| Shared PostgreSQL client helpers | `tooling/lib/pg-tools.sh` |
+| Retention policy catalog and predicates | `apps/api/src/maintenance/retention-policy.ts` |
+| Retention executor / CLI / command | `apps/api/src/maintenance/retention{.ts,-cli.ts,-command.ts}` |
+| Retention configuration | `packages/config/src/schema.ts` (`RETENTION_*`) |
+| Cleanup indexes | `packages/db/migrations/0012_shocking_warbound.sql` |
+| CI topology | `.github/workflows/ci.yml`, `.github/workflows/data-durability.yml` |
+
+---
+
+## 23. Confidence assessment
+
+Stated as confidence in *specific claims*, not as a score. The repository does
+not use numeric confidence percentages and none are introduced here.
+
+**High confidence — repository-controlled, directly evidenced**
+
+- *A backup taken by this tooling can be restored.* Proven by a drill that uses
+  the real backup script, restores into a provably empty target, and asserts
+  schema, migration ledger, every seeded entity, a multi-table join, and
+  byte-identical API-key hash metadata. Corrupted and missing inputs are proven
+  to fail loudly. Runs on every pull request.
+- *A restored database is usable by the production artifact.* Proven end to end
+  through the packaged image: migration entrypoint no-op, `/health`, `/ready`,
+  and an API-key-authenticated read of restored data, with an unknown key still
+  rejected.
+- *PITR works on the PostgreSQL this repository runs.* Proven twice — locally
+  and on GitHub Actions against `main` — with archived-WAL consumption asserted
+  from the recovery log and the target boundary checked in both directions.
+- *Retention cannot delete active lifecycle state.* Enforced by the predicates
+  themselves (age-only, strictly `<`, referrer-aware), not by convention; 21
+  live-PostgreSQL cases including the hold-back/release pairs and an
+  inbound-foreign-key coverage guard.
+- *Deletion cannot happen by accident.* Dry-run is the default and no flag
+  combination reaches apply mode, pinned across the flag space.
+
+**Medium / deployment-dependent — not evidenced here, and not claimed**
+
+- *Behavior at production data volume.* Every drill runs against fixture-sized
+  data in throwaway containers. Batch sizing, statement duration, index
+  selectivity, and restore wall-clock at real volume are unmeasured.
+- *Backup scheduling and continuity.* No scheduler exists; a backup happens
+  only when a human runs the command.
+- *WAL continuity.* No long-lived database archives WAL. The drill enables
+  archiving for its own lifetime and deletes the archive afterwards.
+- *Real RPO/RTO.* DG-5's targets (RPO ≤ 1 h, RTO ≤ 4 h) have a proven
+  *capability* behind them and no measurement.
+- *Remote encrypted storage.* Backups are written to a local directory; nothing
+  encrypts, uploads, expires, or replicates them.
+- *Provider-managed recovery behavior.* No managed database exists, so no
+  provider backup window, restore API, or failover behavior has been observed.
+
+The honest summary: what the repository can prove about its own data-durability
+code, it proves well. What requires a running production database to prove, it
+does not attempt to prove — and that gap is the whole of the remaining
+ORG-PR-005.

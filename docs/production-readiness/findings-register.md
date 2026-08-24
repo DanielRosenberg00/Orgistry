@@ -240,21 +240,35 @@ for staging or production. See
 [../runtime-secrets.md](../runtime-secrets.md), and
 [../rotation-runbook.md](../rotation-runbook.md).
 
-**Status update (Sprint 25, 2026-08-24):** [ORG-PR-015](#org-pr-015) (P2) is
-**Closed** — a retention policy, a runnable one-shot cleanup command (source
-mode and deployable artifact), the indexes its predicates need, and
-PostgreSQL-backed safety tests all exist; scheduling remains
-deployment-dependent and is tracked under ORG-PR-016.
+**Status update (Sprint 25, 2026-08-24 — COMPLETE, merged and remotely
+validated):** merged to `main` as PR #34 (merge commit `b267f70`;
+implementation `e7d5710` + `e55c5a8`) with all seven PR checks green — CI
+Validate/Integration/Artifacts (run 32702593281), Security scans dependency
+audit + Gitleaks (32702593268), CodeQL analyze (32702593273), and the CodeQL PR
+**security gate** (97357238278) — and the merged state of `main` independently
+re-validated green. The `Data durability` workflow was then dispatched against
+`main` and **passed** (run 32702918307, job 97357955641, 42 s), so the PITR
+drill is verified locally **and** on GitHub Actions.
+
+[ORG-PR-015](#org-pr-015) (P2) is **Closed** — a retention policy, a runnable
+one-shot cleanup command (source mode and deployable artifact), the indexes its
+predicates need, and PostgreSQL-backed safety tests all exist; scheduling
+remains deployment-dependent and is tracked under ORG-PR-016.
+
 [ORG-PR-005](#org-pr-005) (P1) **remains Open, materially advanced**: a
 repeatable logical backup, a tested restore into a fresh database that reaches
 the packaged API artifact, and a **VERIFIED** PostgreSQL PITR drill (base
 backup + archived WAL + recovery target time, with post-target damage proven
-undone) now exist with command-level runbooks — but **nothing schedules a
-backup, no backup is stored remotely or encrypted, no long-lived database
-archives WAL, no managed-provider PITR is configured, and no RPO/RTO has been
-measured**, all of which depend on ORG-PR-001. **Open P1 production blockers:
-ORG-PR-001, ORG-PR-002, ORG-PR-005, ORG-PR-006 — unchanged.** The repository
-remains not ready for staging or production. See
+undone) now exist with command-level runbooks and remote evidence — but
+**nothing schedules a backup, no backup is stored remotely or encrypted, no
+long-lived database archives WAL, no managed-provider PITR is configured, no
+archive health is monitored, and no RPO/RTO has been measured**, all of which
+depend on ORG-PR-001. A verified drill is a capability; it is not a backup
+posture.
+
+**Open P1 production blockers: ORG-PR-001, ORG-PR-002, ORG-PR-005,
+ORG-PR-006 — unchanged.** The repository remains not ready for staging or
+production. See
 [sprint-25-artifact-package.md](sprint-25-artifact-package.md),
 [../backup-and-restore.md](../backup-and-restore.md), [../pitr.md](../pitr.md),
 and [../retention.md](../retention.md).
@@ -534,6 +548,12 @@ Standards · Threats.
     `--with-artifact` drill in the `artifacts` job on every push and pull
     request; the PITR drill runs manually and weekly in
     `.github/workflows/data-durability.yml` (cost rationale documented).
+  - *Remote evidence.* All of the above passed on GitHub Actions for the merged
+    change set (CI run 32702593281 on the PR, re-validated on `main` by run
+    32702856226), and the PITR drill was dispatched against `main` and passed
+    (`Data durability` run 32702918307, 42 s) with archived-WAL consumption and
+    the target boundary asserted from the run log. The capability is therefore
+    not machine-specific.
   - *Backup security.* `backups/`, `*.dump`, and `*.dump.sha256` are
     git-ignored; the tool refuses to write inside `.git`; artifacts are
     created under `umask 077` and `chmod 600`; drills delete their artifacts

@@ -347,6 +347,9 @@ permissions, and nothing publishes or deploys — see
 Mailpit is intentionally omitted from CI (see above).
 
 `.github/workflows/data-durability.yml` (manual + weekly) runs the PITR drill.
+It has been executed against `main` and passed
+([run 32702918307](https://github.com/DanielRosenberg00/Orgistry/actions/runs/32702918307),
+42 s).
 It is deliberately outside the pull-request path: the drill starts two
 PostgreSQL servers and waits on archive recovery, and it validates the recovery
 STRATEGY, which changes only when the tooling, the pinned PostgreSQL image, or

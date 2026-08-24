@@ -45,7 +45,7 @@ drills that depend on it.
 | Backup integrity verification | **Implemented** (SHA-256 sidecar, verified during the drill) | `tooling/db-backup.sh`, `tooling/db-restore-drill.sh` |
 | Tested logical restore into a fresh database | **Implemented** | `tooling/db-restore-drill.sh` |
 | Restore compatibility with the deployable artifact | **Implemented** | `tooling/db-restore-drill.sh --with-artifact` |
-| Point-in-time recovery | **Implemented and verified locally** (PITR VERIFIED) | [pitr.md](pitr.md), `tooling/db-pitr-drill.sh` |
+| Point-in-time recovery | **Implemented and verified** — locally and on GitHub Actions against `main` (PITR VERIFIED) | [pitr.md](pitr.md), `tooling/db-pitr-drill.sh` |
 | Automated backup **scheduling** | **Not provided** | Deployment-dependent — see §8 |
 | Remote, encrypted backup **storage** | **Not provided** | Deployment-dependent — see §8 |
 | Production RPO/RTO evidence | **Not provided** | Deployment-dependent — see §8 |
@@ -252,7 +252,7 @@ can run it in the artifacts job straight after the image is built.
 | --- | --- | --- |
 | `ci.yml` → `integration` | `./tooling/db-restore-drill.sh` | Has pnpm and Docker. Catches a regression in the backup/restore path on every push and pull request. |
 | `ci.yml` → `artifacts` | `./tooling/db-restore-drill.sh --with-artifact` | The image already exists from `artifact-smoke.sh`, and this mode needs no workspace install. |
-| `data-durability.yml` | `./tooling/db-pitr-drill.sh` | Manual + weekly. See [pitr.md](pitr.md) for the tradeoff. |
+| `data-durability.yml` | `./tooling/db-pitr-drill.sh` | Manual + weekly. Verified green on `main` (run 32702918307, 42 s). See [pitr.md](pitr.md) for the tradeoff. |
 
 The drills create their own containers, so they never touch the CI service
 containers or a developer's local database.

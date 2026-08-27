@@ -366,7 +366,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > release's own image, verifying the applied migration head against the release
 > through Drizzle's ledger, deploying API then web, waiting for readiness,
 > proving the running containers are the released digests, and running smoke;
-> `tooling/deploy-smoke.sh`, eight URL-only checks including coarse-readiness
+> `tooling/deploy-smoke.sh`, nine URL-only checks including coarse-readiness
 > disclosure, the six-header security baseline, request-ID propagation, and
 > reading the API origin back out of the SERVED web bundle; an append-only
 > **deployment evidence ledger** that records failed deployments too, cannot
@@ -473,6 +473,132 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > Sprint 26 built against it; its only prerequisite is an operator/procurement
 > decision, and if that is unavailable, **External Email Provider Closure and
 > Secrets Platform Integration** is the correct fallback.
+
+> **Sprint 27 status (2026-08-25) — Deployment Pipeline Closure.
+> IN PROGRESS — BLOCKED ON DURABLE EXTERNAL TARGET. NO FINDING CLOSED.**
+> *(Superseded by the 2026-08-27 closure status below — the target was
+> subsequently provisioned, deployed to, and rolled back for real.)*
+> Sprint 27's definition of done requires deployment and rollback against a
+> durable external staging-like target. That has not happened, so **the Sprint
+> 27 DoD is not met and the sprint remains open**; its evidence package is a
+> living document updated in place, not a closing artifact. What has been
+> achieved so far is repository-controlled work plus a published-artifact local
+> rehearsal.
+>
+> **No durable staging-like target is reachable from this environment** — no
+> provider CLI is installed, no SSH key material exists, no target hostname,
+> DNS name, TLS certificate, or deployment credential is configured. That
+> external prerequisite is unmet, was not worked around, and is recorded with
+> the exact operator actions that would unblock it.
+>
+> **Two findings a locally built rehearsal cannot produce.** (1) *Observed
+> state: the GHCR packages are currently publicly pullable; Sprint 26 recorded
+> them as private.* Proven by pulling both published digests with an empty
+> Docker configuration directory. *Operational implication:* a deployment host
+> does not currently need a registry credential, so the staging blocker "a pull
+> credential for the host" is **not currently blocking**. *Policy implication:*
+> this is an observation, **not an approved visibility policy** — nothing here
+> changed it, no approval is on record, and it is **not** a secrets-management
+> capability (ORG-PR-006 is unaffected). (2) *The deployment had no image/host
+> architecture check.* The
+> published images are single-architecture `linux/amd64`; a pull is
+> architecture-agnostic, so an arm64 host — Graviton, Ampere, Apple Silicon —
+> pulls them and fails only when a container starts, which surfaced four stages
+> later as "the API container did not become healthy", **after the backup
+> preflight and the migration had already run against the target's database**.
+> `pnpm deploy:rehearsal` builds locally, so its images are always native: this
+> class of defect is invisible to it by construction.
+>
+> **Fixed:** `tooling/deploy.sh` gained stage 5, which refuses a platform
+> mismatch before anything touches the database and accepts emulation only on an
+> exact opt-in that is then written onto the deployment evidence as a
+> limitation; and `tooling/deploy-target-preflight.sh` (`pnpm deploy:preflight`)
+> qualifies a candidate host against every requirement a target must meet. Ten
+> new unit tests drive the real shell functions inside `Validate (offline)`.
+>
+> **Evidence upgraded:** the whole lifecycle ran against the images GHCR
+> actually serves — unauthenticated digest pull → deploy `91664d0` (backup
+> preflight, migrate once, verified head, 9/9 smoke, evidence) → deploy the
+> second compatible release `d51c76b` (9/9 smoke) → roll back to `91664d0` by
+> digest with migrations skipped (9/9 smoke, running digests confirmed). Both
+> releases already existed on `main` and declare the same migration head; none
+> was manufactured.
+>
+> **None of that is a target.** That run was a local rehearsal on a workstation:
+> no durability, no TLS, no DNS, no public origin (smoke reached `127.0.0.1`),
+> no reboot survival, amd64 images under CPU emulation. Its evidence tier is
+> **published-artifact local rehearsal**, which is not real staging-like target
+> validation, not staging readiness, and not production readiness. ORG-PR-001
+> stays **OPEN — materially advanced**; ORG-PR-002, ORG-PR-005, and ORG-PR-006
+> stay OPEN.
+>
+> ```
+> Sprint 27 DoD met                    NO
+> Real staging-like target validated   NO
+> Staging ready                        NO
+> Production ready                     NO
+>
+> C — Ready to continue production implementation
+> ```
+>
+> See [sprint-27-artifact-package.md](sprint-27-artifact-package.md) (living
+> evidence package) and [../deployment.md](../deployment.md). Next:
+> **Sprint 28 — Deployment Target Procurement and Environment Closure.** The
+> blocker is the absence of a durable target; obtain one and execute the
+> existing Sprint 27 deployment/rollback procedure against it. Host procurement
+> constraint: **select an x86-64 / amd64 target**, since the published images
+> are single-architecture `linux/amd64` unless a future authorised sprint
+> changes the publication architecture.
+
+> **Sprint 27 real-target milestone (2026-08-27) — REAL STAGING-LIKE TARGET
+> VALIDATED. ORG-PR-001 CLOSED. THE SPRINT ITSELF REMAINS OPEN**, pending
+> operator publication of the Sprint 27 repository changes and the required
+> remote workflow validation that depends on it.** The first P1 production blocker closed since Sprint 17.
+>
+> The Sprint 26 deployment mechanism was executed end to end against a durable
+> external target: a DigitalOcean `linux/amd64` host (Ubuntu 24.04.4, Docker
+> enabled at boot) serving real public HTTPS origins
+> (`https://staging.drsvp.com`, `https://api-staging.drsvp.com`) behind Caddy
+> with valid Let's Encrypt certificates and inbound exposure limited to
+> 22/80/443 — externally probed and confirmed.
+>
+> **Executed:** target preflight PASS (0 failed, 0 warned) · target-side GHCR
+> digest pulls with **no registry credential on the host** · deploy `91664d0`
+> (backup preflight taken, migration applied once, head `0012_shocking_warbound`
+> verified, running digests verified) · **public HTTPS smoke 9/9** — the
+> pre-deploy 502s became 200 · restart/persistence check (ledger 13 before and
+> after) · deploy the second compatible release `d51c76b` (public smoke 9/9) ·
+> **real application rollback** to `91664d0`'s exact digests with `--no-migrate`
+> (public rollback smoke 9/9, running images verified, ledger still 13) ·
+> Deploy workflow run `33061763360` bound to `staging-like`. Three
+> machine-generated evidence records on the host, scanned and free of secret
+> material. Neither release was manufactured; both pre-existed on `main` with
+> identical migration identity. **No source was built on the target** — only the
+> deployment tooling closure was transferred.
+>
+> ```
+> Real staging-like target validated   YES
+> ORG-PR-001                           CLOSED
+> Sprint 27 DoD met                    NO   (remote validation of the
+>                                            Sprint 27 repository changes
+>                                            awaits operator publication)
+> Staging ready                        NO
+> Production ready                     NO
+>
+> C — Ready to continue production implementation
+> ```
+>
+> **Staging readiness remains NO** for reasons outside ORG-PR-001: account email
+> does not work on that target (`MAIL_DRIVER=smtp` against a plaintext Mailpit
+> sink while the driver requires implicit TLS — correct fail-closed behaviour),
+> and there is no observability there. **Production readiness remains NO** —
+> ORG-PR-002, ORG-PR-005, and ORG-PR-006 are open and the target holds synthetic
+> data only.
+>
+> Next: publish the Sprint 27 repository changes and observe the required remote
+> workflows, then **backup operations closure (ORG-PR-005)** — previously
+> blocked on the absence of an environment, a blocker that is now gone. See
+> [sprint-27-artifact-package.md](sprint-27-artifact-package.md).
 
 ## Audit context
 

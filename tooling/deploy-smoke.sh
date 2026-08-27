@@ -19,8 +19,8 @@
 #      through whatever proxy sits in front of the deployment;
 #   6. the web artifact serves a production build (not a dev server);
 #   7. the SPA history fallback works, so deep links resolve;
-#   8. the deployment applied the intended PUBLIC browser configuration, and
-#      the API origin is NOT baked into the immutable bundle — the property that
+#   8. the deployment applied the intended PUBLIC browser configuration;
+#   9. the API origin is NOT baked into the immutable bundle — the property that
 #      keeps one web digest promotable between environments.
 #
 # WHAT IT DELIBERATELY DOES NOT DO

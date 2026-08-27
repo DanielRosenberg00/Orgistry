@@ -33,7 +33,7 @@ average — do not read a high domain score as launch clearance.
 | Testing | 2 | Partly | Strong negative/isolation coverage + real-DB quota/authz concurrency races (S20) | No failure-injection/E2E | ORG-PR-026 | High |
 | CI/CD | 4 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22); deployable-artifact build+smoke gate in CI (S23); release workflow that publishes to GHCR only after proving all six required checks succeeded for the exact release SHA, plus environment-scoped deployment-verification and deployment-rehearsal workflows — all executed remotely and green for `91664d0` (S26) | No artifact signing or SLSA provenance; nothing has been deployed to an environment | ORG-PR-001 | High |
 | Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); every active image reference tag+digest-pinned (S23, ORG-PR-042 closed); build-once/promote-by-digest enforced at four points and a schema-validated release manifest (S26); two documented advisory acceptances | No artifact signing or SLSA provenance attestation; published images are single-architecture amd64 | ORG-PR-001 | High |
-| Infrastructure | 2 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23); single-host deployment topology, promote-by-digest deployment script with migrate-once + verified head, post-deploy smoke, evidence ledger, and rehearsed application rollback (S26) | **No deployment environment exists** — no host, provider account, or deployment credential, and nothing has been deployed to one; the `staging-like` GitHub Environment has no reviewer protection; no IaC; no TLS/DNS/proxy; no least-privilege DB roles | ORG-PR-001, 022 | High |
+| Infrastructure | 3 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23); single-host deployment topology, promote-by-digest deployment script with migrate-once + verified head, post-deploy smoke, evidence ledger, and rehearsed application rollback (S26); **a durable staging-like target deployed to and rolled back for real, with public HTTPS smoke and machine-generated evidence (S27) — ORG-PR-001 closed** | **No production environment**; the staging-like target is single-host with no HA/autoscaling, holds synthetic data only, has no observability, and account email does not work there; the `staging-like` GitHub Environment has a deployment-branch policy but no reviewer separation (single maintainer, documented); no IaC; no least-privilege DB roles | ORG-PR-007, 022 | High |
 | Reliability | 2 | Yes | Graceful shutdown; readiness probes; tested recovery tooling (S25) | No scheduled backups; fail-open non-sensitive limiters | ORG-PR-005, 009, 016 | High |
 | Backup & recovery | 2 | Yes | Repeatable logical backup + checksum + provenance; restore drill into a fresh DB reaching the packaged artifact incl. an authenticated read of restored data; **PITR VERIFIED** (base backup + archived WAL + recovery target); CI-gated; command-level runbooks (S25) | Nothing schedules a backup; no remote/encrypted storage; no continuous WAL archiving on a long-lived DB; no provider-managed PITR; no measured RPO/RTO; failed-migration recovery unrehearsed | ORG-PR-005, 028 | High |
 | Observability | 1 | Yes | Structured logs + request IDs | No metrics/tracing/alerts | ORG-PR-007 | High |
@@ -249,3 +249,73 @@ the P1/P2 work and the launch gate (see
 > change; if that decision is not available, **External Email Provider Closure
 > and Secrets Platform Integration (ORG-PR-002 + ORG-PR-006)** is the correct
 > fallback.
+
+> **Scorecard update (Sprint 27, 2026-08-25 — IN PROGRESS).** **No domain
+> changes maturity level, and no finding closes.** The sprint's objective —
+> validate the pipeline against a durable staging-like target — is **blocked**:
+> no host, provider account, SSH credential, DNS name, or TLS certificate is
+> reachable from this environment, so **the Sprint 27 DoD is not met and the
+> sprint remains open**. What it has produced so far is the first external
+> reconnaissance the project has done, which found two facts a locally built
+> rehearsal cannot. **Observed state: the GHCR packages are currently publicly
+> pullable, not private as Sprint 26 recorded** — proven by an unauthenticated
+> digest pull — so a deployment host does not currently need a registry
+> credential and that staging blocker is not currently blocking. That is an
+> observation, not an approved visibility policy, and it is not a
+> secrets-management capability.
+> **The deployment had no image/host architecture check**, so a correctly
+> provisioned arm64 host would have pulled both single-architecture `linux/amd64`
+> images and failed only at container start, surfacing four stages later as
+> "the API container did not become healthy" — after the backup preflight and
+> the migration had already run. Both are fixed: a new stage 5 in
+> `tooling/deploy.sh` refuses a platform mismatch before anything touches the
+> database, and `pnpm deploy:preflight` qualifies a candidate host.
+> The lifecycle was then re-run against the **real published GHCR artifacts**
+> — deploy, second compatible release, rollback by digest, 9/9 smoke each time.
+> **Infrastructure deliberately stays at 2.** The evidence is stronger; the
+> environment still does not exist. That run had no durability, no TLS, no DNS,
+> no public origin (smoke reached loopback), and ran under CPU emulation.
+> Infrastructure reaches 3 when a real environment has actually been deployed
+> to and rolled back. **Backup & recovery stays at 2** — the pre-migration
+> preflight executed for real inside a real deployment, which is the deployment
+> boundary working, not a backup programme. **Secrets/Ops stays where it was**;
+> currently public packages mean one fewer secret to hold, which is not the same as managing
+> secrets, and the `staging-like` GitHub Environment was re-observed with zero
+> protection rules (environment exists: YES; protection validated/configured:
+> NO; operator action required: YES). **4 P1 blockers remain open (ORG-PR-001,
+> 002, 005, 006).** State remains **C — Ready to continue production
+> implementation**; real staging-like target validated: **NO**, staging ready:
+> **NO**, production ready: **NO**. Next: **Sprint 28 — Deployment Target
+> Procurement and Environment Closure**. The blocker is the absence of a durable
+> target; obtain one, then execute the existing Sprint 27 deployment/rollback
+> procedure against it. Host procurement constraint: select an x86-64 / amd64
+> target, since the published images are single-architecture `linux/amd64`
+> unless a future authorised sprint changes the publication architecture.
+
+> **Scorecard update (Sprint 27 real-target milestone, 2026-08-27).** **ORG-PR-001 is CLOSED
+> and Infrastructure moves 2 → 3.** A durable staging-like target now exists and
+> has been validated: a DigitalOcean `linux/amd64` host serving real public
+> HTTPS origins, which pulled immutable digests itself, ran two gate-authorised
+> releases with a backup preflight and a one-shot verified migration, passed
+> public HTTPS smoke 9/9 three times, and completed a **real application
+> rollback** with running digests verified and the migration ledger unchanged.
+> Infrastructure reaches 3 on exactly the criterion recorded earlier — "a real
+> environment has actually been deployed to and rolled back". It does **not**
+> reach 4: single host, no HA, no autoscaling, no observability, synthetic data.
+> **CI/CD stays at 4** — the pipeline was already executed; this validates its
+> target end. **Backup & recovery stays at 2**: two real pre-migration backups
+> on the target is a deployment boundary, not a backup programme — nothing
+> schedules, stores off-host, encrypts, or archives WAL, the target has no PITR
+> window, and no real-target restore drill was performed. **Secrets/Ops stays
+> where it was**: runtime secrets are still a 0600 file on a host; the new
+> environment deployment-branch policy is a deployment boundary, not secrets
+> management. **3 P1 blockers remain open (ORG-PR-002, 005, 006)**, so the
+> overriding rule still yields *not production ready*; the state remains **C —
+> Ready to continue production implementation**. Real staging-like target
+> validated: **YES**. Staging ready: **NO** (account email does not work on the
+> target; no observability). Production ready: **NO**. Next: publish the
+> Sprint 27 repository changes and observe the required remote workflows, then
+> **backup operations closure (ORG-PR-005)** — its environment dependency is now
+> gone. **Sprint 27 itself remains open**: its repository changes are
+> unpublished, so the mandatory remote workflow validation has not run against
+> them. ORG-PR-001 closing is a finding closure, not a sprint closure.

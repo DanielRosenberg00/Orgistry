@@ -352,9 +352,39 @@ variables rather than compiled into the bundle, so one validated digest is
 promotable rather than rebuilt per environment. That configuration channel is
 public by construction — the application refuses to start if it receives a
 credential-shaped key, and the deployment evidence ledger refuses to record
-anything outside the published public contract. **Environment provisioning and IaC still do not exist**, no
-image has been published to any registry, and no deployment has ever run
-against a real host (ORG-PR-001 open). The recommended
+anything outside the published public contract. **Infrastructure-as-code still does not
+exist**, and no PRODUCTION environment exists. **A durable staging-like target
+has now been deployed to and validated (2026-08-27), and ORG-PR-001 is CLOSED.**
+Security-relevant properties observed on that target: inbound exposure
+externally probed and confirmed as **22/80/443 only** (API, web, PostgreSQL,
+Redis, Mailpit, and the Caddy admin endpoint all unreachable from the internet);
+TLS terminated by Caddy with valid Let's Encrypt certificates; runtime secrets
+in a single 0600 owner-only file that the deployment's permission gate verified
+and that was never read or printed by the execution; **no registry credential on
+the host at all**; the six baseline security headers and coarse readiness
+disclosure verified over public HTTPS; and deployment evidence scanned free of
+credential material. The operator-assisted boundary was preserved — **no inbound
+exposure was created to let CI reach the target**. The target holds synthetic
+data only. **Sprint 27 itself remains open** — its repository changes are
+unpublished, so CodeQL, the secret scan, and the dependency audit have not yet
+run against them. Both release images *are* published — to GHCR, for two
+gate-authorised Sprint 26 commits — and the **observed state is that both
+packages are currently publicly pullable**, verified in Sprint 27 by an
+unauthenticated digest pull. **No visibility policy has been approved or
+recorded**; visibility remains an operator decision, and nothing in this
+repository changed it. *Operational implication:* a deployment host does not
+currently need a registry credential, which is one fewer secret on the target —
+**not** a secrets-management capability, and it closes nothing in ORG-PR-006.
+*Security implication:* while the packages are public the
+images are already proven to carry nothing secret by `tooling/artifact-smoke.sh`
+(no `.env`, no source, no git metadata, no secret-shaped value in the image or
+the served web assets; neither Dockerfile accepts a secret build argument).
+What becomes public is dependency versions and file layout, which the public
+source tree already discloses. If an operator chooses to make the packages
+private, that is legitimate and carries a cost: every deployment host then needs
+a long-lived read-only pull credential. Either way the decision should be
+recorded, and public visibility must stay explicitly visible here and in
+[../deployment.md](../deployment.md). The recommended
 simplest architecture (reverse proxy + TLS + 2 API replicas + managed Postgres/
 Redis + real SMTP + scheduler + secrets manager, **not Kubernetes**) is in
 [production-target.md](production-target.md). Depends on: security headers/proxy

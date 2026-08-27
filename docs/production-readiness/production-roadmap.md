@@ -372,7 +372,100 @@ Phase 6: End-to-End Verification & Security Review
   respectively; neither moves toward closure. Closing artifact:
   [sprint-26-artifact-package.md](sprint-26-artifact-package.md); docs:
   [../deployment.md](../deployment.md).
-- **Next (recommended) — Deployment Pipeline Closure (ORG-PR-001).** Provision
+- **Sprint 27 (IN PROGRESS — BLOCKED ON DURABLE EXTERNAL TARGET, 2026-08-25) —
+  Deployment Pipeline Closure (ORG-PR-001).** The objective is to validate
+  Sprint 26's mechanism against the first durable staging-like target. That has
+  not happened, so **the Sprint 27 DoD is not met and the sprint remains open**;
+  its evidence package is a living document updated in place, not a closing
+  artifact. **No target is reachable from
+  this environment** — no provider CLI installed, no SSH key material, no target
+  hostname, DNS name, TLS certificate, or deployment credential. A blocker is an
+  acceptable factual outcome; a fabricated deployment is not, and none was
+  claimed. What the sprint delivered instead is the first real external
+  reconnaissance the project has performed, which found two defects invisible to
+  a rehearsal. **(1) The GHCR packages are public, not private as Sprint 26
+  recorded** — proven by pulling both published digests with an empty Docker
+  configuration directory. A deployment host therefore needs no registry
+  credential at all; the staging blocker "a pull credential for the host" is
+  **resolved**, and keeping the packages public is recorded as a deliberate
+  decision with its implications. **(2) The deployment had no image/host
+  architecture check.** The published images are single-architecture
+  `linux/amd64` and a pull is architecture-agnostic, so an arm64 host would have
+  pulled them and failed only at container start — surfacing four stages later
+  as "the API container did not become healthy", **after the backup preflight
+  and the migration had already run against the target's database**.
+  `pnpm deploy:rehearsal` builds locally, so its images are always native and
+  the failure mode is invisible to it by construction. Implemented:
+  `deploy_assert_image_runs_on_host` and its platform helpers in
+  `tooling/lib/deploy-common.sh`; a new **stage 5** in `tooling/deploy.sh` that
+  refuses a mismatch before anything touches the database, with emulation
+  accepted only on an exact opt-in that is written onto the deployment evidence
+  as a limitation; `tooling/deploy-target-preflight.sh` (`pnpm deploy:preflight`)
+  for host qualification; and ten unit tests driving the real shell functions
+  inside the required `Validate (offline)` check. The lifecycle was then re-run
+  against the **real published GHCR artifacts**: deploy `91664d0`, deploy the
+  second compatible release `d51c76b`, roll back to `91664d0` by digest — 9/9
+  smoke each time, running digests verified, migrations neither re-run nor
+  reversed. Both releases already existed on `main`; none was manufactured.
+  **No finding closed.** That run was a local rehearsal on a workstation with no
+  durability, no TLS, no DNS, no public origin, and amd64 images under CPU
+  emulation — evidence tier **published-artifact local rehearsal**, not target
+  validation. ORG-PR-001 remains **OPEN — materially advanced**; ORG-PR-002
+  untouched; ORG-PR-005 and ORG-PR-006 unchanged in substance. Living evidence
+  package (not a closing artifact):
+  [sprint-27-artifact-package.md](sprint-27-artifact-package.md); docs:
+  [../deployment.md](../deployment.md).
+- **Sprint 27 (COMPLETE, 2026-08-27) — Deployment Pipeline Closure
+  (ORG-PR-001). ORG-PR-001 CLOSED on real-target evidence.** A durable staging-like target was provisioned by the operator and
+  validated by this repository's own tooling: a DigitalOcean `linux/amd64` host
+  (Ubuntu 24.04.4, Docker enabled at boot, containers `restart=unless-stopped`,
+  PostgreSQL on a named volume) serving real public HTTPS origins
+  (`https://staging.drsvp.com`, `https://api-staging.drsvp.com`) behind Caddy
+  v2.11.4 with valid Let's Encrypt certificates, inbound exposure externally
+  probed and confirmed as 22/80/443 only. Target preflight passed 0 failed /
+  0 warned; the host pulled both release digests itself **with no registry
+  credential present on it**; release `91664d0` deployed with a backup preflight
+  (`taken`), a one-shot migration and applied head `0012_shocking_warbound`
+  verified against the manifest, running container digests verified, and
+  **public HTTPS smoke 9/9** — the pre-deployment 502s became 200. A restart
+  check confirmed persistence (migration ledger 13 before and after). The second
+  compatible release `d51c76b` deployed (public smoke 9/9), and a **real
+  application rollback** restored `91664d0`'s exact digests with `--no-migrate`,
+  passing public HTTPS rollback smoke 9/9 with the running images verified and
+  the schema untouched. Deploy workflow run `33061763360` bound to the
+  `staging-like` environment validated the manifest and resolved both digests.
+  Three machine-generated evidence records live on the host, scanned free of
+  secret material. Neither release was manufactured — both pre-existed on `main`
+  with identical migration identity — and **no source was built on the target**.
+  **ORG-PR-001 closed.** ORG-PR-002, ORG-PR-005, and ORG-PR-006 remain open;
+  staging readiness is **NO** (account email does not work on the target; no
+  observability) and production readiness is **NO**. Evidence:
+  [sprint-27-artifact-package.md](sprint-27-artifact-package.md); docs:
+  [../deployment.md](../deployment.md).
+- **Sprint 27 repository-change validation (2026-08-27) — COMPLETE.** Published
+  as **PR #40** (branch `sprint-27-deployment-pipeline-closure`, head
+  `0b6e6967bb95f26f211df29671210926eb136b75`, merge state CLEAN). All six
+  required checks passed — `Validate (offline)`, `Integration (PostgreSQL +
+  Redis)`, `Artifacts (build + smoke)`, `Dependency audit (pnpm)`,
+  `Secret scan (Gitleaks)`, `Analyze (javascript-typescript)` — plus the CodeQL
+  rollup, plus a manually dispatched **Deployment rehearsal** (run
+  `33065548416`) at the exact published head, required because Sprint 27 changed
+  the deployment tooling and that workflow has no push trigger. **Data
+  durability** was correctly not required and no new **Release** was needed.
+  **Sprint 27 DoD met: YES.**
+- **Next — Sprint 28: Backup and Recovery Operations Closure (ORG-PR-005).**
+  With ORG-PR-001 closed, the environment dependency that blocked this finding's
+  larger half is gone. Now executable against the real target: scheduled
+  backups, off-host encrypted storage, continuous WAL archiving with
+  archive-health monitoring, a measured RPO/RTO, and — the piece Sprint 27
+  explicitly did not attempt — a **real-target restore and PITR drill**.
+  Secondary candidates, in order: **external email provider closure
+  (ORG-PR-002)**, which would also make the staging environment exercisable end
+  to end; **secrets platform integration (ORG-PR-006)**; and **observability
+  (ORG-PR-007/009)**, without which the staging environment cannot be operated
+  as a production rehearsal. Multi-architecture publishing remains unnecessary —
+  the target is amd64.
+- **Superseded (recorded for continuity) — Deployment Pipeline Closure (ORG-PR-001).** Provision
   the smallest real staging-like target that satisfies the
   [staging blockers](../deployment.md#remaining-staging-blockers), run the
   release workflow so images genuinely exist in GHCR, create the GitHub

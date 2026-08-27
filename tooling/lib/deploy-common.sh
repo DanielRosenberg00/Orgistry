@@ -218,3 +218,107 @@ deploy_container_image_id() {
   docker inspect --format '{{.Image}}' "$1" 2>/dev/null \
     || deploy_die "container ${1} does not exist"
 }
+
+# ---- Host / image platform compatibility ----------------------------------
+
+# Set by deploy_assert_image_runs_on_host when a mismatch was explicitly
+# allowed, so the deployment can record emulation as a limitation instead of
+# letting it disappear into a log line. Its only reader is tooling/deploy.sh, so
+# a linter looking at this file alone cannot see the use.
+DEPLOY_EMULATED_PLATFORM=''
+
+# One canonical token per CPU architecture.
+#
+# The Docker daemon reports the HOST architecture the way the kernel names it
+# (`x86_64`, `aarch64`); an image's own configuration records the OCI name
+# (`amd64`, `arm64`). Comparing the two spellings directly would report a
+# mismatch on every host, so both sides are normalised through here first.
+deploy_normalize_architecture() {
+  case "$1" in
+    x86_64 | amd64) printf 'amd64' ;;
+    aarch64 | arm64) printf 'arm64' ;;
+    armv7l | armv7 | arm) printf 'arm' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# Refuse a platform string that is not fully determined.
+#
+# `docker image inspect` and `docker info` exit 0 even when a template field
+# renders empty, so a missing component would produce the string "/" — and if it
+# happened on BOTH sides, the comparison below would MATCH and the gate would
+# pass by accident. A gate that fails open is worse than no gate, so an
+# incompletely determined platform is a refusal, not a warning.
+deploy_require_determined_platform() {
+  local platform="$1" source_description="$2"
+  [[ "${platform}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] \
+    || deploy_die "could not determine a complete os/architecture from ${source_description} (got \"${platform}\"); refusing to compare architectures on incomplete information"
+}
+
+# The `os/architecture` a locally present image declares it was built for.
+deploy_image_platform() {
+  local reference="$1" inspected os architecture platform
+  inspected="$(docker image inspect --format '{{.Os}} {{.Architecture}}' "${reference}" 2>/dev/null)" \
+    || deploy_die "image ${reference} is not present locally — pull it before inspecting its platform"
+  os="${inspected%% *}"
+  architecture="${inspected##* }"
+  platform="${os}/$(deploy_normalize_architecture "${architecture}")"
+  deploy_require_determined_platform "${platform}" "image ${reference}"
+  printf '%s' "${platform}"
+}
+
+# The `os/architecture` of the Docker daemon this deployment drives.
+#
+# Deliberately the DAEMON's view rather than `uname -m`: a deployment may be
+# driving a remote or virtualised Docker host whose architecture is not the
+# calling shell's.
+deploy_host_platform() {
+  local inspected os architecture platform
+  inspected="$(docker info --format '{{.OSType}} {{.Architecture}}' 2>/dev/null)" \
+    || deploy_die 'cannot read the Docker daemon platform — is the daemon running and reachable?'
+  os="${inspected%% *}"
+  architecture="${inspected##* }"
+  platform="${os}/$(deploy_normalize_architecture "${architecture}")"
+  deploy_require_determined_platform "${platform}" 'the Docker daemon'
+  printf '%s' "${platform}"
+}
+
+# Refuse an image this host cannot execute natively.
+#
+# Orgistry publishes SINGLE-architecture images: the release workflow builds on
+# a GitHub-hosted `linux/amd64` runner and pushes one manifest, not a manifest
+# list. Pulling is architecture-agnostic, so an arm64 host (Graviton, Ampere,
+# Apple Silicon) pulls those images successfully and only fails when the
+# container starts, with `exec format error`. Without this check that failure
+# surfaces much later as "the API container did not become healthy", which
+# sends the operator debugging the application instead of the platform — and it
+# surfaces AFTER the backup preflight and the migration have already run.
+#
+# Emulation (Docker Desktop, or binfmt_misc + QEMU on Linux) can make a
+# mismatched container run anyway: slowly, and on a syscall surface nothing in
+# CI validated. That is not a supported deployment mode, so it must be opted
+# into per deployment and is recorded on the deployment evidence rather than
+# silently accepted.
+deploy_assert_image_runs_on_host() {
+  local reference="$1" label="$2" host_platform="$3" image_platform
+  image_platform="$(deploy_image_platform "${reference}")"
+  # Re-checked here, in the CALLER's shell. The getters validate too, but they
+  # run inside a command substitution, so their refusal would surface as an
+  # empty value plus a non-zero status rather than as this function's own
+  # failure. The decision point must never compare two unusable strings.
+  deploy_require_determined_platform "${image_platform}" "image ${reference}"
+  deploy_require_determined_platform "${host_platform}" 'the Docker host'
+  if [[ "${image_platform}" == "${host_platform}" ]]; then
+    return 0
+  fi
+
+  if [[ "${ORGISTRY_ALLOW_IMAGE_ARCHITECTURE_MISMATCH:-}" != 'yes' ]]; then
+    deploy_die "the ${label} is built for ${image_platform} but this Docker host is ${host_platform}, so it cannot start here. Deploy from a ${image_platform} host, publish a multi-architecture image, or — only if this host really emulates ${image_platform} — set ORGISTRY_ALLOW_IMAGE_ARCHITECTURE_MISMATCH=yes to accept emulation for this deployment."
+  fi
+
+  # Read by tooling/deploy.sh, which turns it into a limitation on the
+  # deployment record; not read anywhere in this file.
+  # shellcheck disable=SC2034
+  DEPLOY_EMULATED_PLATFORM="${image_platform} images on a ${host_platform} host"
+  deploy_info "WARNING: the ${label} is ${image_platform} on a ${host_platform} host; running under emulation because ORGISTRY_ALLOW_IMAGE_ARCHITECTURE_MISMATCH=yes"
+}

@@ -428,6 +428,28 @@ describe('production mailer guard (NODE_ENV=production, Sprint 16)', () => {
     expect(config.mail.smtp?.port).toBe(465);
   });
 
+  it('accepts an isolated non-provider SMTP endpoint (the staging-like deployment model)', () => {
+    // Sprint 27 (ORG-PR-001) depends on this: a staging-like target must be
+    // able to run with NODE_ENV=production — which is what activates every
+    // guard in this file — WITHOUT a production email provider, and therefore
+    // without ORG-PR-002 being closed. The production rules constrain the
+    // DRIVER (never a local sink), the CREDENTIAL (never a placeholder), and
+    // the SENDER (never a reserved domain). They deliberately do not constrain
+    // the endpoint's identity, so an operator-run sink reachable only from the
+    // deployment network is a valid production-mode configuration.
+    //
+    // This is NOT evidence of email-provider validation: nothing here proves
+    // the endpoint exists, accepts the credential, or delivers anything.
+    // ORG-PR-002 owns that and stays open.
+    const config = loadConfig({
+      ...productionEnv(),
+      SMTP_HOST: 'mail-sink.orgistry-staging.internal',
+      SMTP_PORT: '465',
+    });
+    expect(config.mail.driver).toBe('smtp');
+    expect(config.mail.smtp?.host).toBe('mail-sink.orgistry-staging.internal');
+  });
+
   it('rejects the mailpit driver in production', () => {
     const issues = loadIssues({ ...productionEnv(), MAIL_DRIVER: 'mailpit' });
     expect(issues.join('\n')).toContain('MAIL_DRIVER must be "smtp"');

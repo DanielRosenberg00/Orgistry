@@ -110,7 +110,7 @@ These are intentional non-goals, not bugs:
   no Content-Security-Policy hardening; that remains open.
 - **No organization lifecycle endpoints** (archive/suspend) and **no project
   hard-delete or restore** — deletes are soft.
-- **No object storage** and **no deployed environment.** Sprint 23 added
+- **No object storage.** *(Deployed environment: see the Sprint 27 note below — a durable staging-like target now exists.)* Sprint 23 added
   production-shaped container artifacts (API + web, non-root,
   tag+digest-pinned bases), an explicit migration entrypoint, a
   production-like compose validation reference, and a CI build/smoke gate (see
@@ -132,7 +132,8 @@ These are intentional non-goals, not bugs:
   green. **What is still missing is a host to deploy to** — no deployment has
   ever been performed against any environment, rollback is validated only in
   the rehearsal, the `staging-like` GitHub Environment has zero protection
-  rules, published images are single-architecture `linux/amd64`, and there is
+  rules (re-observed 2026-08-25), published images are single-architecture
+  `linux/amd64` — which constrains a target to x86-64 — and there is
   still no Terraform/Helm/Kubernetes, no image signing or SLSA provenance, no
   TLS/DNS/reverse-proxy configuration, and no observability. ORG-PR-001 remains
   open, materially advanced.
@@ -142,6 +143,77 @@ These are intentional non-goals, not bugs:
   ([deployment.md](deployment.md#runtime-public-configuration)); publication is
   authorised by the required checks having succeeded for the exact release
   commit; and rehearsal output is schema-marked as non-deployable.
+  **Sprint 27 (in progress, blocked on a durable external target) corrected two
+  things this list got wrong and left the finding open.** (1) Observed state:
+  the GHCR packages are currently **publicly pullable**, not private — verified
+  by pulling both published digests with an empty Docker configuration
+  directory — so a deployment host does not currently need a registry
+  credential. That is an observation of the current state, not an approved
+  visibility policy, and it is not secrets management. (2) The
+  single-architecture `linux/amd64` constraint was documented but *unenforced*:
+  a pull is architecture-agnostic, so an arm64 host would have pulled both
+  images and failed only when a container started, surfacing as "the API
+  container did not become healthy" **after** the backup preflight and the
+  migration had already run. `tooling/deploy.sh` now refuses a platform
+  mismatch as stage 5, before anything touches the database, and
+  `pnpm deploy:preflight` qualifies a candidate host before the first
+  deployment. The whole lifecycle — deploy, second compatible release, rollback
+  by digest — was then run against the **real published GHCR artifacts** rather
+  than locally built stand-ins. **None of that is a target.** That run was a
+  local rehearsal on a workstation with no durability, no TLS, no DNS, no public
+  origin, and amd64 images under CPU emulation — evidence tier
+  *published-artifact local rehearsal*.
+  **Superseded on 2026-08-27: a durable staging-like target now exists and has
+  been validated.** Two gate-authorised releases were deployed to a DigitalOcean
+  `linux/amd64` host by immutable digest, serving real public HTTPS origins
+  behind Caddy with valid Let's Encrypt certificates; the backup preflight ran,
+  migrations ran once with a verified head, public HTTPS smoke passed 9/9 three
+  times, and a real application rollback restored the previous known-good
+  digests with the running images verified and the migration ledger unchanged.
+  **ORG-PR-001 is CLOSED.** Machine-generated deployment and rollback evidence
+  lives on the host and contains no secret material. Only the deployment tooling
+  was transferred there — no Dockerfile, no application source — so the target
+  cannot build the application. **This is not staging readiness and not
+  production readiness:** the target holds synthetic data only, account email
+  does not work there, there is no observability, and ORG-PR-002, ORG-PR-005,
+  and ORG-PR-006 remain open. **Sprint 27 is complete**: its repository changes
+  were published as PR #40 (head `0b6e6967bb95…`) and passed every mandatory
+  remote gate, including a manually dispatched Deployment Rehearsal
+  (run `33065548416`).
+- **Account email does not work on the validated staging-like target.** The
+  target runs `MAIL_DRIVER=smtp` against a plaintext Mailpit sink on port 1025,
+  while Orgistry's smtp driver uses implicit TLS with certificate verification
+  always on. The API therefore boots, `/health` and `/ready` answer over public
+  HTTPS, and all nine smoke checks pass — but account-email **sends fail
+  closed**, so registration, verification, and invitation flows will error
+  there. That is the correct architectural behaviour (mail failures must never
+  silently disappear in production mode), it was not exercised by Sprint 27
+  (all smoke is unauthenticated by design), and it is a **staging-readiness**
+  limitation rather than a deployment defect. Fixing it means giving the sink a
+  publicly-trusted certificate on an SMTPS port — **not** adding a provider.
+  **ORG-PR-002 remains open** and is unaffected either way
+  ([deployment.md](deployment.md#staging-mail-model)).
+- **The public `mailpitUrl` is not a remote inbox link (staging/demo only).**
+  `ORGISTRY_PUBLIC_MAILPIT_URL` defaults to `http://localhost:8025` and is
+  served to every browser, but `localhost` resolves on the *visitor's* machine,
+  and the staging host binds the Mailpit UI to its own loopback and publishes
+  nothing (externally probed and confirmed closed). The link therefore reaches
+  nothing for a remote browser. It is not a leak (a loopback literal discloses
+  nothing), not a deployment defect, and not an ORG-PR-001 blocker; an operator
+  inspects the sink over an SSH tunnel
+  ([deployment.md](deployment.md#the-public-mailpit-url-is-not-a-remote-inbox)).
+- **No observability on the validated staging-like target.** No metrics,
+  dashboards, log shipping, or alerting on a failed deployment, a failed
+  migration, or a fail-closed rate limiter (ORG-PR-007, ORG-PR-009). A staging
+  environment nobody can observe cannot be operated as a production rehearsal,
+  which is the second reason staging readiness remains **NO**.
+  Sprint 27 also established that a staging-like target needs **no production
+  email provider**: the production config guard constrains the mail driver,
+  credential, and sender domain but not the endpoint's identity, SMTP is not a
+  boot dependency, and `/ready` probes only PostgreSQL and Redis — so a target
+  runs with `MAIL_DRIVER=smtp` pointed at an operator-run isolated sink
+  ([deployment.md](deployment.md#staging-mail-model)). **ORG-PR-002 is
+  unaffected and remains open**; nothing there proves delivery.
 - **No production secret management.** Sprint 24 delivered the runtime
   *source* and *rotation* halves — secrets come from a direct environment value
   or a mounted `<NAME>_FILE` secret resolved before validation, access-token
@@ -225,6 +297,15 @@ These are intentional non-goals, not bugs:
   reference instant rather than shortening a window. Boundaries are exercised
   deterministically; a production window shorter than its floor is not
   exercised because it cannot exist.
+- **The deployment rehearsal cannot find host-specific defects (Sprint 27).**
+  `pnpm deploy:rehearsal` builds its images locally, so they are always native
+  to the machine running it and a published image's architecture can never
+  mismatch inside it. That is precisely why the deployment shipped without an
+  image/host platform check: the failure mode is invisible to the rehearsal by
+  construction. It also uses a throwaway registry, so it proves nothing about
+  GHCR authentication, package visibility, or retention. Read a passing
+  rehearsal as evidence about the *mechanics*, and look separately for the
+  classes of defect its construction excludes.
 - **The deployment rehearsal is not a deployed environment (Sprint 26).**
   `pnpm deploy:rehearsal` runs the entire promotion and deployment lifecycle —
   publish, deploy by digest, migrate once, smoke, record evidence, roll back —

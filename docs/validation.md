@@ -37,8 +37,9 @@ There are two tiers:
 | `pnpm db:retention -- --dry-run` | durability | Reports retention-eligible rows per category. Mutates nothing. |
 | `pnpm db:retention -- --apply` | durability | Deletes retention-eligible rows in bounded batches. **Destructive** — take a backup first. |
 | `pnpm release:manifest validate PATH` | deployment | A release manifest is well-formed, digest-pinned, tagged with its commit, and free of anything credential-shaped. |
+| `pnpm deploy:preflight -- [--config PATH] [--manifest PATH] [--json]` | deployment (Docker) | Qualifies a candidate host BEFORE deploying to it: toolchain, host baseline and boot persistence, release pullability and image/host platform, and the configuration boundary. Read-only; deploys nothing. |
 | `pnpm deploy:run -- --manifest PATH --config PATH` | deployment (Docker) | Deploys one release to one single-host environment and fails on any unmet stage (see [Deployment validation](#deployment-validation)). |
-| `pnpm deploy:smoke -- --api-url URL --web-url URL` | deployment | Eight post-deployment checks against a running deployment, over HTTP only. |
+| `pnpm deploy:smoke -- --api-url URL --web-url URL` | deployment | Nine post-deployment checks against a running deployment, over HTTP only. |
 | `pnpm deploy:rollback -- --config PATH [--dry-run]` | deployment (Docker) | Redeploys the previous known-good digests and re-runs smoke. |
 | **`pnpm deploy:rehearsal`** | **deployment (Docker)** | **The whole lifecycle end to end against a throwaway registry and throwaway services: build once → publish → digest → manifest → deploy → migrate → smoke → evidence → second release → rollback.** |
 
@@ -376,6 +377,80 @@ Run it before merging any change to `tooling/deploy*.sh`,
 `tooling/release-gates.mjs`, `tooling/deploy-evidence.mjs`,
 `infra/compose.deploy.yml`, `apps/web-demo/nginx.conf.template`, or either
 Dockerfile.
+
+**What the rehearsal structurally cannot prove (Sprint 27).** It builds its
+images locally, so they are always native to the machine running it. A published
+image's architecture can therefore never mismatch inside a rehearsal — which is
+exactly how the deployment shipped for a sprint with no image/host platform
+check, and why the arm64 failure mode was found only by pulling the real
+published release onto an arm64 host. It also uses a throwaway registry, so it
+proves nothing about GHCR authentication, package visibility, or retention.
+Treat "the rehearsal passes" as evidence about the *mechanics*, and go looking
+for the classes of defect its construction excludes.
+
+#### Sprint 27 outcome (2026-08-27)
+
+The Sprint 27 changes — `tooling/deploy.sh`, `tooling/lib/deploy-common.sh`,
+`tooling/deploy-smoke.sh`, the new `tooling/deploy-target-preflight.sh` and
+`tooling/deploy-platform-guard.test.ts`, `packages/config/src/config.test.ts`,
+`package.json`, and documentation — were published as **PR #40**
+(head `0b6e6967bb95…`) and passed every mandatory remote gate:
+
+| Workflow | Result |
+| --- | --- |
+| CI — `Validate (offline)`, `Integration (PostgreSQL + Redis)`, `Artifacts (build + smoke)` | **PASS** |
+| Security scans — `Dependency audit (pnpm)`, `Secret scan (Gitleaks)` | **PASS** |
+| CodeQL — `Analyze (javascript-typescript)` | **PASS** |
+| **Deployment rehearsal** — run `33065548416`, manually dispatched at the published head | **PASS** |
+
+**Data durability** was correctly not required — its owned surface is untouched.
+**Release** was not required: `release.yml` is unchanged and no new application
+release was published. **Deploy** needed no new run — it is unchanged, and run
+`33061763360` provided the operational validation against the real target.
+
+`ORG-PR-001` is **CLOSED** on real-target evidence and **Sprint 27 DoD met:
+YES**. Sprint 27 is complete. Staging readiness remains NO and production readiness remains NO — see
+[sprint-27-artifact-package.md](production-readiness/sprint-27-artifact-package.md).
+
+### `pnpm deploy:preflight` — qualify a host
+
+`tooling/deploy-target-preflight.sh`. New in Sprint 27. Run it on a candidate
+deployment host before the first deployment, and after any change to that host:
+
+```sh
+pnpm deploy:preflight -- --config /etc/orgistry/deploy.env \
+                        --manifest release-manifest.json --json
+```
+
+All arguments are optional — a host being evaluated has no configuration and no
+chosen release yet. It checks the deployment toolchain, the host baseline
+(platform, Docker/Compose versions, CPU/memory/storage, and whether Docker
+starts at boot, which is what makes a target durable rather than merely
+running), that both release images actually pull *from that host* and match its
+platform, and the configuration boundary (environment class, runtime-file
+permissions, loopback port binds, HTTPS public origin, evidence and backup
+directory permissions).
+
+It collects every failure rather than stopping at the first, exits non-zero if
+any check FAILED, and prints a sanitized baseline with `--json`. It stats the
+runtime configuration file but never reads it, so it cannot print a secret.
+
+**What it does not check: mail.** SMTP is neither a boot dependency nor a
+readiness probe, so the preflight has nothing to probe. A staging-like target
+runs `MAIL_DRIVER=smtp` against an operator-run isolated sink and needs no
+production email provider — see
+[deployment.md](deployment.md#staging-mail-model). The rules that *are*
+enforced (driver, credential shape, sender domain) live in the API's own
+production config guard and are covered by `pnpm test`.
+
+**Read-only contract.** It may inspect versions, file modes, and directory
+writability; pull and inspect immutable digest-pinned images; compare
+architectures; and structurally validate non-secret configuration. It must never
+run a migration, touch the application database, start or reconfigure the
+deployment, change firewall or host configuration, persist a secret, or mutate
+GitHub settings or package visibility. **A passing preflight is not a
+deployment** — it starts no container, runs no migration, and writes nothing to
+the evidence ledger.
 
 ### Forwarding flags through pnpm
 

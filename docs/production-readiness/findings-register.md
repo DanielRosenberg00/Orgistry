@@ -324,11 +324,100 @@ ORG-PR-006 — unchanged.** The repository remains not ready for staging or
 production. See [sprint-26-artifact-package.md](sprint-26-artifact-package.md)
 and [../deployment.md](../deployment.md).
 
+**Status update (Sprint 27, 2026-08-27 — COMPLETE):**
+[ORG-PR-001](#org-pr-001) is **CLOSED** on real durable-target evidence. It is
+the first P1 production blocker closed since Sprint 17.
+
+```
+Sprint 27 DoD met                    YES
+Real staging-like target validated   YES
+ORG-PR-001                           CLOSED
+Staging ready                        NO
+Production ready                     NO
+```
+
+**Sprint 27 repository-change validation is complete.** Published as **PR #40**
+(branch `sprint-27-deployment-pipeline-closure`, head
+`0b6e6967bb95f26f211df29671210926eb136b75`, merge state CLEAN): all six required
+checks passed, plus the CodeQL rollup, plus a manually dispatched **Deployment
+rehearsal** (run `33065548416`) at the exact published head — required because
+Sprint 27 changed the deployment tooling and that workflow has no push trigger.
+**Data durability** was correctly not required (its owned surface is untouched)
+and no new **Release** was needed (`release.yml` unchanged, no release
+published).
+
+This is separate from the application-release operational evidence below, which
+concerns pre-existing published releases and the real target. The two evidence
+classes answer different questions and are not interchangeable.
+
+**What was executed.** On 2026-08-27 the Sprint 26 deployment mechanism ran end
+to end against a durable DigitalOcean staging-like host (`orgistry-staging-01`,
+FRA1, `linux/amd64`, Ubuntu 24.04.4) serving real public HTTPS origins
+(`https://staging.drsvp.com`, `https://api-staging.drsvp.com`) behind Caddy with
+valid Let's Encrypt certificates:
+
+- **Target preflight PASS** — 0 failed, 0 warned, on the host itself.
+- **Target-side digest pulls** — the host pulled both images for both releases
+  with **no registry credential of any kind** (`~/.docker/config.json` absent).
+- **Release `91664d0` deployed** — backup preflight `taken`, migration applied
+  once from the release's own image, applied head `0012_shocking_warbound` (13)
+  verified against the manifest, API healthy, web up, **running container
+  digests asserted equal to the manifest digests**, smoke 9/9, evidence written.
+- **Public HTTPS smoke 9/9** from outside the host — the first public-origin
+  smoke evidence in the project's history. The pre-deployment `502` responses on
+  both origins became `200`.
+- **Durability** — application containers restarted cleanly, `/ready` returned
+  200 again after 3s, and the migration ledger held 13 rows before and after.
+- **Release `d51c76b` deployed** — same lifecycle, public HTTPS smoke 9/9.
+- **Real application rollback** — `91664d0`'s exact digests redeployed with
+  `--no-migrate`, public HTTPS rollback smoke 9/9, running images cross-checked
+  as Release 1's, and the migration ledger unchanged at 13.
+- **Deploy workflow run `33061763360`** bound to the `staging-like` environment
+  validated the manifest, confirmed gate authorisation, and resolved both
+  digests in the registry.
+- **Network boundary** — externally probed: only 22/80/443 reachable; API, web,
+  PostgreSQL, Redis, Mailpit, and the Caddy admin endpoint all unreachable from
+  the internet.
+- **Evidence hygiene** — every evidence file scanned; no credential-bearing URL,
+  credential-named key, or secret value anywhere.
+
+The two releases are a genuinely compatible pair — identical migration head,
+count, and journal timestamp — and both already existed on `main`. **No release
+was manufactured**, and **no source was built on the target**: only the
+deployment tooling dependency closure was transferred.
+
+[ORG-PR-002](#org-pr-002) (P1) **remains Open.** No provider was contacted and
+no mail reached a real recipient. The target's isolated Mailpit sink has no
+external relay. Account-email delivery was not exercised and would currently
+fail closed, because `MAIL_DRIVER=smtp` points at a plaintext sink while the
+driver requires implicit TLS — correct fail-closed behaviour, and a staging
+limitation rather than a deployment defect.
+
+[ORG-PR-005](#org-pr-005) (P1) **remains Open.** The pre-migration backup
+preflight executed for real twice on the target, producing dumps with checksums
+and provenance sidecars. That is the deployment boundary working. Nothing
+schedules backups, stores them off-host, encrypts them, archives WAL, or
+monitors archive health; no RPO/RTO is measured; the target has no PITR window;
+and **no real-target restore or PITR drill was performed**.
+
+[ORG-PR-006](#org-pr-006) (P1) **remains Open.** Runtime secrets are a 0600 file
+on a host. The `staging-like` GitHub Environment now carries an active
+deployment-branch policy — a deployment boundary, not secrets management. No
+secret store, access control, read auditing, or automated rotation exists.
+
+**Open P1 production blockers: ORG-PR-002, ORG-PR-005, ORG-PR-006.**
+The repository is **not** staging ready (account email does not work on the
+target and there is no observability there) and **not** production ready.
+Recommended next: **Sprint 28 — Backup and Recovery Operations Closure
+(ORG-PR-005)**, whose environment dependency ORG-PR-001's closure removes. Final
+artifact: [sprint-27-artifact-package.md](sprint-27-artifact-package.md); see
+also [../deployment.md](../deployment.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
 | --- | --- | --- | --- | --- | --- |
-| [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Open; materially advanced (Sprint 23 artifacts + CI build/smoke gate; Sprint 26 registry publishing, release manifest, promote-by-digest deployment, migration contract, smoke, evidence, rollback — merged as PR #38 and validated remotely: both images published to GHCR for `91664d0` after exact-SHA gate authorization): no deployment target exists and nothing has been deployed to one** | Infrastructure | Production blocker | P1 | High |
+| [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Closed (Sprint 27, 2026-08-27)**: a durable staging-like target pulled immutable digests itself, deployed two gate-authorised releases with a backup preflight, one-shot migration and verified head, served real public HTTPS origins, passed public smoke 9/9 three times, and completed a real application rollback with verified running digests — all recorded in machine-generated deployment and rollback evidence | Infrastructure | Production blocker | P1 | High |
 | [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16 adapter + guard; Sprint 24 runtime credential source, failure-mode redaction proofs, family matrix, operator validation procedure): external delivery, inbox receipt, and sender-domain authentication all still unvalidated** | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
 | [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
@@ -558,6 +647,172 @@ Standards · Threats.
   one.** Publishing and authorising an artifact is not deploying it; rollback
   remains rehearsal-only; the `staging-like` environment has zero protection
   rules; and the published images are single-architecture `linux/amd64`.
+- **Progress (Sprint 27, 2026-08-25 — IN PROGRESS): Open — materially
+  advanced.** Sprint 27's task is to validate Sprint 26's mechanism against a
+  durable staging-like target. That has not happened, so **the Sprint 27
+  definition of done is not met and the sprint remains open**. **No
+  such target is reachable from this execution environment** — no provider CLI
+  is installed (`flyctl`, `doctl`, `hcloud`, `aws`, `gcloud`, `az`, `terraform`:
+  all absent), no SSH key material exists (`~/.ssh` holds only a `known_hosts`
+  with a single `github.com` entry), no target hostname, DNS name, or TLS
+  certificate is configured anywhere, and no deployment credential exists. That
+  is the exact, unmet external prerequisite; everything below is what was done
+  instead, and none of it substitutes for it.
+
+  **Two findings that a locally built rehearsal cannot produce.** (1) *Observed
+  state: the GHCR packages are currently publicly pullable, not private as
+  Sprint 26 recorded.* Proven by pulling both published digests with
+  `DOCKER_CONFIG` set to an empty directory — no stored credential could have
+  been used — and by an anonymously issued registry token listing tags with
+  `200`. *Operational implication:* a deployment host does not currently need a
+  registry credential, so the staging blocker "a pull credential for the host"
+  is not currently blocking, and the images are already proven to contain
+  nothing secret by `tooling/artifact-smoke.sh`. *Policy implication:* this is
+  an observation of the current state, **not an approved visibility policy** —
+  visibility remains an operator decision, nothing here changed it, and no
+  approval is recorded anywhere in this repository. It is also not a
+  secrets-management capability and closes nothing in ORG-PR-006. (2) *The
+  deployment had no image/host architecture check.* The published images are
+  single-architecture `linux/amd64` — a single manifest, not a manifest list —
+  and a pull is architecture-agnostic, so an arm64 host pulls them successfully
+  and fails only when a container starts. Before Sprint 27 that surfaced four
+  stages later as "the API container did not become healthy", **after the backup
+  preflight and the migration had already run against the target's database**.
+  `pnpm deploy:rehearsal` builds its images locally, so they are always native
+  and can never mismatch: this class of defect is invisible to it by
+  construction.
+
+  **Implemented:** `deploy_normalize_architecture`, `deploy_image_platform`,
+  `deploy_host_platform`, and `deploy_assert_image_runs_on_host` in
+  `tooling/lib/deploy-common.sh`; a new stage 5 in `tooling/deploy.sh` that runs
+  immediately after the digest pull and before the backup preflight, so a
+  platform mismatch aborts while the target is still untouched. Both spellings
+  of each architecture are normalised (`docker info` reports `aarch64`/`x86_64`,
+  an image reports `arm64`/`amd64`) because a gate that fails closed on correct
+  input gets disabled. Emulation is accepted only on the exact opt-in
+  `ORGISTRY_ALLOW_IMAGE_ARCHITECTURE_MISMATCH=yes` (`true` and `1` are refused)
+  and is then written onto the deployment record as a limitation stating that
+  runtime behaviour and performance are unproven. Ten unit tests in
+  `tooling/deploy-platform-guard.test.ts` drive the real shell functions through
+  bash rather than re-implementing the rule, and run inside the required
+  `Validate (offline)` check. Also new:
+  `tooling/deploy-target-preflight.sh` (`pnpm deploy:preflight`), a read-only
+  host-qualification tool covering the deployment toolchain, the host baseline
+  including whether Docker starts at boot, release pullability and platform from
+  that host, and the configuration boundary (environment class, runtime-file
+  permissions, loopback binds, HTTPS public origin, evidence/backup directory
+  permissions). It collects every problem rather than stopping at the first, and
+  stats the runtime configuration file without reading it.
+
+  **Evidence upgraded from stand-ins to the real artifacts.** The entire
+  lifecycle ran against the images GHCR actually serves: unauthenticated digest
+  pull of both images for both releases → deploy `91664d0` (backup preflight
+  taken, migrations applied exactly once, applied head `0012_shocking_warbound`
+  verified against the manifest, API healthy, web up, running container digests
+  verified, 9/9 smoke, evidence recorded) → deploy the second compatible release
+  `d51c76b` (9/9 smoke; rollback target resolved to `91664d0`) → roll back to
+  `91664d0` by digest with `--no-migrate` (9/9 smoke; running digests confirmed
+  to be `91664d0`'s). Both releases already existed on `main` from Sprint 26 and
+  declare the same migration head with the same migration count, so the pair is
+  genuinely schema-compatible and **no release was manufactured for the test**.
+  The refusal path was exercised too: on the arm64 host, both the preflight and
+  `tooling/deploy.sh` correctly refused the release before any database
+  operation.
+
+  **Why it stays open — the closure criterion is unchanged and unmet.** The
+  finding requires "a tagged build deploys to a target environment
+  reproducibly", and ORG-PR-001's closure list requires that evidence on a
+  *durable* target. Sprint 27's run was a local rehearsal on a workstation: it
+  had no durability (every container, volume, and network was destroyed on
+  completion), **no TLS, no DNS, no public origin** — smoke reached
+  `127.0.0.1`, not a configured public origin — no reverse proxy, no reboot
+  survival, and it ran under CPU emulation, which no Orgistry validation
+  exercises — and because emulation lets a mismatched image run, such a
+  deployment is distinguishable from a native one only by the limitation written
+  onto its evidence record. That evidence tier is **published-artifact local
+  rehearsal**. It is not a target, it is not staging readiness, and it is not
+  production readiness. Docs:
+  [../deployment.md](../deployment.md),
+  [sprint-27-artifact-package.md](sprint-27-artifact-package.md).
+- **Resolution (Sprint 27, 2026-08-27): CLOSED — real durable-target
+  deployment and rollback evidence exists.** The finding's validation criterion
+  was "a tagged build deploys to a target environment reproducibly; container
+  runs as non-root". Both halves are now satisfied by evidence from a durable
+  external target rather than a rehearsal.
+
+  **Target:** `orgistry-staging-01`, a DigitalOcean droplet in FRA1 —
+  `linux/amd64`, Ubuntu 24.04.4, kernel 6.8.0-138, 2 vCPU / 4 GiB / ~74 GiB
+  free, Docker Engine 29.7.2 and Compose v5.5.0, Docker enabled at boot, all
+  containers `restart=unless-stopped`, PostgreSQL 16.14-alpine on a named volume
+  and Redis 7.4.10-alpine on the `orgistry-deploy` network with **no host port
+  bindings**. Public origins `https://staging.drsvp.com` and
+  `https://api-staging.drsvp.com` behind Caddy v2.11.4 with Let's Encrypt
+  certificates valid to 2026-11-25. Inbound exposure externally probed:
+  **22/80/443 only**. Synthetic data only; no real user data.
+
+  **Closure evidence, element by element.**
+  *Durable target exists* — survives container restart with data intact
+  (migration ledger 13 before and after) and is enabled at boot.
+  *Target-side immutable pulls* — the host pulled
+  `orgistry-api@sha256:9b79d72c045f…` and `orgistry-web@sha256:20dc434b7b62…`
+  (and the Release 2 pair) **with no registry credential present on it at all**.
+  *Real digest deployment* — `tooling/deploy.sh` ran its full stage sequence
+  twice, refusing anything not digest-pinned and asserting the compose topology
+  has no `build:` section.
+  *Backup/PITR preflight* — `taken` before each migration, producing
+  `orgistry-20260827T100354Z-pre-deploy.dump` and
+  `orgistry-20260827T100654Z-pre-deploy.dump` with checksums and provenance
+  sidecars, recovery points `10:03:59Z` and `10:06:59Z`.
+  *Migration* — applied exactly once per deployment from the release's own API
+  image; the API never migrates at boot.
+  *Verified head* — `0012_shocking_warbound`, 13 applied migrations, checked
+  against the manifest through Drizzle's ledger on the target's own database.
+  *Real public operation* — both public HTTPS origins returned `200` where they
+  had returned `502` before deployment.
+  *HTTPS post-deployment smoke* — `tooling/deploy-smoke.sh` from outside the
+  host, **9/9 after Release 1, 9/9 after Release 2, 9/9 after the rollback**,
+  including coarse readiness disclosure, six security headers, request-ID
+  propagation through the proxy, and reading the API origin back out of the
+  served bundle.
+  *Second compatible release* — `d51c76b5ee6b0d6183b76ac4b8efacdee94ae704`
+  (Release run `32779601026`), identical migration head, count, and journal
+  timestamp to `91664d0fd639ca6ca8b5681317757bbcf0f0209b` (run `32776576782`);
+  both pre-existing on `main`, neither manufactured.
+  *Real application rollback* — `tooling/deploy-rollback.sh` resolved Release 1
+  from the host's own ledger and redeployed its exact digests with
+  `--no-migrate`; `docker inspect` confirmed the running images are Release 1's,
+  and the migration ledger stayed at 13, proving application rollback does not
+  reverse migrations.
+  *Evidence* — three machine-generated records under
+  `/opt/orgistry/evidence/staging-like/`, each carrying the release identity,
+  full gate authorisation, public-config fingerprint, migration and backup
+  results, smoke result, and the digests **observed running**. Both deployed
+  manifests are stored alongside them, so the host can resolve a rollback
+  without the registry or an expired artifact. Scanned: no credential material.
+  *Environment boundary reconciled* — Deploy workflow run `33061763360`
+  (`workflow_dispatch`, `main`, success) bound to the `staging-like` GitHub
+  Environment validated the manifest, confirmed gate authorisation, and resolved
+  both digests; the environment now carries an active deployment-branch policy
+  (`protected_branches: true`). Reviewer separation is unavailable on a
+  single-maintainer repository and is a documented limitation, which the Sprint
+  Specification permits.
+  *Non-root* — unchanged since Sprint 23 and re-proven by the artifact gate that
+  authorised both releases.
+
+  **The operator-assisted boundary was preserved.** GitHub Actions does not
+  reach into the target and **no inbound exposure was created** to let it. Only
+  the deployment tooling dependency closure was transferred to the host — no
+  Dockerfile, no application source, no `packages/` — so the target is
+  structurally incapable of building the application.
+
+  **What this closure does NOT mean.** It is not staging readiness: account
+  email does not work on that target (`MAIL_DRIVER=smtp` against a plaintext
+  Mailpit sink, while the driver requires implicit TLS — correct fail-closed
+  behaviour), and there is no observability there. It is not production
+  readiness: ORG-PR-002, ORG-PR-005, and ORG-PR-006 remain open, and the target
+  holds synthetic data only. No real-target restore or PITR drill was performed.
+  Docs: [../deployment.md](../deployment.md),
+  [sprint-27-artifact-package.md](sprint-27-artifact-package.md).
 
 <a id="org-pr-002"></a>
 ### ORG-PR-002 — No production email provider (Mailpit-only)
@@ -628,6 +883,43 @@ Standards · Threats.
   relevant families, verified sender identity, documented provider/domain
   verification state, and SPF/DKIM/DMARC verdicts from a received
   `Authentication-Results` header.
+- **Progress (Sprint 27, 2026-08-25 — IN PROGRESS): Open — untouched, and
+  confirmed NOT to be a prerequisite for ORG-PR-001.** Sprint 27 sent no mail,
+  contacted no provider, resolved no MX record, and validated no sender domain.
+  External provider credentials, real inbox receipt, and SPF/DKIM/DMARC
+  alignment all remain unvalidated, and closure still requires all three.
+
+  **The staging boundary was established precisely**, by loading real
+  configurations against `packages/config/src/production-policy.ts` and
+  `mail-policy.ts` rather than reading prose. Under `NODE_ENV=production` the
+  guard constrains the mail *driver* (`smtp` only — a local sink would silently
+  swallow account email), the *credential* (no placeholder or development
+  default), and the *sender domain* (no reserved, non-routable suffix). It does
+  **not** constrain the endpoint's identity. Combined with the SMTP transport
+  being created lazily — nothing connects at boot — and `/ready` probing only
+  PostgreSQL and Redis, a staging-like target boots, becomes ready, and passes
+  all nine post-deployment smoke checks with `MAIL_DRIVER=smtp` pointed at an
+  operator-run isolated sink. Directly observed during the lifecycle run: the
+  packaged API did exactly that with an unreachable `SMTP_HOST`.
+
+  **Consequence:** a real production email provider is **not** required to
+  deploy to, or validate, a staging-like target, and therefore not required for
+  ORG-PR-001 closure. The staging blocker previously recorded as "a real SMTP
+  provider" was never accurate. **None of this is progress toward ORG-PR-002**:
+  nothing proves an endpoint exists, accepts a credential, or delivers anything
+  to a recipient, and no production email validation was weakened — the
+  driver/credential/sender rules are unchanged and are now pinned by an
+  additional regression test. Model:
+  [../deployment.md](../deployment.md#staging-mail-model).
+- **Progress (Sprint 27, 2026-08-27 — real target): Open, untouched.** No
+  provider was contacted and no mail reached a real recipient. The staging
+  target's Mailpit sink is isolated with no external relay. Account-email
+  delivery was **not exercised** and would currently fail closed there:
+  `MAIL_DRIVER=smtp` points at a plaintext sink on port 1025 while Orgistry's
+  smtp driver uses implicit TLS with verification always on. That is correct
+  fail-closed behaviour and a staging limitation, not a deployment defect — and
+  it is not delivery evidence in any direction. Closure still requires an
+  external provider, real inbox receipt, and SPF/DKIM/DMARC alignment.
 
 <a id="org-pr-003"></a>
 ### ORG-PR-003 — Dev-default secrets accepted & `COOKIE_SECURE` unenforced in production
@@ -782,6 +1074,35 @@ Standards · Threats.
   provider PITR window is configured, no archive health is monitored, and no
   RPO/RTO has been measured. Deployment-time integration is not a backup
   programme.
+- **Progress (Sprint 27, 2026-08-25 — IN PROGRESS): Open — unchanged in
+  substance.** The pre-migration backup preflight executed for real, against the lifecycle
+  deployment's own PostgreSQL, in the middle of a real deployment of a published
+  release: `tooling/db-backup.sh` produced a labelled `pre-deploy` dump and the
+  deployment recorded its artifact name and recovery point in the evidence
+  ledger, before migrations ran. That proves the *deployment boundary* Sprint 26
+  built is wired correctly to Sprint 25's durability tooling and works against
+  real published artifacts. **It is not backup operations.** Nothing schedules a
+  backup, nothing stores one off-host, nothing encrypts one at rest, no
+  long-lived database archives WAL, no archive-health check exists, and no
+  RPO/RTO has been measured. The rollback performed in the same run deliberately
+  took no backup and recorded that absence as a limitation, which is the
+  intended behaviour and is also not evidence of a recovery capability.
+  Closure continues to require the independent production requirements listed
+  above, none of which Sprint 27 addressed.
+- **Progress (Sprint 27, 2026-08-27 — real target): Open, unchanged in
+  substance.** The pre-migration backup preflight executed for real **twice on
+  the durable target**, before each migration, producing
+  `orgistry-20260827T100354Z-pre-deploy.dump` and
+  `orgistry-20260827T100654Z-pre-deploy.dump` with SHA-256 checksums and
+  provenance sidecars, and recording artifact and recovery point in the
+  deployment evidence. The rollback correctly took none and recorded why. That
+  is the deployment boundary working against real infrastructure. **It is not
+  backup operations.** Nothing schedules a backup, stores one off-host, encrypts
+  one at rest, archives WAL, or monitors archive health; no RPO/RTO is measured;
+  the staging PostgreSQL has **no PITR window**; and **no real-target restore or
+  PITR drill was performed** — none is claimed. ORG-PR-001 closing removes the
+  dependency that previously blocked this finding's environment-dependent half,
+  which makes it the strongest candidate for the next sprint.
 
 <a id="org-pr-006"></a>
 ### ORG-PR-006 — No secrets management or rotation procedure
@@ -873,6 +1194,36 @@ Standards · Threats.
   for a future deployment credential; **no GitHub Environment is configured**,
   so that is a documented intention, not a control. GitHub Environment secrets
   would in any case satisfy only the injection half of this finding.
+- **Progress (Sprint 27, 2026-08-25 — IN PROGRESS): Open — unchanged.** Sprint
+  27 observed that the GHCR packages are *currently* publicly pullable, which
+  means a deployment host does not presently need a registry pull credential.
+  One fewer secret to hold is a good thing and it is **not** secrets management;
+  it closes nothing here, and it is an observed state rather than an approved
+  policy, so it could change. Everything
+  the finding requires is still absent: runtime secrets remain a 0600 file on a
+  host, with no secret store, no least-privilege access control, no read
+  auditing, no expiry tracking, and no automated rotation. The `staging-like`
+  GitHub Environment — documented as the intended home of a future deployment
+  credential — was re-observed on 2026-08-25 with `protection_rules: []` and
+  `deployment_branch_policy: null`, i.e. still **zero protection**. Sprint 27
+  did not configure it: required reviewers on a single-maintainer repository
+  would be the sole maintainer approving their own deployment, which is a log
+  entry rather than a control, and nothing in this repository mutates remote
+  configuration. Restricting that environment's deployment branches to `main`
+  *is* a real control and is recorded as a one-command operator action in
+  [../deployment.md](../deployment.md).
+- **Progress (Sprint 27, 2026-08-27 — real target): Open, unchanged.**
+  Runtime secrets on the durable target are a single 0600 file
+  (`/opt/orgistry/config/runtime.env`, owner-only), which the deployment's
+  permission gate verified and which was never read or printed by this
+  execution. The `staging-like` GitHub Environment now carries an active
+  deployment-branch policy (`protected_branches: true`) — a **deployment
+  boundary**, not secrets management. Public package visibility means the host
+  needs no registry credential, which removes a secret rather than managing one.
+  Still absent, and still required for closure: a secret store, least-privilege
+  access control, read auditing, expiry tracking, and automated rotation.
+  Reviewer separation on the environment is unavailable for a single maintainer
+  and is documented rather than simulated.
 
 <a id="org-pr-007"></a>
 ### ORG-PR-007 — No observability (metrics/tracing/dashboards/alerts)

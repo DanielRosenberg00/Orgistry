@@ -5,16 +5,32 @@ is built, how it is published, how a release is identified, how it reaches a
 target, how it is validated once it is there, and how it is rolled back.
 
 **Scope guard — read this before quoting anything below.** This document
-describes a deployment *mechanism* that is implemented, rehearsed, and
-**executed remotely**: both images are published to GitHub Container Registry
-for the merged Sprint 26 commit, authorised by the required checks for that
-exact SHA (see [Remote validation evidence](#remote-validation-evidence)).
-Orgistry nonetheless has **no staging environment and no production
-environment** — nothing here has ever been deployed to a real target, no host
-runs Orgistry, and the `staging-like` GitHub Environment carries no reviewer
-protection. Publishing and authorising an artifact is not deploying it. Finding
-status: `ORG-PR-001` remains **open, materially advanced** in the
-[findings register](production-readiness/findings-register.md).
+describes a deployment mechanism that is implemented, rehearsed, executed
+remotely, and — since 2026-08-27 — **validated against a real durable
+staging-like target**. Two gate-authorised releases were deployed to that target
+by immutable digest, a real application rollback was performed, and public HTTPS
+smoke passed 9/9 each time. `ORG-PR-001` is **CLOSED**
+([findings register](production-readiness/findings-register.md),
+[Sprint 27 evidence](#sprint-27-real-target-validation-evidence)).
+
+**A validated staging-like target is not staging readiness, and neither is
+production readiness.** The target holds **synthetic data only**, account email
+does not work on it, and it has no observability. Three P1 blockers remain open
+(ORG-PR-002, ORG-PR-005, ORG-PR-006).
+
+```
+Real staging-like target validated   YES
+ORG-PR-001                           CLOSED
+Sprint 27 DoD met                    YES
+Staging ready                        NO
+Production ready                     NO
+```
+
+**ORG-PR-001 closing is a finding closure, not an environment-readiness
+declaration.** Staging readiness remains NO on documented limitations (account
+email does not work on the target; no observability there), and production
+readiness remains NO on three open P1 findings. See
+[sprint-27-artifact-package.md](production-readiness/sprint-27-artifact-package.md).
 
 Related documents, each authoritative for its own boundary:
 
@@ -92,13 +108,13 @@ a successful deployment        !=  production readiness
 | | **local development** | **repository validation** | **production-like local validation** | **staging-like deployment target** | **production deployment target** |
 | --- | --- | --- | --- | --- | --- |
 | Purpose | Write and run code | Prove a change is correct | Prove the built artifacts boot and behave | Rehearse operating a real deployment | Serve real users |
-| Exists today | yes | yes | yes | **no** | **no** |
+| Exists today | yes | yes | yes | **yes** (since 2026-08-27) | **no** |
 | Defined by | `infra/docker-compose.yml` | `.github/workflows/*.yml` | `infra/compose.production-like.yml` | `infra/compose.deploy.yml` + `tooling/deploy.sh` | same as staging-like |
 | Operator | developer | CI | developer or CI | operator | operator |
 | Data classification | throwaway | throwaway | throwaway | synthetic only | real user data |
 | Real user data allowed | no | no | no | **no** | yes |
 | Secrets source | `.env` local defaults | fake checked-in/generated values | fake checked-in values | operator runtime env file (0600) or `<NAME>_FILE` mounts | same |
-| Email behavior | Mailpit sink | none delivered | Mailpit stand-in, delivery not exercised | real provider required, unvalidated (ORG-PR-002) | same |
+| Email behavior | Mailpit sink | none delivered | Mailpit stand-in, delivery not exercised | `smtp` driver pointed at an operator-run **isolated sink**; delivery not exercised, **no real provider** ([Staging mail model](#staging-mail-model)) | real provider required, still unvalidated (ORG-PR-002) |
 | Backup behavior | manual `pnpm db:backup` | drills only, throwaway data | none | pre-deployment backup preflight; nothing scheduled | scheduled + off-host storage required, **does not exist** (ORG-PR-005) |
 | Deployment trigger | `pnpm dev` | push / pull request | `pnpm artifact:smoke` | operator runs `tooling/deploy.sh` after the `Deploy` workflow verifies the release | same, plus required reviewers |
 | Required gates | none | the six required checks | artifact smoke | release gated by artifact smoke; deployment gated by migration verification and post-deploy smoke | same |
@@ -219,12 +235,52 @@ second container from the **same image** with a different
 `ORGISTRY_PUBLIC_API_BASE_URL` and asserts the served configuration follows
 while the built assets do not contain that origin.
 
-### Package visibility (operator action)
+### Package visibility — observed state
 
-Packages published to GHCR from a public repository are **private by default**
-until an owner changes the package's visibility, and a private package requires
-`docker login` on the deployment host. Neither state is configured yet; both are
-listed under [external configuration](#external-and-operator-only-configuration).
+Sprint 26 recorded these packages as private. **They are not**, and the
+correction matters to every host that will ever pull them.
+
+**Observed state (2026-08-25): the API and web GHCR packages are currently
+publicly pullable.** Verified by pulling both published digests with
+`DOCKER_CONFIG` pointed at a *fresh empty directory*, so no stored credential
+could have been used, and independently by `GET
+https://ghcr.io/v2/danielrosenberg00/orgistry-api/tags/list` returning `200`
+against an anonymously issued registry token. The likely cause is GitHub's own
+default: a package published with `GITHUB_TOKEN` and linked to a repository
+inherits **that repository's** visibility, and Orgistry is public. Sprint 26
+generalised from the rule for user- and organisation-scoped packages, which is
+different.
+
+**No approved visibility policy is on record.** This is an *observation of the
+current state*, not a decision anyone made deliberately and not a decision made
+here. Package visibility remains the operator decision it always was, and it is
+listed under [external configuration](#external-and-operator-only-configuration)
+for that reason. Nothing in this repository changed it, and nothing should
+change it without recording the decision.
+
+**Operational implication.** A staging host does **not currently** require a
+GHCR pull credential. That removes the target's only registry secret rather
+than adding one to provision, store at 0600, rotate, and leak.
+
+**Security implication.** Because the packages are currently public, the images
+must contain nothing secret — which is already an enforced property rather than
+a hope: `tooling/artifact-smoke.sh` asserts no `.env`, no source, no git
+metadata, and no secret-shaped value in the image or the served web assets, and
+neither Dockerfile accepts a secret build argument. What is disclosed is
+dependency versions and file layout, which the public source tree already
+discloses. Digest references are unaffected: visibility changes who may pull,
+never what a digest resolves to.
+
+**Policy implication.** Public package visibility must stay explicitly visible
+in this document and in the
+[security assessment](production-readiness/security-assessment.md), and it must
+**not** be mistaken for a secrets-management capability. Needing no credential
+is not the same as managing credentials well; ORG-PR-006 is unaffected.
+
+**If an operator decides to make the packages private**, that is a legitimate
+choice with a cost: every deployment host then needs a long-lived read-only pull
+credential, and `ORGISTRY_*`-style credential handling on the host grows a new
+secret. Record the decision either way.
 
 ## Release manifest
 
@@ -451,12 +507,12 @@ It is **not** duplicated here. What a deployment adds on top:
 | `DATABASE_URL` | **secret**, required | Also read by the deployment itself for the backup preflight and migration-head verification. `DATABASE_URL_FILE` works identically |
 | `REDIS_URL` | secret if credentialed, required in practice | Must name the operator-provided instance, not localhost |
 | `JWT_SECRET` / `JWT_PREVIOUS_SECRET` | **secret** | Rotation window semantics unchanged ([rotation-runbook.md](rotation-runbook.md)) |
-| `SMTP_*`, `MAIL_*` | mixed; `SMTP_PASSWORD` secret | A real provider is required and remains unvalidated (ORG-PR-002) |
+| `SMTP_*`, `MAIL_*` | mixed; `SMTP_PASSWORD` secret | The guard constrains the *driver*, *credential*, and *sender domain* — **not the endpoint's identity**. A staging-like target points `smtp` at an operator-run isolated sink; **a real provider is required only for production**, and remains unvalidated (ORG-PR-002). See [Staging mail model](#staging-mail-model) |
 | `COOKIE_SECURE`, `TRUST_PROXY`, `CORS_ORIGINS`, `WEB_DEMO_URL`, `HSTS_MAX_AGE_SECONDS` | non-secret, environment-scoped | Set `TRUST_PROXY` to the real hop count/CIDRs behind the operator's proxy |
 | `RATE_LIMIT_FAILURE_MODE`, `LOG_LEVEL`, `RETENTION_*` | non-secret, optional | Leave `RATE_LIMIT_FAILURE_MODE` unset in production (derives to `closed`) |
 | API and web image digests | **deployment-generated** | From the release manifest only |
 | `ORGISTRY_PUBLIC_API_BASE_URL` | **public browser configuration**, required | The API origin the browser will call. Applied to the web container at start; recorded in deployment evidence; verified by smoke |
-| `ORGISTRY_PUBLIC_CSRF_HEADER_NAME`, `ORGISTRY_PUBLIC_MAILPIT_URL` | public browser configuration, optional | Defaults match the application's own; the CSRF name must match the API's `AUTH_CSRF_HEADER_NAME` |
+| `ORGISTRY_PUBLIC_CSRF_HEADER_NAME`, `ORGISTRY_PUBLIC_MAILPIT_URL` | public browser configuration, optional | Defaults match the application's own; the CSRF name must match the API's `AUTH_CSRF_HEADER_NAME`. **`ORGISTRY_PUBLIC_MAILPIT_URL` is a link handed to the *visitor's browser*, not a server-side address** — see [The public Mailpit URL is not a remote inbox](#the-public-mailpit-url-is-not-a-remote-inbox) |
 | `ORGISTRY_ENVIRONMENT_CLASS` | non-secret, operator-provided | `deployment` (default) accepts only a deployable published release; `rehearsal` is the explicit opt-in used by the local rehearsal |
 | `ORGISTRY_*` in `deploy.env` | non-secret, operator-provided | Documented inline in `infra/deploy.env.example` |
 
@@ -525,6 +581,204 @@ Permissions are read-only throughout: `contents: read`, `actions: read`,
 `packages: read`. Concurrency is keyed per environment, so two deployments
 cannot interleave and leave the ledger ambiguous about what is running.
 
+### `tooling/deploy-target-preflight.sh` — qualify the host (runs on the host, first)
+
+New in Sprint 27. Run it **before** the first deployment to a host, and again
+after any change to that host:
+
+```sh
+pnpm deploy:preflight -- --config /etc/orgistry/deploy.env \
+                        --manifest release-manifest.json --json
+```
+
+Every argument is optional, which is deliberate: a host being *evaluated* has
+no configuration and no chosen release yet, and the host-level checks are the
+ones that decide whether it is a candidate at all.
+
+| Group | Checks |
+| --- | --- |
+| Toolchain | `docker`, `docker compose` v2, `node`, `curl`, and a complete Orgistry checkout — the deployment executes *from* a checkout, which is easy to forget when provisioning a bare host |
+| Host baseline | Docker daemon reachable and its platform; Docker/Compose versions; CPU, memory, storage driver; kernel; **whether the Docker service starts at boot**, which is what makes a target durable rather than merely running |
+| Release | the manifest validates; both images actually pull *from this host*; **both image platforms match this host** |
+| Configuration | `ORGISTRY_ENVIRONMENT_CLASS=deployment` (a durable target must never accept a rehearsal release); the runtime env file exists and is owner-readable only; API/web ports bind to loopback; the browser-facing API origin is HTTPS; evidence and backup directories are writable and not world-writable |
+
+It collects every problem instead of stopping at the first — an operator
+qualifying a host wants the whole list — and exits non-zero if any check
+FAILED. `--json` prints the sanitized baseline for pasting into deployment
+records. It reads paths, modes, versions, and counts; it stats the runtime
+configuration file but never reads it, so it can never be the thing that prints
+a secret.
+
+**Read-only contract.** The preflight is read-only with respect to
+application, database, host, and remote state. It may inspect versions, file
+modes, and directory writability; pull and inspect immutable digest-pinned
+images; compare architectures; and structurally validate non-secret
+configuration. It must never run a migration, touch the application database,
+start or reconfigure the deployment, change firewall or host configuration,
+persist a secret, or mutate GitHub settings or package visibility. A check that
+needs any of those belongs in `tooling/deploy.sh`.
+
+**It is not a deployment.** It starts no Orgistry container, runs no migration,
+and writes nothing to the evidence ledger. A passing preflight means "the
+checks this script can make are satisfied", never "a deployment succeeded".
+
+### Staging mail model
+
+**A staging-like target does not need, and must not use, a production email
+provider.** Establishing this precisely matters, because the deployment
+requires `NODE_ENV=production` — which activates every production config guard
+— and it would be easy to read that as "production email required". It is not.
+
+#### What the production guard actually constrains
+
+Verified against `packages/config/src/production-policy.ts` and
+`mail-policy.ts` by loading real configurations, not by reading prose:
+
+| Constraint | Under `NODE_ENV=production` |
+| --- | --- |
+| `MAIL_DRIVER` | must be `smtp`. `mailpit` and `memory` are refused — production must never *silently swallow* account email |
+| `SMTP_HOST` / `SMTP_USERNAME` / `SMTP_PASSWORD` | must be present; `SMTP_PASSWORD` must not be a placeholder or known development default |
+| `MAIL_FROM_EMAIL` | must not be the shipped default, and must not sit on a reserved non-routable suffix (`.invalid`, `.test`, `.example`, `.localhost`, `@example.com`, …) |
+| `WEB_DEMO_URL` | must not be plain-HTTP or localhost — emailed links embed it |
+| **The endpoint's identity** | **not constrained.** Nothing requires a known provider, a public hostname, or a reachable server |
+
+#### What that means operationally
+
+```
+SMTP is not a boot dependency  — the transport is created lazily; nothing connects at startup
+SMTP is not a readiness probe  — /ready probes PostgreSQL and Redis only
+Sprint 27 smoke sends no mail  — all nine checks are unauthenticated
+```
+
+Directly observed: the packaged API booted under `NODE_ENV=production` with an
+unreachable `SMTP_HOST`, reached `/ready` 200, and passed 9/9 post-deployment
+smoke.
+
+#### The supported staging configuration
+
+Point the `smtp` driver at an **operator-run, isolated sink reachable only from
+the deployment network**:
+
+```
+MAIL_DRIVER=smtp
+SMTP_HOST=<sink reachable only on the deployment network>
+SMTP_PORT=465
+SMTP_USERNAME=<any non-placeholder value>
+SMTP_PASSWORD=<any non-placeholder value>
+MAIL_FROM_EMAIL=no-reply@<a domain the operator controls, not a reserved suffix>
+```
+
+Two sub-cases, both acceptable, and the difference is worth knowing before the
+first deployment:
+
+- **The sink presents a publicly-trusted certificate on an SMTPS port.**
+  Account email delivers into the sink; nothing leaves the host. The `smtp`
+  driver uses implicit TLS with certificate and hostname verification always
+  on, and there is no environment seam for a private CA — so a self-signed
+  sink does **not** qualify here.
+- **The sink is plaintext, self-signed, or absent.** The deployment still
+  boots, stays ready, and passes smoke; account-email *sends* fail closed and
+  are surfaced as errors. That is the correct architectural behaviour — mail
+  failures must never silently disappear in production mode — and it is
+  acceptable for a Sprint 27 target whose validation never exercises a mail
+  flow.
+
+Choose the second only knowingly: registration and invitation flows will error
+on that target until a working sink exists.
+
+#### The public Mailpit URL is not a remote inbox
+
+`ORGISTRY_PUBLIC_MAILPIT_URL` defaults to `http://localhost:8025`, and that
+default is served to every browser in `/public-config.js`. On the validated
+staging-like target the served value is exactly that:
+
+```
+window.__ORGISTRY_PUBLIC_CONFIG__ = {…,"mailpitUrl":"http://localhost:8025"}
+```
+
+**Read that precisely.** `localhost` is resolved by the *visitor's browser*, not
+by the server. The staging host binds the Mailpit UI to its own loopback
+(`127.0.0.1:8025`) and publishes nothing — externally probed and confirmed
+closed. So a person browsing `https://staging.drsvp.com` who follows that link
+reaches **their own machine's** port 8025, which is almost certainly nothing.
+
+Consequences:
+
+- **It is not a remotely usable inbox endpoint**, and no document should imply
+  it is. It is a convenience that only works for a developer running Mailpit
+  locally, which is the environment its default was written for.
+- **It is not a leak.** The value is a loopback literal; it discloses nothing
+  about the host, and the deployment evidence records it as public
+  configuration by design.
+- **It is not a deployment defect and not an ORG-PR-001 blocker.** Nothing in
+  the deployment, smoke, or readiness path depends on it.
+- To inspect the staging sink, an operator uses an SSH tunnel to the host's
+  loopback port — deliberately, since exposing Mailpit publicly would put
+  captured message bodies (which carry raw verification tokens) on the internet.
+
+This is a **staging/demo limitation only**, recorded so nobody mistakes the
+served value for a working staging inbox link.
+
+#### Why this is not ORG-PR-002 evidence
+
+Nothing above proves an endpoint exists, accepts a credential, or delivers
+anything to a recipient. **ORG-PR-002 remains open** and requires an actual
+external provider, verified sender-domain authentication (SPF/DKIM/DMARC), and
+observed inbox receipt — none of which is in Sprint 27's scope, and none of
+which is a prerequisite for closing ORG-PR-001.
+
+**Never point a staging-like target at a real provider.** It has synthetic data
+and no delivery guarantees; sending real mail from it risks reputation damage
+to a sender domain that production will later depend on.
+
+### Host baseline and target preflight
+
+The properties a staging-like target must have, and where each is enforced:
+
+| Requirement | Enforced by |
+| --- | --- |
+| Durable — not a CI runner, survives a host reboot | preflight (Docker enabled at boot) + `restart: unless-stopped` in the compose topology |
+| Outbound access to GHCR | preflight (both digests actually pull) |
+| **CPU architecture matching the published images** | preflight, and again as stage 5 of every deployment |
+| Persistent PostgreSQL and a Redis, operator-provided | the runtime configuration contract; neither is in the deployment topology |
+| Runtime secrets in a file readable only by its owner | preflight, and `deploy.sh` stage 3 |
+| Internal ports not published to the network | preflight (loopback binds) + the compose defaults |
+| Synthetic data only | policy, restated by the preflight's own output |
+
+#### The architecture constraint is real, and it is now a gate
+
+`.github/workflows/release.yml` builds on a GitHub-hosted runner and pushes a
+**single-architecture `linux/amd64` manifest** — not a manifest list. A pull is
+architecture-agnostic, so an arm64 host pulls those images perfectly and only
+fails when a container starts, with `exec format error`.
+
+Before Sprint 27 that surfaced four stages later as *"the API container did not
+become healthy"* — **after** the backup preflight and the migration had already
+run against the target's database. The message sent the operator to debug the
+application; the fault was the host.
+
+Stage 5 now compares each image's platform against the Docker daemon's, and
+refuses the deployment before anything touches the database. Both sides are
+normalised first (`docker info` reports `aarch64`/`x86_64`; an image reports
+`arm64`/`amd64`), because a gate that fails closed on correct input is worse
+than no gate — operators disable those.
+
+This was found by pulling the real published release onto an arm64 host. No
+rehearsal could have found it: `pnpm deploy:rehearsal` builds its images
+locally, so they are always native and can never mismatch.
+
+**Emulation is an explicit, recorded opt-in.** `ORGISTRY_ALLOW_IMAGE_ARCHITECTURE_MISMATCH=yes`
+(that exact value; `true` and `1` are refused) downgrades the refusal to a
+warning and writes a limitation onto the deployment record stating that the
+deployment runs under CPU emulation and that its runtime behaviour and
+performance are unproven. Use it for a local experiment, never for a target
+anyone depends on.
+
+**When provisioning a real target, choose an x86-64 host.** The alternative —
+publishing multi-architecture images with `docker buildx build --platform` —
+changes the release workflow's build and digest model and belongs to a sprint
+that owns that decision, not to this one.
+
 ### `tooling/deploy.sh` — execute on the target (runs on the host)
 
 ```sh
@@ -539,15 +793,16 @@ Stages, in order, each failing the deployment loudly and naming itself:
 | 2 | Validate the release manifest | the manifest is malformed, or an image reference is not digest-pinned |
 | 3 | Pre-deployment validation | the compose topology declares a build section; the release is not deployable and the environment is not a rehearsal; the runtime env file is missing, unreadable, not 0600, missing a required key, or not `NODE_ENV=production` |
 | 4 | Pull both images by digest | a digest is not available from the registry this host can reach |
-| 5 | Backup / recovery-point preflight | the pre-deployment backup fails, or a skip has no recorded reason |
-| 6 | Migrations, exactly once | the migration container exits non-zero |
-| 7 | Verify the applied migration head | the database's applied migrations do not match the release's declared head |
-| 8 | Deploy the API, wait for health | the API container never becomes healthy |
-| 9 | Deploy the web artifact | the web container does not start |
-| 10 | Wait for readiness | `/ready` does not return 200 |
-| 11 | Verify the running container digests | a running container is not the released image |
-| 12 | Post-deployment smoke | any smoke check fails |
-| 13 | Record deployment evidence | — (evidence is written for failures too, from stage 6 onward) |
+| 5 | Verify the images can run on this host | an image's platform is not the Docker host's platform, and emulation was not explicitly opted into (Sprint 27; see [Host baseline and target preflight](#host-baseline-and-target-preflight)) |
+| 6 | Backup / recovery-point preflight | the pre-deployment backup fails, or a skip has no recorded reason |
+| 7 | Migrations, exactly once | the migration container exits non-zero |
+| 8 | Verify the applied migration head | the database's applied migrations do not match the release's declared head |
+| 9 | Deploy the API, wait for health | the API container never becomes healthy |
+| 10 | Deploy the web artifact | the web container does not start |
+| 11 | Wait for readiness | `/ready` does not return 200 |
+| 12 | Verify the running container digests | a running container is not the released image |
+| 13 | Post-deployment smoke | any smoke check fails |
+| 14 | Record deployment evidence | — (evidence is written for failures too, from stage 7 onward) |
 
 There is no `--skip-smoke`. A deployment that cannot be validated is not a
 deployment that happened successfully.
@@ -561,6 +816,171 @@ non-deployable manifest unless the environment declares
 `ORGISTRY_ENVIRONMENT_CLASS=rehearsal`, which is how a local rehearsal can
 deploy its own output to a throwaway target without that path ever being
 available to a real environment.
+
+## Operator runbook: first deployment to a new target
+
+Every command below is one this repository actually implements. Nothing here is
+hypothetical. Run them **on the target host**, from an Orgistry checkout.
+
+### 0. Prerequisites
+
+| | |
+| --- | --- |
+| Host | Durable (not a CI runner), **x86-64** — see [the architecture constraint](#the-architecture-constraint-is-real-and-it-is-now-a-gate) — with outbound HTTPS to `ghcr.io` |
+| Required on the host | `bash`, **Docker Engine**, **Docker Compose v2**, **`curl`**, **`node`**, and standard coreutils. Nothing else — see [Host tool requirements](#host-tool-requirements) for exactly why each is needed and what is *not* required |
+| Access | Non-shared administrative account; SSH restricted to keys; the deploying user in the `docker` group (equivalent to root on the host — treat it as such) |
+| Backing services | PostgreSQL with persistent storage and a Redis, operator-provided. Neither is in the deployment topology; both must be reachable from `ORGISTRY_DEPLOY_NETWORK` or as external services |
+| Mail | A **staging-safe** mail configuration — see [Staging mail model](#staging-mail-model). **No production email provider is required**, and none should be used |
+| Registry credential | **None currently required** — the packages are currently publicly pullable. Confirm with `pnpm deploy:preflight`, which pulls both digests from the host. See [Package visibility](#package-visibility--observed-state) |
+| Data | **Synthetic only.** A staging-like target must never hold real user data |
+
+#### Host tool requirements
+
+Determined by reading what the host-side scripts actually invoke, not by
+copying a workstation's toolchain.
+
+| Tool | Required? | Why |
+| --- | --- | --- |
+| `bash` | **yes** | Every deployment script is bash |
+| Docker Engine | **yes** | Runs the deployment, and the PostgreSQL client tools for the backup preflight run in a *pinned container* — so no `pg_dump`/`psql` is needed on the host |
+| Docker Compose v2 | **yes** | `infra/compose.deploy.yml` is applied with `docker compose` |
+| `curl` | **yes** | Health, readiness, and post-deployment smoke are probed over HTTP |
+| `node` | **yes** | `tooling/release-manifest.mjs` and `tooling/deploy-evidence.mjs` are Node programs that run **on the host**: the manifest is validated there and the evidence ledger is written there |
+| coreutils (`awk`, `grep`, `sed`, `stat`, `df`, `id`, `date`, `tr`, `tail`, `basename`) | **yes** | Present on any Linux host; listed for completeness |
+| `git` | **no** | No host-side script invokes it. Getting the repository files onto the host is a delivery choice — clone, tarball, or `rsync` all work |
+| `pnpm` | **no** | The `pnpm deploy:*` scripts are thin wrappers; `bash tooling/deploy.sh …` runs identically. Convenient if present, never required |
+| `systemctl` | optional | Only the preflight's boot-persistence check uses it, and it warns rather than fails when absent |
+| `sha256sum` | optional | The backup tooling falls back to `shasum` |
+
+`pnpm deploy:preflight` verifies the required set on the candidate host before
+anything is deployed.
+
+### 1. Configure the host
+
+```sh
+git clone https://github.com/DanielRosenberg00/Orgistry.git /opt/orgistry
+sudo install -d -m 0750 -o "$(id -un)" /etc/orgistry
+sudo install -d -m 0750 -o "$(id -un)" /var/lib/orgistry/deployments /var/lib/orgistry/backups
+
+# HOW to deploy — no secrets, safe to keep in your own infrastructure repo.
+cp /opt/orgistry/infra/deploy.env.example /etc/orgistry/deploy.env
+$EDITOR /etc/orgistry/deploy.env
+
+# WHAT the application runs with — every runtime secret. Never committed.
+umask 077 && $EDITOR /etc/orgistry/runtime.env && chmod 600 /etc/orgistry/runtime.env
+```
+
+The runtime configuration contract — every variable and its production rules —
+is [above](#deployment-configuration-contract). `NODE_ENV=production` is
+mandatory: it is what activates the API's own config guard, which refuses
+development secrets, non-deliverable sender domains, and insecure cookies.
+
+### 2. Select a release
+
+Run the `Deploy` workflow (manual dispatch: environment + the `Release` run ID).
+It validates the manifest, refuses a release that is not gate-authorised,
+proves both digests still resolve, and prints the plan. Then bring that run's
+`release-manifest` artifact onto the host:
+
+```sh
+gh run download <RELEASE_RUN_ID> --repo DanielRosenberg00/Orgistry \
+   --name release-manifest --dir /etc/orgistry
+```
+
+### 3. Qualify the host — before deploying anything
+
+```sh
+pnpm deploy:preflight -- --config /etc/orgistry/deploy.env \
+                        --manifest /etc/orgistry/release-manifest.json --json
+```
+
+Resolve every `FAIL` before continuing. Keep the `--json` baseline: it is the
+sanitized host record for your deployment documentation.
+
+### 4. Deploy
+
+```sh
+pnpm deploy:run -- --manifest /etc/orgistry/release-manifest.json \
+                  --config /etc/orgistry/deploy.env
+```
+
+Fourteen stages, each naming itself on failure. `DEPLOY OK` prints the commit,
+both digests, the migration result and verified head, the backup and its
+recovery point, the smoke result, the evidence path, and the rollback target.
+
+### 5. Read the evidence
+
+```sh
+pnpm deploy:evidence -- current --dir /var/lib/orgistry/deployments \
+                                --environment staging-like
+```
+
+Check three things: `smoke.result` is `passed`; `runtime` digests equal the
+manifest's; and `limitations` is what you expect. A record with an
+`under CPU emulation` limitation is not a validated deployment of a supported
+configuration.
+
+### 6. Deploy a second release, then prove rollback works
+
+Do this **before** you need it. Repeat steps 2–4 with a newer release, then:
+
+```sh
+pnpm deploy:rollback -- --config /etc/orgistry/deploy.env --dry-run   # inspect
+pnpm deploy:rollback -- --config /etc/orgistry/deploy.env             # execute
+```
+
+Rollback resolves the previous smoke-passing release from this host's own
+ledger, redeploys those digests with `--no-migrate`, and re-runs smoke. **It
+does not reverse migrations** — see [Rollback model](#rollback-model). If a
+migration since the target release removed or rewrote something the older code
+reads, rollback will not fix the incident; recovery is a restore or a PITR
+([backup-and-restore.md](backup-and-restore.md), [pitr.md](pitr.md)).
+
+### Common failure modes
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| Stage 5 refuses: image is `linux/amd64`, host is `linux/arm64` | The host's CPU architecture is not the published images' | Move to an x86-64 host. Do **not** reach for the emulation opt-in on a target anyone depends on |
+| Stage 3 refuses the runtime env file's mode | It is group- or world-readable | `chmod 600` it. It holds every runtime secret |
+| Stage 3 refuses a non-deployable release | The manifest is a rehearsal, or its gates did not pass for its own commit | Deploy a release the `Release` workflow published from `main` |
+| Stage 4 cannot pull a digest | No outbound HTTPS to `ghcr.io`, or the digest was deleted | Check egress first — no credential is involved |
+| Stage 9: "the API container did not become healthy" | Almost always the production config guard rejecting runtime configuration | `docker logs <project>-api-1` — the guard names the offending variable and why |
+| Stage 8: applied head ≠ manifest head | The database is not the one this release expects | Stop. Do not force. Confirm `DATABASE_URL` names the right database |
+| Smoke fails on the browser API origin | `ORGISTRY_PUBLIC_API_BASE_URL` is not what the browser should use | Fix the deployment configuration and redeploy; never rebuild the web image for an environment |
+
+### Emergency stop
+
+```sh
+project="$(grep '^ORGISTRY_COMPOSE_PROJECT=' /etc/orgistry/deploy.env | cut -d= -f2)"
+docker stop $(docker ps --quiet --filter "label=com.docker.compose.project=${project}")
+```
+
+The containers are addressed by their Compose project **label**, deliberately.
+`infra/compose.deploy.yml` declares its image references as
+`${ORGISTRY_API_IMAGE:?…}`, so a plain `docker compose … stop` against that file
+fails interpolation unless a release manifest has already been exported into the
+environment — which is not something to discover during an incident.
+
+This stops the API and web containers and nothing else: no database, no volume,
+no evidence. The ledger still describes what *was* running, which is exactly
+what a rollback needs. Prefer `pnpm deploy:rollback` when a known-good release
+exists; stop only when no release is safe to serve.
+
+### Decommissioning a staging-like target
+
+```sh
+project="$(grep '^ORGISTRY_COMPOSE_PROJECT=' /etc/orgistry/deploy.env | cut -d= -f2)"
+docker rm --force $(docker ps --all --quiet --filter "label=com.docker.compose.project=${project}")
+docker network rm "$(grep '^ORGISTRY_DEPLOY_NETWORK=' /etc/orgistry/deploy.env | cut -d= -f2)"
+shred -u /etc/orgistry/runtime.env      # every runtime secret lives here
+```
+
+Then rotate anything that file held ([rotation-runbook.md](rotation-runbook.md)):
+decommissioning a host does not un-disclose a secret it stored. Keep
+`/var/lib/orgistry/deployments` if you want the deployment history; it contains
+no secrets. Backups in `/var/lib/orgistry/backups` **do** contain user data and
+password/API-key hashes — destroy or move them deliberately
+([backup-and-restore.md](backup-and-restore.md#7-backup-security)).
 
 ## Migration lifecycle
 
@@ -859,17 +1279,37 @@ any of it as done until the verification command confirms it.
 | # | Action | Status | Verify |
 | --- | --- | --- | --- |
 | 1 | Run the `Release` workflow so the two GHCR packages exist | **DONE** — run `32776576782` published both images for `91664d0` | `gh run list --workflow=release.yml` |
-| 2 | Decide and set each package's visibility (private is the default) | **OPEN** — both packages remain private, which is the safe default | the package's settings page |
-| 3 | If packages stay private, give the deployment host a read-only pull credential | **OPEN** — no host exists yet | `docker pull ghcr.io/danielrosenberg00/orgistry-api@sha256:…` on the host |
-| 4 | Add required reviewers to the `staging-like` GitHub Environment | **OPEN** — the environment now exists (auto-created by the first `Deploy` run) but has **zero protection rules** | `gh api /repos/DanielRosenberg00/Orgistry/environments` |
-| 5 | Restrict that environment's deployment branches to `main` | **OPEN** | same call |
+| 2 | Decide and record each package's visibility | **OPEN — but the observed state is corrected.** Both packages are *currently* publicly pullable, verified 2026-08-25 by an unauthenticated digest pull; Sprint 26's "both remain private" entry was factually wrong. No visibility policy has been approved or recorded, and nothing in this repository changed it. See [Package visibility](#package-visibility--observed-state) | `docker pull` with `DOCKER_CONFIG` set to an empty directory |
+| 3 | Give the deployment host a read-only pull credential | **NOT REQUIRED WHILE THE PACKAGES ARE PUBLIC** — this removes the host's only registry secret. Becomes required again if an operator makes them private | as above |
+| 4 | Add required reviewers to the `staging-like` GitHub Environment | **OPEN — impractical for this repository.** The environment exists with **zero protection rules** (observed 2026-08-25: `protection_rules: []`, `deployment_branch_policy: null`). Required reviewers on a single-maintainer repository would mean the sole maintainer approving their own deployment, which is a log entry, not a control. Recorded as a limitation rather than simulated | `gh api /repos/DanielRosenberg00/Orgistry/environments` |
+| 5 | Restrict that environment's deployment branches to `main` | **OPEN — worth doing, and unlike (4) it is a real control.** It stops a `Deploy` dispatch from an arbitrary branch reaching environment secrets. One operator command: `gh api -X PUT /repos/DanielRosenberg00/Orgistry/environments/staging-like -f 'deployment_branch_policy[protected_branches]=true' -f 'deployment_branch_policy[custom_branch_policies]=false'`. Not applied by Sprint 27: nothing in this repository mutates remote configuration | same call |
 | 6 | Decide whether `Deployment rehearsal` should be a required check (see below) | **OPEN** — deliberately not required | `gh api /repos/DanielRosenberg00/Orgistry/rulesets/19769611` |
 
-Both packages are private by default and were verified by authenticated
-registry inspection; nothing was made public to validate them. Until (4)
-happens, `environment: staging-like` provides no protection beyond the workflow
-being manual-dispatch-only — GitHub created the environment implicitly on the
-first `Deploy` run, with zero protection rules, exactly as this table predicted.
+### GitHub Environment protection — status
+
+```
+Environment exists:                              YES  (staging-like)
+Environment protection rules validated/configured: NO
+Operator action required:                        YES
+```
+
+Observed 2026-08-25 via `gh api /repos/DanielRosenberg00/Orgistry/environments`:
+`protection_rules: []`, `deployment_branch_policy: null`. **This requirement is
+not complete and must not be reported as complete.** Nothing in this repository
+mutates remote configuration, and no repository settings were changed — doing so
+is an external side effect that needs explicit operator authorisation.
+
+The single-maintainer limitation is real and stays documented: required
+reviewers here would mean the sole maintainer approving their own deployment,
+which produces a log entry rather than a control. The deployment-branch
+restriction in (5) is a genuine control and is the action worth taking.
+
+Until (4) and (5) happen, `environment: staging-like` provides no protection
+beyond the workflow being manual-dispatch-only — GitHub created the environment
+implicitly on the first `Deploy` run, with zero protection rules, and Sprint 27
+re-observed it in exactly that state. The environment scoping is still worth
+having: it is where a deployment secret would live, and it is the boundary an
+untrusted pull request cannot cross.
 
 ## Branch protection
 
@@ -903,22 +1343,40 @@ check.
 Deployment-specific. The project-wide list is
 [known-limitations.md](known-limitations.md).
 
-- **No deployment target exists.** No staging host, no production host, no
-  provider account, no deployment credential. Everything below follows from
-  that.
+- ~~**No deployment target exists.**~~ **RESOLVED 2026-08-27.** A durable
+  staging-like target exists and has been validated
+  ([evidence](#sprint-27-real-target-validation-evidence)). **No production
+  target exists**, and the staging-like target holds synthetic data only.
+- **Account email does not work on the staging-like target.** `MAIL_DRIVER=smtp`
+  points at a plaintext Mailpit sink while the driver requires implicit TLS with
+  verification always on, so sends fail closed. That is the correct
+  architectural behaviour, it was not exercised by Sprint 27 (all smoke is
+  unauthenticated), and it means registration, verification, and invitation
+  flows will error on that target. Fixing it means giving the sink a
+  publicly-trusted certificate on an SMTPS port — not adding a provider
+  (ORG-PR-002).
 - **Published images are single-architecture `linux/amd64`.** They are built on
   GitHub's amd64 runners and no multi-arch manifest list is produced, so an
-  arm64 host cannot run them without emulation. This is adequate for the
-  single-host x86-64 target this model assumes, and it is a real constraint on
-  which host may be provisioned. Surfaced by inspecting the first real release.
-- **Rollback is validated only in the rehearsal**, between two releases that
-  differ by an image label, on one machine, with a throwaway database. Rollback
-  in a long-lived environment with real traffic is untested.
+  arm64 host cannot run them without emulation. Since Sprint 27 this is
+  **enforced** rather than merely documented: the target preflight and stage 5
+  of every deployment refuse a platform mismatch before anything touches the
+  database, and emulation is an explicit opt-in recorded on the deployment
+  evidence. The constraint itself remains — a target must be x86-64, or the
+  release workflow must start publishing multi-architecture images.
+- **Rollback has now run on a durable target** (2026-08-27): two real,
+  gate-authorised, GHCR-published releases, rolled back by digest, with public
+  HTTPS smoke and running-digest verification. **Rollback under real user
+  traffic remains untested** — the target has synthetic data and no users.
 - **The `Deploy` workflow verifies; it does not deploy.** It resolves and
-  authorises a release and emits the operator plan. No target execution has
-  occurred anywhere.
-- **No GitHub Environment is configured**, so environment-scoped protection and
-  required reviewers are documented rather than enforced.
+  authorises a release and emits the operator plan; the operator executes
+  `tooling/deploy.sh` on the host. This is deliberate, and it is the model that
+  was exercised for real on 2026-08-27 (run `33061763360`). **No inbound
+  exposure was created to let CI reach the target**, and none should be.
+- **The `staging-like` GitHub Environment now carries an active
+  deployment-branch policy** (`protected_branches: true`), applied by the
+  operator. **Required reviewers remain unconfigured** and are impractical on a
+  single-maintainer repository — a documented limitation, not a simulated
+  control.
 - **The `main` ruleset is the source of the required-check list**, and the
   release gate mirrors it in `REQUIRED_GATES`. If a maintainer changes the
   ruleset without updating that list, the release gate would authorise against
@@ -941,15 +1399,39 @@ Deployment-specific. The project-wide list is
 - **No artifact signing and no provenance attestation** (deliberately out of
   Sprint 26 scope; tracked under ORG-PR-001's successor work).
 
-### Remaining staging blockers
+<a id="remaining-staging-blockers"></a>
+### Staging blockers — resolved 2026-08-27
 
-1. A host or provider account that can run the compose topology.
+All six blockers recorded through Sprint 26 are now satisfied: a durable
+`linux/amd64` host, operator-provided PostgreSQL and Redis, a registry that
+needs no credential, staging-safe mail configuration, TLS with real public
+origins, and a GitHub Environment with an active deployment-branch policy. The
+original list is kept below for continuity.
+
+**Staging readiness is still NO** for reasons outside that list: account email
+does not work on the target, and there is no observability there.
+
+### Original staging blocker list (for continuity)
+
+1. A host or provider account that can run the compose topology. **Host
+   procurement constraint: select an x86-64 / amd64 target**, since the
+   published images are single-architecture `linux/amd64` unless a future
+   authorised sprint changes the publication architecture (see
+   [the architecture constraint](#the-architecture-constraint-is-real-and-it-is-now-a-gate)).
 2. A managed or operated PostgreSQL and Redis for it.
-3. A pull credential for the host, or public package visibility — the two
-   packages now exist and are private (external action 2/3 above).
-4. A real SMTP provider — the production config guard refuses to boot without
-   one, and delivery through a real provider has still never been validated
-   (ORG-PR-002).
+3. ~~A pull credential for the host, or public package visibility.~~
+   **NOT CURRENTLY BLOCKING.** Both packages are *currently* publicly pullable
+   from any host with outbound HTTPS, proven by an unauthenticated digest pull
+   on 2026-08-25, so the deployment host needs no registry credential. This is
+   an observed state, not an approved policy: if an operator makes the packages
+   private, this blocker returns.
+4. ~~A real SMTP provider.~~ **NOT A STAGING BLOCKER.** The production config
+   guard constrains the mail *driver*, *credential*, and *sender domain* — not
+   the endpoint's identity — so a staging-like target runs with
+   `MAIL_DRIVER=smtp` pointed at an operator-run, isolated sink. See
+   [Staging mail model](#staging-mail-model). Delivery through a real provider
+   has still never been validated, and **ORG-PR-002 remains open** — it is
+   simply not a prerequisite for deploying to a staging-like target.
 5. TLS termination and a public origin, so `COOKIE_SECURE=true`,
    `WEB_DEMO_URL`, and `CORS_ORIGINS` describe something real.
 6. A GitHub Environment with the deployment protections above.
@@ -970,6 +1452,11 @@ it so.**
   `deploy_stage`, fail with `deploy_die` naming what could not be satisfied, and
   decide explicitly whether a failure there should write a deployment record
   (it should, if the target was already touched).
+- **Adding a host requirement:** put the check in
+  `tooling/deploy-target-preflight.sh` if it qualifies a host, and in
+  `tooling/deploy.sh` as well only if a deployment must refuse when it is unmet.
+  The platform gate is in both for exactly that reason: the preflight tells an
+  operator a host is unsuitable, and the deployment refuses to proceed on one.
 - **Adding a smoke check:** put it in `tooling/deploy-smoke.sh` only if it needs
   nothing but the URLs. Anything needing the database, a credential, or
   configuration belongs in `tooling/deploy.sh`.
@@ -1022,11 +1509,167 @@ from the same push as CI, Security scans, and CodeQL. Its gate job logged
 roughly three minutes, and proceeded only once all six reported `success`. No
 gate was ever treated as satisfied because its run had not appeared yet.
 
+**A second release followed on the same day.** The Sprint 26 final-artifact
+merge `d51c76b5ee6b0d6183b76ac4b8efacdee94ae704` produced `Release` run
+`32779601026`, publishing `orgistry-api@sha256:7afc079b3844…` and
+`orgistry-web@sha256:b0d5dd000ab2…`. It declares the same migration head as
+`91664d0`, which is what made the Sprint 27 rollback test possible without
+manufacturing a release.
+
 **Promotion was proven against the published artifact, not only the rehearsal.**
 The published web digest `sha256:20dc434b7b62…` was started twice with two
 different `ORGISTRY_PUBLIC_API_BASE_URL` values; both containers report the same
 image digest, each serves its own origin from `/public-config.js`, and neither
 origin appears anywhere in the built assets.
+
+## Sprint 27 real-target validation evidence
+
+```
+Real staging-like target validated: YES  (2026-08-27)
+ORG-PR-001: CLOSED
+```
+
+The Sprint 26 mechanism was executed end to end against a durable external
+staging-like target. This supersedes the earlier published-artifact local
+rehearsal, which is retained below as supporting history.
+
+### The target
+
+| | |
+| --- | --- |
+| Sanitized identity | `orgistry-staging-01` — DigitalOcean, FRA1 |
+| Platform | `linux/amd64`, Ubuntu 24.04.4 LTS, kernel 6.8.0-138-generic |
+| Resources | 2 vCPU · 4 GiB RAM · ~74 GiB free |
+| Runtime | Docker 29.7.2 · Compose v5.5.0 · bash 5.2.21 · curl 8.5.0 · node v22.23.2 |
+| Durability | Docker enabled at boot; `restart=unless-stopped`; PostgreSQL on a named volume |
+| Public origins | `https://staging.drsvp.com`, `https://api-staging.drsvp.com` |
+| Edge | Caddy v2.11.4; Let's Encrypt, valid to 2026-11-25; HTTP→HTTPS `308` |
+| Inbound exposure | **22/80/443 only** — externally probed and confirmed |
+| Data | **Synthetic only** |
+
+### What was executed
+
+| Step | Result |
+| --- | --- |
+| `deploy-target-preflight.sh` **on the host** | **PASS** — 0 failed, 0 warned |
+| Target-side GHCR digest pulls | **PASS** — no registry credential exists on the host |
+| Deploy `91664d0` | **PASS** — backup `taken`, migration applied once, head `0012_shocking_warbound` (13) verified, API healthy, web up, running digests verified, smoke 9/9, evidence written |
+| **Public HTTPS smoke** | **PASS 9/9** — from outside the host |
+| Restart / persistence | **PASS** — `/ready` 200 after 3s; ledger 13 before and after |
+| Deploy `d51c76b` | **PASS** — same lifecycle; public HTTPS smoke 9/9 |
+| **Real application rollback** | **PASS** — `91664d0`'s exact digests restored with `--no-migrate`; public HTTPS rollback smoke 9/9; running images cross-checked as Release 1's; ledger still 13 |
+| Deploy workflow `33061763360` | **PASS** — bound to `staging-like`, manifest validated, gates confirmed, both digests resolved |
+| Evidence secret-hygiene scan | **PASS** — no credential material |
+
+### The 502s disappeared
+
+| Origin | Before | After |
+| --- | --- | --- |
+| `https://staging.drsvp.com/` | 502 | **200** |
+| `https://api-staging.drsvp.com/health` | 502 | **200** `{"ok":true,"data":{"status":"ok"}}` |
+| `https://api-staging.drsvp.com/ready` | 502 | **200** `{"ok":true,"data":{"status":"ready"}}` |
+
+### Deployment ledger on the target
+
+```
+2026-08-27T10:04:15.026Z  deploy    91664d0fd639  migration=applied  backup=taken    smoke=passed(9)  rollbackTarget=none
+2026-08-27T10:07:13.595Z  deploy    d51c76b5ee6b  migration=applied  backup=taken    smoke=passed(9)  rollbackTarget=91664d0fd639
+2026-08-27T10:08:02.764Z  rollback  91664d0fd639  migration=skipped  backup=skipped  smoke=passed(9)  rollbackTarget=d51c76b5ee6b
+```
+
+### How the tooling reached the host
+
+Only the deployment tooling **dependency closure** was transferred — 13 files:
+`tooling/`, `tooling/lib/`, and `infra/compose.deploy.yml`. **No Dockerfile, no
+application source, no `packages/`.** The target is structurally incapable of
+building the application, and `infra/compose.deploy.yml` contains zero `build:`
+sections, which the deployment asserts before invoking Compose.
+
+`git` and `pnpm` are **not installed** on the target for the deployment's
+benefit, confirming the host tool requirements documented above.
+
+### What this does NOT establish
+
+- **Not staging readiness.** Account email does not work on that target
+  (`MAIL_DRIVER=smtp` against a plaintext Mailpit sink while the driver requires
+  implicit TLS — correct fail-closed behaviour, see
+  [Staging mail model](#staging-mail-model)), and there is no observability
+  there.
+- **Not production readiness.** ORG-PR-002, ORG-PR-005, and ORG-PR-006 remain
+  open; the target holds synthetic data only.
+- **Not backup operations.** Two real pre-migration backups is a deployment
+  boundary, not a backup programme. The target has **no PITR window**, and **no
+  real-target restore or PITR drill was performed**.
+- **Not email evidence.** The Mailpit sink has no external relay and reached no
+  real recipient.
+
+## Sprint 27 evidence — published-artifact local rehearsal (superseded)
+
+Retained as supporting history. Before the real target existed, the lifecycle
+was run on a workstation against the **actually published** GHCR artifacts,
+under CPU emulation, over loopback, with no TLS, DNS, or durability. It found
+the image/host platform gap that the real amd64 target later validated as fixed.
+**It is subordinate to the real-target evidence above and must not be cited in
+its place.**
+
+## Sprint 27 changelog
+
+- **Real durable-target validation (2026-08-27).** Two gate-authorised releases
+  deployed by digest to a DigitalOcean staging-like host serving public HTTPS
+  origins, a real application rollback, public HTTPS smoke 9/9 three times, and
+  machine-generated evidence on the host. **ORG-PR-001 closed.** The
+  operator-assisted boundary was preserved: GitHub Actions still does not reach
+  the target, and no inbound exposure was created.
+
+- **Image/host platform gate (stage 5).** `deploy_assert_image_runs_on_host` in
+  `tooling/lib/deploy-common.sh`, called by `tooling/deploy.sh` immediately
+  after the digest pull and before the backup preflight. Normalises both
+  spellings of each architecture, refuses a mismatch with an actionable
+  message, and accepts emulation only on an exact opt-in that is then recorded
+  as a limitation on the deployment evidence. Ten unit tests exercise the real
+  shell functions through bash rather than re-implementing the rule.
+- **Target preflight (`tooling/deploy-target-preflight.sh`, `pnpm deploy:preflight`).**
+  The repository had no way to qualify a candidate host. It now has one, and it
+  is what turns "there is no target" into an executable definition of what a
+  target must satisfy.
+- **Package visibility: observed state corrected.** Sprint 26 recorded both GHCR
+  packages as private. They are currently publicly pullable, proven by an
+  unauthenticated pull. A deployment host therefore needs no registry credential
+  today. This is a corrected *observation*, not an approved policy and not a
+  decision made here — visibility remains an operator decision.
+- **Rollback evidence upgraded** from locally built stand-ins to two real
+  gate-authorised published releases.
+- **Fail-open defect in the new gate, found in review and fixed.**
+  `docker image inspect` and `docker info` exit 0 even when a template field
+  renders empty, which produces the platform string `"/"`. If that happened on
+  both sides, the equality check would have MATCHED and the gate would have
+  passed by accident — a gate that fails open is worse than no gate.
+  `deploy_require_determined_platform` now refuses an incompletely determined
+  platform, in both getters and again at the decision point (the getters run
+  inside a command substitution, so their refusal alone would surface as an
+  empty value rather than as the assertion's own failure). Regression-tested.
+- **The target preflight refuses a non-digest image reference** before pulling.
+  The manifest schema already guarantees digest pinning, but that stage collects
+  failures rather than exiting, so an invalid manifest could otherwise have led
+  the preflight into resolving a mutable tag.
+- **Staging mail boundary established — no code change needed.** The external
+  prerequisite list previously said a staging-like target needs a real SMTP
+  provider. It does not, and the claim was never accurate. Loading real
+  configurations against the production config guard shows it constrains the
+  mail *driver*, *credential*, and *sender domain* but **not the endpoint's
+  identity**; the SMTP transport is created lazily so nothing connects at boot;
+  and `/ready` probes only PostgreSQL and Redis. A target therefore runs
+  `MAIL_DRIVER=smtp` against an operator-run isolated sink. One regression test
+  pins the invariant. **No production email rule was weakened, and ORG-PR-002
+  is untouched and still open.** See [Staging mail model](#staging-mail-model).
+- **Host tool requirements corrected.** `git` was listed as a host prerequisite;
+  no host-side script invokes it, and delivering the repository files is a free
+  choice. `pnpm` is convenience only. See
+  [Host tool requirements](#host-tool-requirements).
+- **No new deployment mechanism.** Sprint 26's architecture, executor, manifest
+  schema, evidence ledger, rollback rule, and smoke tooling are unchanged. The
+  only executable additions are one gate inside the existing stage sequence and
+  one new read-only script.
 
 ## Sprint 26 changelog
 

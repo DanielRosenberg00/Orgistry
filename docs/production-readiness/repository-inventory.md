@@ -164,7 +164,8 @@ than documented — ORG-PR-037).
 >
 > **Update (Sprint 26, 2026-08-24):** added the deployment surface —
 > `release:manifest` (`tooling/release-manifest.mjs`), `deploy:run`
-> (`tooling/deploy.sh`), `deploy:smoke` (`tooling/deploy-smoke.sh`),
+> (`tooling/deploy.sh`), `deploy:preflight`
+> (`tooling/deploy-target-preflight.sh`), `deploy:smoke` (`tooling/deploy-smoke.sh`),
 > `deploy:rollback` (`tooling/deploy-rollback.sh`), `deploy:evidence`
 > (`tooling/deploy-evidence.mjs`), and `deploy:rehearsal`
 > (`tooling/deploy-rehearsal.sh`). The executor is `deploy:run`, not `deploy`,
@@ -360,8 +361,22 @@ runtime/migration/env-contract/image-policy reference).
 >   (`record`/`rollback-target`/`current`/`validate`).
 > - `tooling/lib/deploy-common.sh` — shared reporting, the non-executing
 >   deployment-config parser, HTTP probes, and digest helpers.
-> - `tooling/deploy.sh` — the thirteen-stage deployment executor.
-> - `tooling/deploy-smoke.sh` — eight URL-only post-deployment checks.
+> - `tooling/deploy.sh` — the **fourteen**-stage deployment executor (Sprint 27
+>   inserted stage 5, the image/host platform gate).
+> - `tooling/deploy-target-preflight.sh` — read-only host qualification, run
+>   BEFORE a first deployment (`pnpm deploy:preflight`). Executed against the
+>   real staging-like target on 2026-08-27: 0 failed, 0 warned.
+>
+> **Update (Sprint 27 real-target milestone, 2026-08-27):** this deployment surface has been
+> executed against a **durable external staging-like target**. Its host-side
+> dependency closure is 13 files — `tooling/`, `tooling/lib/`, and
+> `infra/compose.deploy.yml` — with **zero npm dependencies** (only `node:`
+> built-ins) and no application source, which is what lets a target run the
+> deployment without being able to build the application. `git` and `pnpm` are
+> not required on the host and are not installed there. **ORG-PR-001 is
+> CLOSED** on that evidence, and **Sprint 27 is complete** — its repository
+> changes were published as PR #40 and passed every mandatory remote gate.
+> - `tooling/deploy-smoke.sh` — nine URL-only post-deployment checks.
 > - `tooling/deploy-rollback.sh` — application rollback to the previous
 >   known-good release.
 > - `tooling/deploy-rehearsal.sh` — the end-to-end lifecycle rehearsal.

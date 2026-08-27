@@ -34,6 +34,26 @@ would change under a different target.
   images are published to GHCR for the merged Sprint 26 commit, but nothing has
   been deployed to any environment — and observability tooling remains
   absent.)*
+  *(Sprint 27 update: **the target must be `linux/amd64` (x86-64)**. The release
+  workflow builds on a GitHub-hosted amd64 runner and publishes
+  single-architecture images, not manifest lists, so an arm64 host — Graviton,
+  Ampere, Apple Silicon — cannot run them without emulation. Since Sprint 27
+  this is enforced by the deployment rather than merely documented, and
+  `pnpm deploy:preflight` refuses a mismatched candidate host before anything is
+  deployed to it ([../deployment.md](../deployment.md#the-architecture-constraint-is-real-and-it-is-now-a-gate)).
+  Also corrected: the observed state is that both GHCR packages are currently
+  publicly pullable, so a target does not presently need a registry pull
+  credential — an observation, not an approved visibility policy.)*
+  *(Sprint 27 real-target milestone, 2026-08-27: a **durable staging-like deployment
+  environment now exists and has been validated** — a DigitalOcean `linux/amd64`
+  host serving public HTTPS origins behind Caddy, running gate-authorised
+  releases by immutable digest with a real application rollback proven.
+  ORG-PR-001 is CLOSED. The amd64 procurement constraint was satisfied and
+  verified by the deployment's own platform gate. **No production environment
+  exists**, the staging-like target holds synthetic data only, account email
+  does not work there, and observability tooling remains absent. **Sprint 27 is
+  complete**, its repository changes having been published as PR #40 and
+  validated by every mandatory remote gate.)*
 
 ## Explicit assumptions
 

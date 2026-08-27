@@ -253,6 +253,21 @@ API_IMAGE_ID="$(deploy_image_id "${API_IMAGE}")"
 WEB_IMAGE_ID="$(deploy_image_id "${WEB_IMAGE}")"
 deploy_info 'both images resolved from their digests'
 
+# A pull is architecture-agnostic; execution is not. Orgistry publishes
+# single-architecture images, so this is the stage that turns "the API
+# container did not become healthy" four stages from now into an accurate
+# message here — before the backup preflight or a migration has touched the
+# database.
+deploy_stage 'Verify the images can run on this host'
+HOST_PLATFORM="$(deploy_host_platform)"
+deploy_assert_image_runs_on_host "${API_IMAGE}" 'API image' "${HOST_PLATFORM}"
+deploy_assert_image_runs_on_host "${WEB_IMAGE}" 'web image' "${HOST_PLATFORM}"
+if [[ -n "${DEPLOY_EMULATED_PLATFORM}" ]]; then
+  deploy_info "proceeding under emulation: ${DEPLOY_EMULATED_PLATFORM}"
+else
+  deploy_info "both images are native to this host (${HOST_PLATFORM})"
+fi
+
 # ---------------------------------------------------------------------------
 # Evidence helper — used by every failure path from here on
 # ---------------------------------------------------------------------------
@@ -296,6 +311,9 @@ record_deployment() {
   arguments+=(--limitation 'Application rollback restores container digests and redeploys them under the environment CURRENT public configuration; migrations are forward-only and this record is not evidence of database rollback capability.')
   if [[ "${backup_result}" != 'taken' ]]; then
     arguments+=(--limitation 'No pre-deployment backup was taken for this deployment; there is no recovery point associated with it.')
+  fi
+  if [[ -n "${DEPLOY_EMULATED_PLATFORM}" ]]; then
+    arguments+=(--limitation "This deployment runs ${DEPLOY_EMULATED_PLATFORM} under CPU emulation, which no Orgistry validation exercises. Its runtime behaviour and performance are unproven, and this record is NOT evidence that a supported configuration was validated on this host.")
   fi
 
   node "${REPO_ROOT}/tooling/deploy-evidence.mjs" "${arguments[@]}"

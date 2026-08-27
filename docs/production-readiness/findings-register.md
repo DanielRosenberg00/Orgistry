@@ -324,18 +324,31 @@ ORG-PR-006 — unchanged.** The repository remains not ready for staging or
 production. See [sprint-26-artifact-package.md](sprint-26-artifact-package.md)
 and [../deployment.md](../deployment.md).
 
-**Status update (Sprint 27, 2026-08-27 — REAL TARGET VALIDATED):**
+**Status update (Sprint 27, 2026-08-27 — COMPLETE):**
 [ORG-PR-001](#org-pr-001) is **CLOSED** on real durable-target evidence. It is
 the first P1 production blocker closed since Sprint 17.
 
 ```
+Sprint 27 DoD met                    YES
 Real staging-like target validated   YES
 ORG-PR-001                           CLOSED
-Sprint 27 DoD met                    NO   (remote validation of the Sprint 27
-                                           repository changes is outstanding)
 Staging ready                        NO
 Production ready                     NO
 ```
+
+**Sprint 27 repository-change validation is complete.** Published as **PR #40**
+(branch `sprint-27-deployment-pipeline-closure`, head
+`0b6e6967bb95f26f211df29671210926eb136b75`, merge state CLEAN): all six required
+checks passed, plus the CodeQL rollup, plus a manually dispatched **Deployment
+rehearsal** (run `33065548416`) at the exact published head — required because
+Sprint 27 changed the deployment tooling and that workflow has no push trigger.
+**Data durability** was correctly not required (its owned surface is untouched)
+and no new **Release** was needed (`release.yml` unchanged, no release
+published).
+
+This is separate from the application-release operational evidence below, which
+concerns pre-existing published releases and the real target. The two evidence
+classes answer different questions and are not interchangeable.
 
 **What was executed.** On 2026-08-27 the Sprint 26 deployment mechanism ran end
 to end against a durable DigitalOcean staging-like host (`orgistry-staging-01`,
@@ -394,9 +407,11 @@ secret store, access control, read auditing, or automated rotation exists.
 
 **Open P1 production blockers: ORG-PR-002, ORG-PR-005, ORG-PR-006.**
 The repository is **not** staging ready (account email does not work on the
-target and there is no observability there) and **not** production ready. See
-[sprint-27-artifact-package.md](sprint-27-artifact-package.md) and
-[../deployment.md](../deployment.md).
+target and there is no observability there) and **not** production ready.
+Recommended next: **Sprint 28 — Backup and Recovery Operations Closure
+(ORG-PR-005)**, whose environment dependency ORG-PR-001's closure removes. Final
+artifact: [sprint-27-artifact-package.md](sprint-27-artifact-package.md); see
+also [../deployment.md](../deployment.md).
 
 ## Summary table
 

@@ -21,15 +21,16 @@ does not work on it, and it has no observability. Three P1 blockers remain open
 ```
 Real staging-like target validated   YES
 ORG-PR-001                           CLOSED
-Sprint 27 DoD met                    NO
+Sprint 27 DoD met                    YES
 Staging ready                        NO
 Production ready                     NO
 ```
 
-**ORG-PR-001 closing did not close Sprint 27.** The sprint's own definition of
-done additionally requires that its *repository changes* pass the mandatory
-remote workflows, and those changes are still unpublished. See
-[which remote workflows a change must be validated by](validation.md#which-remote-workflows-a-change-must-be-validated-by).
+**ORG-PR-001 closing is a finding closure, not an environment-readiness
+declaration.** Staging readiness remains NO on documented limitations (account
+email does not work on the target; no observability there), and production
+readiness remains NO on three open P1 findings. See
+[sprint-27-artifact-package.md](production-readiness/sprint-27-artifact-package.md).
 
 Related documents, each authoritative for its own boundary:
 

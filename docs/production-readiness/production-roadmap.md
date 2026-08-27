@@ -415,8 +415,8 @@ Phase 6: End-to-End Verification & Security Review
   package (not a closing artifact):
   [sprint-27-artifact-package.md](sprint-27-artifact-package.md); docs:
   [../deployment.md](../deployment.md).
-- **Sprint 27 real-target milestone (2026-08-27) — ORG-PR-001 CLOSED on
-  real-target evidence. The sprint itself remains OPEN.** A durable staging-like target was provisioned by the operator and
+- **Sprint 27 (COMPLETE, 2026-08-27) — Deployment Pipeline Closure
+  (ORG-PR-001). ORG-PR-001 CLOSED on real-target evidence.** A durable staging-like target was provisioned by the operator and
   validated by this repository's own tooling: a DigitalOcean `linux/amd64` host
   (Ubuntu 24.04.4, Docker enabled at boot, containers `restart=unless-stopped`,
   PostgreSQL on a named volume) serving real public HTTPS origins
@@ -442,11 +442,17 @@ Phase 6: End-to-End Verification & Security Review
   observability) and production readiness is **NO**. Evidence:
   [sprint-27-artifact-package.md](sprint-27-artifact-package.md); docs:
   [../deployment.md](../deployment.md).
-- **Remaining in Sprint 27 — operator-owned.** The Sprint 27 repository changes
-  are uncommitted, so the required remote workflows (CI, Security scans, CodeQL,
-  Artifacts) have not run for them. Sprint 27's DoD is not met until the
-  operator publishes and those are observed green. No further repository-only
-  implementation is needed first.
+- **Sprint 27 repository-change validation (2026-08-27) — COMPLETE.** Published
+  as **PR #40** (branch `sprint-27-deployment-pipeline-closure`, head
+  `0b6e6967bb95f26f211df29671210926eb136b75`, merge state CLEAN). All six
+  required checks passed — `Validate (offline)`, `Integration (PostgreSQL +
+  Redis)`, `Artifacts (build + smoke)`, `Dependency audit (pnpm)`,
+  `Secret scan (Gitleaks)`, `Analyze (javascript-typescript)` — plus the CodeQL
+  rollup, plus a manually dispatched **Deployment rehearsal** (run
+  `33065548416`) at the exact published head, required because Sprint 27 changed
+  the deployment tooling and that workflow has no push trigger. **Data
+  durability** was correctly not required and no new **Release** was needed.
+  **Sprint 27 DoD met: YES.**
 - **Next — Sprint 28: Backup and Recovery Operations Closure (ORG-PR-005).**
   With ORG-PR-001 closed, the environment dependency that blocked this finding's
   larger half is gone. Now executable against the real target: scheduled

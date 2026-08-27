@@ -388,45 +388,29 @@ proves nothing about GHCR authentication, package visibility, or retention.
 Treat "the rehearsal passes" as evidence about the *mechanics*, and go looking
 for the classes of defect its construction excludes.
 
-#### Current position (Sprint 27, 2026-08-27)
+#### Sprint 27 outcome (2026-08-27)
 
 The Sprint 27 changes — `tooling/deploy.sh`, `tooling/lib/deploy-common.sh`,
 `tooling/deploy-smoke.sh`, the new `tooling/deploy-target-preflight.sh` and
 `tooling/deploy-platform-guard.test.ts`, `packages/config/src/config.test.ts`,
-`package.json`, and documentation — are **uncommitted**. Every gate above passed
-**locally**, including `pnpm deploy:rehearsal` at 65 assertions, but a local
-pass is not a remote observation.
+`package.json`, and documentation — were published as **PR #40**
+(head `0b6e6967bb95…`) and passed every mandatory remote gate:
 
-After publication the mandatory remote set is **CI**, **Security scans**,
-**CodeQL** (all automatic), and **Deployment rehearsal** (**manual dispatch** —
-the deployment tooling changed and that workflow has no push trigger).
-**Data durability is not required**: its owned surface is untouched.
-**Release** fires automatically on merge and should be green, but is not a
-Sprint 27 gate. **Deploy** needs no new run — it is unchanged, and run
-`33061763360` already provided its operational validation.
+| Workflow | Result |
+| --- | --- |
+| CI — `Validate (offline)`, `Integration (PostgreSQL + Redis)`, `Artifacts (build + smoke)` | **PASS** |
+| Security scans — `Dependency audit (pnpm)`, `Secret scan (Gitleaks)` | **PASS** |
+| CodeQL — `Analyze (javascript-typescript)` | **PASS** |
+| **Deployment rehearsal** — run `33065548416`, manually dispatched at the published head | **PASS** |
 
-`ORG-PR-001` is **CLOSED** on real-target evidence; **Sprint 27 remains open**
-until the remote set above is green.
+**Data durability** was correctly not required — its owned surface is untouched.
+**Release** was not required: `release.yml` is unchanged and no new application
+release was published. **Deploy** needed no new run — it is unchanged, and run
+`33061763360` provided the operational validation against the real target.
 
-### Which remote workflows a change must be validated by
-
-The six required checks live in **three** workflows, not six:
-
-| Workflow | Jobs that are required checks | Triggers |
-| --- | --- | --- |
-| **CI** | `Validate (offline)`, `Integration (PostgreSQL + Redis)`, `Artifacts (build + smoke)` | push to `main`, pull request |
-| **Security scans** | `Dependency audit (pnpm)`, `Secret scan (Gitleaks)` | push to `main`, pull request, weekly, dispatch |
-| **CodeQL** | `Analyze (javascript-typescript)` | push to `main`, pull request, weekly |
-
-Those three run **automatically**. The remaining workflows do not, and must be
-dispatched deliberately when their surface is touched:
-
-| Workflow | Triggers | Required when |
-| --- | --- | --- |
-| **Deployment rehearsal** | weekly, `workflow_dispatch` | any change to `tooling/deploy*.sh`, `tooling/lib/deploy-common.sh`, `tooling/release-manifest.mjs`, `tooling/release-gates.mjs`, `tooling/deploy-evidence.mjs`, `infra/compose.deploy.yml`, `apps/web-demo/nginx.conf.template`, or either Dockerfile. **It has no push trigger, so merging does not run it — dispatch it manually.** |
-| **Data durability** | weekly, `workflow_dispatch` | a change to the durability surface: `tooling/db-backup.sh`, `db-restore-drill.sh`, `db-pitr-drill.sh`, `tooling/lib/pg-tools.sh`, the restore fixture, or `apps/api/src/maintenance`. **Exercising the deployment's backup preflight is not such a change.** |
-| **Release** | push to `main`, dispatch | fires automatically on merge and publishes a new digest pair. Not a validation gate for a change, but it should be green |
-| **Deploy** | `workflow_dispatch` | only when actually deploying a release. Not a validation gate for a repository change |
+`ORG-PR-001` is **CLOSED** on real-target evidence and **Sprint 27 DoD met:
+YES**. Sprint 27 is complete. Staging readiness remains NO and production readiness remains NO — see
+[sprint-27-artifact-package.md](production-readiness/sprint-27-artifact-package.md).
 
 ### `pnpm deploy:preflight` — qualify a host
 

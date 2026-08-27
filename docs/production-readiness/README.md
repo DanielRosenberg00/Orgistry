@@ -476,8 +476,9 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 
 > **Sprint 27 status (2026-08-25) — Deployment Pipeline Closure.
 > IN PROGRESS — BLOCKED ON DURABLE EXTERNAL TARGET. NO FINDING CLOSED.**
-> *(Superseded by the 2026-08-27 closure status below — the target was
-> subsequently provisioned, deployed to, and rolled back for real.)*
+> *(Superseded by the 2026-08-27 completion status below — the target was
+> subsequently provisioned, deployed to, and rolled back for real, and the
+> repository changes were published and remotely validated.)*
 > Sprint 27's definition of done requires deployment and rollback against a
 > durable external staging-like target. That has not happened, so **the Sprint
 > 27 DoD is not met and the sprint remains open**; its evidence package is a
@@ -550,10 +551,8 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > are single-architecture `linux/amd64` unless a future authorised sprint
 > changes the publication architecture.
 
-> **Sprint 27 real-target milestone (2026-08-27) — REAL STAGING-LIKE TARGET
-> VALIDATED. ORG-PR-001 CLOSED. THE SPRINT ITSELF REMAINS OPEN**, pending
-> operator publication of the Sprint 27 repository changes and the required
-> remote workflow validation that depends on it.** The first P1 production blocker closed since Sprint 17.
+> **Sprint 27 COMPLETE (2026-08-27) — REAL STAGING-LIKE TARGET VALIDATED.
+> ORG-PR-001 CLOSED.** The first P1 production blocker closed since Sprint 17. The first P1 production blocker closed since Sprint 17.
 >
 > The Sprint 26 deployment mechanism was executed end to end against a durable
 > external target: a DigitalOcean `linux/amd64` host (Ubuntu 24.04.4, Docker
@@ -577,16 +576,25 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > deployment tooling closure was transferred.
 >
 > ```
+> Sprint 27 DoD met                    YES
 > Real staging-like target validated   YES
 > ORG-PR-001                           CLOSED
-> Sprint 27 DoD met                    NO   (remote validation of the
->                                            Sprint 27 repository changes
->                                            awaits operator publication)
+> ORG-PR-002 / ORG-PR-005 / ORG-PR-006 OPEN
 > Staging ready                        NO
 > Production ready                     NO
 >
 > C — Ready to continue production implementation
 > ```
+>
+> **Remote validation of the Sprint 27 repository changes is complete.**
+> Published as **PR #40** (branch `sprint-27-deployment-pipeline-closure`, head
+> `0b6e6967bb95f26f211df29671210926eb136b75`, merge state CLEAN): all six
+> required checks passed — `Validate (offline)`, `Integration (PostgreSQL +
+> Redis)`, `Artifacts (build + smoke)`, `Dependency audit (pnpm)`,
+> `Secret scan (Gitleaks)`, `Analyze (javascript-typescript)` — plus the CodeQL
+> rollup, and a manually dispatched **Deployment rehearsal** (run
+> `33065548416`) at the exact published head, because Sprint 27 changed the
+> deployment tooling and that workflow has no push trigger.
 >
 > **Staging readiness remains NO** for reasons outside ORG-PR-001: account email
 > does not work on that target (`MAIL_DRIVER=smtp` against a plaintext Mailpit
@@ -595,9 +603,9 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > ORG-PR-002, ORG-PR-005, and ORG-PR-006 are open and the target holds synthetic
 > data only.
 >
-> Next: publish the Sprint 27 repository changes and observe the required remote
-> workflows, then **backup operations closure (ORG-PR-005)** — previously
-> blocked on the absence of an environment, a blocker that is now gone. See
+> Next: **Sprint 28 — Backup and Recovery Operations Closure (ORG-PR-005)**,
+> previously blocked on the absence of an environment, a blocker that is now
+> gone. Final artifact:
 > [sprint-27-artifact-package.md](sprint-27-artifact-package.md).
 
 ## Audit context

@@ -51,9 +51,9 @@ would change under a different target.
   ORG-PR-001 is CLOSED. The amd64 procurement constraint was satisfied and
   verified by the deployment's own platform gate. **No production environment
   exists**, the staging-like target holds synthetic data only, account email
-  does not work there, and observability tooling remains absent. **Sprint 27
-  itself remains open** pending publication of its repository changes and the
-  required remote workflow validation.)*
+  does not work there, and observability tooling remains absent. **Sprint 27 is
+  complete**, its repository changes having been published as PR #40 and
+  validated by every mandatory remote gate.)*
 
 ## Explicit assumptions
 

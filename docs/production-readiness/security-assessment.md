@@ -365,9 +365,9 @@ the host at all**; the six baseline security headers and coarse readiness
 disclosure verified over public HTTPS; and deployment evidence scanned free of
 credential material. The operator-assisted boundary was preserved — **no inbound
 exposure was created to let CI reach the target**. The target holds synthetic
-data only. **Sprint 27 itself remains open** — its repository changes are
-unpublished, so CodeQL, the secret scan, and the dependency audit have not yet
-run against them. Both release images *are* published — to GHCR, for two
+data only. **Sprint 27 is complete**: its repository changes were published as
+PR #40 (head `0b6e6967bb95…`), where CodeQL `Analyze (javascript-typescript)`,
+`Secret scan (Gitleaks)`, and `Dependency audit (pnpm)` all passed. Both release images *are* published — to GHCR, for two
 gate-authorised Sprint 26 commits — and the **observed state is that both
 packages are currently publicly pullable**, verified in Sprint 27 by an
 unauthenticated digest pull. **No visibility policy has been approved or

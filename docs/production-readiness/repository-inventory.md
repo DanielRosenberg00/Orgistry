@@ -374,9 +374,8 @@ runtime/migration/env-contract/image-policy reference).
 > built-ins) and no application source, which is what lets a target run the
 > deployment without being able to build the application. `git` and `pnpm` are
 > not required on the host and are not installed there. **ORG-PR-001 is
-> CLOSED** on that evidence; **Sprint 27 itself remains open** until its
-> repository changes are published and the required remote workflows are
-> observed green.
+> CLOSED** on that evidence, and **Sprint 27 is complete** — its repository
+> changes were published as PR #40 and passed every mandatory remote gate.
 > - `tooling/deploy-smoke.sh` — nine URL-only post-deployment checks.
 > - `tooling/deploy-rollback.sh` — application rollback to the previous
 >   known-good release.

@@ -316,6 +316,8 @@ the P1/P2 work and the launch gate (see
 > target; no observability). Production ready: **NO**. Next: publish the
 > Sprint 27 repository changes and observe the required remote workflows, then
 > **backup operations closure (ORG-PR-005)** — its environment dependency is now
-> gone. **Sprint 27 itself remains open**: its repository changes are
-> unpublished, so the mandatory remote workflow validation has not run against
-> them. ORG-PR-001 closing is a finding closure, not a sprint closure.
+> gone. **Sprint 27 is complete**: its repository changes were published as
+> PR #40 (head `0b6e6967bb95…`) and passed every mandatory remote gate,
+> including a manually dispatched Deployment Rehearsal (run `33065548416`).
+> ORG-PR-001 closing remains a finding closure, not a readiness declaration —
+> staging readiness and production readiness both remain **NO**.

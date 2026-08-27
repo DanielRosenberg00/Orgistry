@@ -176,9 +176,10 @@ These are intentional non-goals, not bugs:
   cannot build the application. **This is not staging readiness and not
   production readiness:** the target holds synthetic data only, account email
   does not work there, there is no observability, and ORG-PR-002, ORG-PR-005,
-  and ORG-PR-006 remain open. **Sprint 27 itself is still open** — its
-  repository changes are unpublished, so the mandatory remote workflow
-  validation has not run against them.
+  and ORG-PR-006 remain open. **Sprint 27 is complete**: its repository changes
+  were published as PR #40 (head `0b6e6967bb95…`) and passed every mandatory
+  remote gate, including a manually dispatched Deployment Rehearsal
+  (run `33065548416`).
 - **Account email does not work on the validated staging-like target.** The
   target runs `MAIL_DRIVER=smtp` against a plaintext Mailpit sink on port 1025,
   while Orgistry's smtp driver uses implicit TLS with certificate verification

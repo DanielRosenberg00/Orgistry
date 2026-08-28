@@ -34,6 +34,14 @@ There are two tiers:
 | `pnpm db:backup` | durability (Docker) | Takes a `pg_dump -Fc` logical backup plus a SHA-256 checksum and a provenance sidecar. |
 | **`pnpm drill:restore`** | **durability (Docker)** | **Backup → checksum verify → restore into a FRESH database → schema/migration/data assertions → migration no-op. Add `-- --with-artifact` to also drive the packaged API artifact (see [Data-durability validation](#data-durability-validation)).** |
 | `pnpm drill:pitr` | durability (Docker + pnpm) | Point-in-time recovery: base backup + verified WAL archiving + recovery to a target time, proving pre-target state survives and post-target damage does not. |
+| `pnpm backup:verify-store` | backup programme (host, network) | Writes, reads back, lists, and deletes a probe object — proves the configured bucket and credentials work before a scheduled job depends on them. |
+| `pnpm backup:ship` | backup programme (host, Docker + network) | Takes the real logical backup, encrypts it client-side, stores it off-host, and records the recovery point. |
+| `pnpm backup:catalog` | backup programme (host, network) | Prints the recovery-point inventory, derived from the store itself. |
+| `pnpm backup:health` | backup programme (host, network) | Is the database protected right now? Exits non-zero when it is not. |
+| `pnpm backup:wal-health` | backup programme (host, Docker + network) | Is continuous WAL archiving working end to end? Exits non-zero when it is not. |
+| `pnpm backup:prune -- --dry-run` | backup programme (host, network) | Reports what the artifact lifecycle would delete. Deletes nothing. |
+| `pnpm rehearse:restore -- --config PATH [--api-image REF]` | backup programme (host, Docker) | **Real-target logical restore rehearsal**: retrieve from the store → decrypt → verify digest → restore into an isolated database → schema, ledger, and data assertions → packaged migration no-op → packaged API readiness. |
+| `pnpm rehearse:pitr -- --config PATH --source-container NAME` | backup programme (host, Docker) | **Real-target PITR rehearsal**: recovery to a chosen timestamp using WAL the deployed database produced and shipped, verified in both directions. |
 | `pnpm db:retention -- --dry-run` | durability | Reports retention-eligible rows per category. Mutates nothing. |
 | `pnpm db:retention -- --apply` | durability | Deletes retention-eligible rows in bounded batches. **Destructive** — take a backup first. |
 | `pnpm release:manifest validate PATH` | deployment | A release manifest is well-formed, digest-pinned, tagged with its commit, and free of anything credential-shaped. |
@@ -273,6 +281,49 @@ Retention behavior itself is covered by
 `apps/api/src/maintenance/retention.integration.test.ts`, which runs as part of
 `pnpm validate:integration`. See [retention.md](retention.md).
 
+### Backup programme validation (Sprint 28)
+
+Two classes of check, deliberately kept apart. **Repository tests are not proof
+that an external target is protected.**
+
+**Offline, in `pnpm validate`.** The parts of the backup programme whose
+correctness does not need a network, a bucket, or a database:
+
+| Suite | What it pins |
+| --- | --- |
+| `tooling/backup-crypto.test.ts` | round-trip fidelity, owner-only file mode, no plaintext left recognisable in the artifact, and loud failure on a wrong key, a truncated artifact, a flipped ciphertext bit, and a same-length header forgery |
+| `tooling/object-store.test.ts` | AWS SigV4 signatures reproduced against the **two published AWS examples**, RFC 3986 encoding, listing pagination, path- and virtual-host addressing, header (never presigned-URL) authentication, that no secret appears in a request, and the transport-retry contract: a connect failure is retried with a rebuilt body, exhaustion is bounded, and an HTTP 403 is **never** retried |
+| `tooling/backup-config.test.ts` | the configuration file is parsed and never sourced, secret files must be mode 0600 and non-empty, every required key is named when missing, and `describeConfiguration` contains no secret |
+| `tooling/backup-catalog.test.ts` | recovery-point shape, orphaned-metadata detection, WAL window derivation, and a rendering that truncates digests and leaks nothing |
+| `tooling/backup-health.test.ts` | every way a backup programme dies quietly: nothing stored, a stale backup, an unencrypted artifact, a half-finished upload, a recorded failed run, archive_mode off, a currently-failing `archive_command`, and a spool that is filling because shipping is broken — plus the inverse, that an **idle** database is not reported unhealthy for an ageing archive |
+
+The AWS vectors matter more than a self-consistent golden file: a signing bug
+surfaces at a provider as an opaque HTTP 403 with no indication of which
+canonicalisation rule was broken, so the check has to come from outside this
+repository.
+
+**Operational, on the deployment host.** These cannot run in CI — they need the
+real database, the real archive, and real DigitalOcean Spaces credentials — and
+their results are recorded as operator evidence, never as repository test
+results. `verify-store` is the **first** thing to run after any credential
+change: a truncated secret surfaces only as `SignatureDoesNotMatch` at the first
+upload, and this catches it in one second.
+
+```bash
+pnpm backup:verify-store        # the store accepts write/read/list/delete
+pnpm backup:ship                # a real backup reaches the store, encrypted
+pnpm backup:catalog             # the recovery point is visible
+pnpm backup:health              # the database is protected
+pnpm backup:wal-health          # continuous archiving is working
+pnpm backup:prune -- --dry-run  # the lifecycle would do what is intended
+pnpm rehearse:restore -- ...    # a stored backup really restores
+pnpm rehearse:pitr -- ...       # a chosen timestamp is really recoverable
+```
+
+Both rehearsals write a secret-free JSON evidence record and destroy every
+container, volume, and decrypted artifact they create. See
+[backup-and-restore.md](backup-and-restore.md) and [pitr.md](pitr.md).
+
 Requirements: Docker; `curl` for `--with-artifact`; `pnpm` for the non-artifact
 restore mode and for the PITR drill. No real secrets and no real database are
 involved.
@@ -411,6 +462,47 @@ release was published. **Deploy** needed no new run — it is unchanged, and run
 `ORG-PR-001` is **CLOSED** on real-target evidence and **Sprint 27 DoD met:
 YES**. Sprint 27 is complete. Staging readiness remains NO and production readiness remains NO — see
 [sprint-27-artifact-package.md](production-readiness/sprint-27-artifact-package.md).
+
+#### Sprint 28 outcome (2026-08-27)
+
+The Sprint 28 changes — the backup programme (`tooling/backup-ops.mjs`,
+`tooling/lib/backup-crypto.mjs`, `object-store.mjs`, `backup-config.mjs`,
+`backup-catalog.mjs`, `backup-health.mjs`, `pg-client.mjs`), the rehearsal and
+enablement scripts, `infra/systemd/`, the stage-6 protection preflight in
+`tooling/deploy.sh` and `tooling/deploy-evidence.mjs`, five new test suites, and
+documentation — were published as **PR #41**
+(branch `sprint-28-backup-recovery-operations`, head
+`ce2a483c6d6651a113055459fc19deb8c2340e9d`) and **all seven required checks
+passed**:
+
+| Workflow | Result |
+| --- | --- |
+| CI — `Validate (offline)`, `Integration (PostgreSQL + Redis)`, `Artifacts (build + smoke)` | **PASS** |
+| Security scans — `Dependency audit (pnpm)`, `Secret scan (Gitleaks)` | **PASS** |
+| CodeQL — `Analyze (javascript-typescript)` and the CodeQL rollup | **PASS** |
+| **Deployment rehearsal** at the published head | **NOT RUN — still owed** |
+
+**Data durability** was correctly not required — its owned surface
+(`tooling/db-backup.sh`, `db-restore-drill.sh`, `db-pitr-drill.sh`,
+`tooling/lib/pg-tools.sh`, the restore fixture, `apps/api/src/maintenance`) is
+untouched on this branch. **Release** and **Deploy** needed no new run.
+
+**`Deployment rehearsal` is outstanding.** Sprint 28 changed the deployment
+tooling, so the rule stated above applies; the workflow has no push trigger and
+must be dispatched manually:
+
+```sh
+gh workflow run deployment-rehearsal.yml --ref sprint-28-backup-recovery-operations
+```
+
+It is not a required check, it passed locally at this change set, and the
+changed tooling's unit tests run inside the required `Validate (offline)` check
+— but the remote run at this head has not happened.
+
+`ORG-PR-005` is **CLOSED** on real off-host recovery evidence and **Sprint 28
+DoD met: YES**. Staging readiness remains NO and production readiness remains
+NO — see
+[sprint-28-artifact-package.md](production-readiness/sprint-28-artifact-package.md).
 
 ### `pnpm deploy:preflight` — qualify a host
 

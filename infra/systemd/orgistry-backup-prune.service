@@ -1,0 +1,9 @@
+[Unit]
+Description=Apply the Orgistry backup artifact lifecycle
+Documentation=file://@ORGISTRY_TOOLING_DIR@/../docs/backup-and-restore.md
+
+[Service]
+Type=oneshot
+Environment=ORGISTRY_BACKUP_CONFIG=@ORGISTRY_BACKUP_CONFIG@
+ExecStart=/usr/bin/env node @ORGISTRY_TOOLING_DIR@/backup-ops.mjs prune
+TimeoutStartSec=900

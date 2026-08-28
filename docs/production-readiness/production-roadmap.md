@@ -453,18 +453,39 @@ Phase 6: End-to-End Verification & Security Review
   the deployment tooling and that workflow has no push trigger. **Data
   durability** was correctly not required and no new **Release** was needed.
   **Sprint 27 DoD met: YES.**
-- **Next — Sprint 28: Backup and Recovery Operations Closure (ORG-PR-005).**
-  With ORG-PR-001 closed, the environment dependency that blocked this finding's
-  larger half is gone. Now executable against the real target: scheduled
-  backups, off-host encrypted storage, continuous WAL archiving with
-  archive-health monitoring, a measured RPO/RTO, and — the piece Sprint 27
-  explicitly did not attempt — a **real-target restore and PITR drill**.
-  Secondary candidates, in order: **external email provider closure
-  (ORG-PR-002)**, which would also make the staging environment exercisable end
-  to end; **secrets platform integration (ORG-PR-006)**; and **observability
-  (ORG-PR-007/009)**, without which the staging environment cannot be operated
-  as a production rehearsal. Multi-architecture publishing remains unnecessary —
-  the target is amd64.
+- **Sprint 28 (COMPLETE, 2026-08-27) — Backup and Recovery Operations.
+  ORG-PR-005 CLOSED.** The Sprint 25 capability became a running programme on the
+  Sprint 27 target with real off-host storage — **DigitalOcean Spaces**, bucket
+  `orgistry-staging-backups`, `fra1`. Delivered: scheduled encrypted logical
+  backups on systemd **user** timers (no root; lingering makes them survive boot
+  and logout), continuous WAL archiving from the deployed PostgreSQL into a spool
+  drained off-host every two minutes, client-side AES-256-GCM applied before
+  anything leaves the host, a least-privilege PostgreSQL backup role
+  (`pg_read_all_data` + `REPLICATION`, writes verified refused), a store-derived
+  recovery-point catalog, backup and archive-health checks that exit non-zero on
+  every quiet-death mode, an artifact lifecycle distinct from application-table
+  retention, and a deployment **backup protection preflight** that aborts before
+  migrations while the target is untouched. **Both rehearsals passed from
+  DigitalOcean Spaces**: logical restore **28 s** to a verified database and
+  **33 s** through packaged API readiness; point-in-time recovery **10 s** from a
+  base backup and 12 WAL segments the deployed database produced and shipped,
+  verified in both directions. Configured **RPO upper bound ≈ 7.0 min**, observed
+  commit-to-off-host **72–132 s**. All staging-scale, none a production
+  guarantee. **ORG-PR-002, ORG-PR-006, and ORG-PR-007 remain open**; staging
+  readiness and production readiness both remain **NO**. Residual: the Space and
+  the droplet share the `fra1` region, so this survives host loss but not a
+  regional outage. Artifact:
+  [sprint-28-artifact-package.md](sprint-28-artifact-package.md).
+- **Next — ORG-PR-002 (external email provider closure).** With ORG-PR-001 and
+  ORG-PR-005 closed, the remaining P1s are email and secrets. ORG-PR-002 is the
+  stronger candidate: it is the last blocker preventing the staging environment
+  from being exercised end to end (registration, verification, invitations all
+  fail closed there today), so closing it converts staging from "deployed" into
+  "usable" and unblocks the staging-readiness assessment. It needs an external
+  provider, real inbox receipt, and SPF/DKIM/DMARC alignment. Then
+  **ORG-PR-006** (secrets platform — now larger, because the backup encryption
+  key adds an unrecoverable-loss risk with no escrow), and **ORG-PR-007/009**
+  (observability, which would give the new health checks somewhere to page).
 - **Superseded (recorded for continuity) — Deployment Pipeline Closure (ORG-PR-001).** Provision
   the smallest real staging-like target that satisfies the
   [staging blockers](../deployment.md#remaining-staging-blockers), run the

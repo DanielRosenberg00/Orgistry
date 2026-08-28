@@ -73,8 +73,14 @@ These are intentional non-goals, not bugs:
   runnable, and tested (`pnpm db:retention`, or `node dist/retention.mjs` from
   the deployable artifact — see [retention.md](retention.md)); what is still
   missing is anything that INVOKES it on a schedule, plus metrics and failure
-  alerting for such a run. The same applies to backups: `pnpm db:backup` exists,
-  nothing schedules it.
+  alerting for such a run. **Backups are the exception since Sprint 28**: the
+  staging-like deployment target runs systemd user timers that take an
+  encrypted logical backup daily, ship archived WAL every two minutes, check
+  protection hourly, and apply the artifact lifecycle weekly
+  ([backup-and-restore.md](backup-and-restore.md), `infra/systemd/`). That
+  scheduler lives on the deployment host, not in this repository, and it still
+  routes no alerts — a failed job is visible in `systemctl --user list-units
+  --failed` and the journal, and nothing pages anyone.
 - **No PostgreSQL row-level security (RLS).** Tenant isolation is enforced in the
   application layer (every query is scoped by the route organization ID), not by
   database policies.
@@ -232,12 +238,17 @@ These are intentional non-goals, not bugs:
   validation does not prove real entropy** — a determined operator can still
   supply a weak-but-passing value. Platform-wide session invalidation has no
   API and is operator SQL only. External email delivery is unvalidated. Backup,
-  restore, and PITR tooling now exists and is tested (Sprint 25 —
-  [backup-and-restore.md](backup-and-restore.md), [pitr.md](pitr.md)), but
-  **nothing schedules or stores backups**: there is no backup schedule, no
-  encrypted remote backup storage, no continuous WAL archiving on any
-  long-lived database, no provider-managed PITR, and no measured RPO/RTO. The
-  project remains **not ready for staging or production** (see the
+  restore, and PITR tooling exists and is tested (Sprint 25 —
+  [backup-and-restore.md](backup-and-restore.md), [pitr.md](pitr.md)), and
+  Sprint 28 turned it into a running programme on the staging-like target:
+  scheduled encrypted backups, continuous WAL archiving from the deployed
+  database, health checks, a recovery-point catalog, and executed real-target
+  restore and PITR rehearsals **from real off-host storage** (DigitalOcean
+  Spaces, `orgistry-staging-backups`, `fra1`) with measured staging-scale
+  RPO/RTO. What remains: the Space and the droplet are both in `fra1`, so this
+  survives host loss but **not a regional outage**; there is no provider-managed
+  PITR, no second storage provider, no alert routing, and no production-scale
+  RPO/RTO. The project remains **not ready for staging or production** (see the
   [production-readiness audit](production-readiness/README.md)).
 
 ## Testing and validation limitations
@@ -283,14 +294,30 @@ These are intentional non-goals, not bugs:
   client-only SPA with no RSC usage; the fix is a major upgrade) and
   brace-expansion GHSA-mh99-v99m-4gvg (DoS in a dev-only eslint transitive
   with no compatible fixed release).
-- **The drills prove recoverability, not recovery objectives (Sprint 25).**
-  The backup/restore drill and the PITR drill run against fixture-sized
-  databases in throwaway containers on a laptop or a CI runner. They prove the
-  procedures work; they say nothing about how long a restore takes at
-  production data volume, and no RPO/RTO has been measured against real
-  infrastructure. PITR runs manually and weekly rather than per pull request
-  (rationale: [pitr.md](pitr.md)), so a change to the PITR tooling merged
-  without running it would not be caught until the next scheduled run.
+- **The drills prove recoverability, not production recovery objectives.**
+  The Sprint 25 backup/restore and PITR drills run against fixture-sized
+  databases in throwaway containers on a laptop or a CI runner. Sprint 28's
+  real-target rehearsals go further — they recover the **deployed** database
+  from artifacts fetched back out of storage — but that database is ~8 MB of
+  synthetic data, so the measured figures (logical restore 28 s to a verified
+  database and 33 s through packaged API readiness, PITR 10 s, configured RPO
+  upper bound ≈ 7.0 min with observed shipping latency 72–132 s) are
+  staging-scale and are **not** a production SLA.
+  No recovery objective has been measured at production data volume. PITR runs
+  manually and weekly rather than per pull request (rationale:
+  [pitr.md](pitr.md)), so a change to the PITR tooling merged without running it
+  would not be caught until the next scheduled run.
+- **The object-store endpoint is unreliable from the staging droplet.**
+  `fra1.digitaloceanspaces.com` resolves to a VPC-internal address that refused
+  **52% of raw TCP connects** in a 90-sample probe, in bursts of up to 3
+  seconds. The client retries transport failures so operations succeed, but the
+  flakiness is a provider condition outside this project's control.
+- **The real-target rehearsals are operator-run, not CI-gated.** They need the
+  deployment host, its database, and its store credentials, so no workflow can
+  run them. A regression in `tooling/backup-restore-rehearsal.sh` or
+  `tooling/backup-pitr-rehearsal.sh` is caught only the next time an operator
+  runs one. Their unit-testable parts — encryption, request signing,
+  configuration, catalog, and the health rules — are in the offline suite.
 - **Retention integration tests use aged fixtures, not short windows.** The
   configured retention floors (30/7/1 days) deliberately prevent sub-floor
   production values, so the suite seeds rows with explicit ages against a fixed

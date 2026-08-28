@@ -25,6 +25,16 @@ backups/
 *.dump
 *.dump.sha256
 
+# Backup programme artifacts (Sprint 28, ORG-PR-005). An encrypted artifact is
+# still a backup, a WAL segment is still database content, and the encryption
+# key is the one value that makes every stored backup readable. None of them
+# may ever enter version control.
+*.enc
+wal-archive/
+backup-encryption-key
+backup-store-secret
+backup-database-url
+
 # Deployment artifacts (Sprint 26, ORG-PR-001). Release manifests and
 # deployment evidence describe a specific build or a specific environment;
 # they are workflow artifacts and host-side operational state, never

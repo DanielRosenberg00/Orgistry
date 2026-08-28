@@ -134,6 +134,13 @@ export ORGISTRY_WEB_HOST_PORT="${ORGISTRY_WEB_HOST_PORT:-8080}"
 SMOKE_API_URL="${ORGISTRY_SMOKE_API_URL:-http://127.0.0.1:${ORGISTRY_API_HOST_PORT}}"
 SMOKE_WEB_URL="${ORGISTRY_SMOKE_WEB_URL:-http://127.0.0.1:${ORGISTRY_WEB_HOST_PORT}}"
 BACKUP_PREFLIGHT="${ORGISTRY_BACKUP_PREFLIGHT:-take}"
+# Sprint 28: when the host runs the backup programme, the deployment verifies
+# that the environment is actually protected BEFORE it migrates. `require`
+# (the default whenever a backup configuration is present) aborts an unhealthy
+# environment while the target is still untouched; `warn` records the
+# degradation and continues; `off` skips the check entirely.
+BACKUP_CONFIG="${ORGISTRY_BACKUP_CONFIG:-}"
+BACKUP_PROTECTION_CHECK="${ORGISTRY_BACKUP_PROTECTION_CHECK:-$([[ -n "${ORGISTRY_BACKUP_CONFIG:-}" ]] && printf 'require' || printf 'off')}"
 MIGRATION_VERIFY="${ORGISTRY_MIGRATION_VERIFY:-on}"
 ACTOR="${ACTOR:-operator:$(id -un)}"
 
@@ -279,6 +286,7 @@ record_deployment() {
   local backup_result="$5" backup_reason="$6" backup_artifact="$7" backup_recovery_point="$8"
   local smoke_result="$9" smoke_checks="${10}"
   local runtime_api_digest="${11}" runtime_web_digest="${12}"
+  local backup_protection="${13}"
 
   local arguments=(
     record
@@ -304,6 +312,7 @@ record_deployment() {
   if [[ -n "${backup_reason}" ]]; then arguments+=(--backup-reason "${backup_reason}"); fi
   if [[ -n "${backup_artifact}" ]]; then arguments+=(--backup-artifact "${backup_artifact}"); fi
   if [[ -n "${backup_recovery_point}" ]]; then arguments+=(--backup-recovery-point "${backup_recovery_point}"); fi
+  if [[ -n "${backup_protection}" ]]; then arguments+=(--backup-protection "${backup_protection}"); fi
   if [[ -n "${smoke_checks}" ]]; then arguments+=(--smoke-checks "${smoke_checks}"); fi
 
   # Limitations travel WITH the evidence so a reader of a single record cannot
@@ -311,6 +320,9 @@ record_deployment() {
   arguments+=(--limitation 'Application rollback restores container digests and redeploys them under the environment CURRENT public configuration; migrations are forward-only and this record is not evidence of database rollback capability.')
   if [[ "${backup_result}" != 'taken' ]]; then
     arguments+=(--limitation 'No pre-deployment backup was taken for this deployment; there is no recovery point associated with it.')
+  fi
+  if [[ "${backup_protection}" != 'verified' ]]; then
+    arguments+=(--limitation "The environment's ongoing backup programme was not verified healthy at deployment time (protection: ${backup_protection}); this record is not evidence that a recovery window existed.")
   fi
   if [[ -n "${DEPLOY_EMULATED_PLATFORM}" ]]; then
     arguments+=(--limitation "This deployment runs ${DEPLOY_EMULATED_PLATFORM} under CPU emulation, which no Orgistry validation exercises. Its runtime behaviour and performance are unproven, and this record is NOT evidence that a supported configuration was validated on this host.")
@@ -334,6 +346,7 @@ BACKUP_RESULT='skipped'
 BACKUP_REASON=''
 BACKUP_ARTIFACT=''
 BACKUP_RECOVERY_POINT=''
+BACKUP_PROTECTION='not-configured'
 DATABASE_URL_VALUE=''
 
 # Read the database URL once, from the runtime env file, for the preflight and
@@ -345,6 +358,40 @@ DATABASE_URL_VALUE=''
 if ! DATABASE_URL_VALUE="$(deploy_read_secret_value "${ORGISTRY_RUNTIME_ENV_FILE}" DATABASE_URL)"; then
   DATABASE_URL_VALUE=''
 fi
+
+deploy_stage 'Backup protection preflight'
+case "${BACKUP_PROTECTION_CHECK}" in
+  off)
+    BACKUP_PROTECTION="$([[ -n "${BACKUP_CONFIG}" ]] && printf 'disabled' || printf 'not-configured')"
+    deploy_info 'skipped — no backup programme is configured for this environment (ORG-PR-005)'
+    ;;
+  require|warn)
+    [[ -n "${BACKUP_CONFIG}" ]] \
+      || deploy_die 'ORGISTRY_BACKUP_PROTECTION_CHECK is set but ORGISTRY_BACKUP_CONFIG names no backup configuration file'
+    deploy_require_file "${BACKUP_CONFIG}" 'backup programme configuration file'
+    protection_output=''
+    # Both checks run so one report shows the whole picture: an environment can
+    # have fresh logical backups and broken WAL archival, which is exactly the
+    # state that looks safe and is not.
+    if protection_output="$(ORGISTRY_BACKUP_CONFIG="${BACKUP_CONFIG}" \
+        node "${REPO_ROOT}/tooling/backup-ops.mjs" health 2>&1)" \
+      && protection_output="${protection_output}
+$(ORGISTRY_BACKUP_CONFIG="${BACKUP_CONFIG}" node "${REPO_ROOT}/tooling/backup-ops.mjs" wal-health 2>&1)"; then
+      BACKUP_PROTECTION='verified'
+      deploy_info 'backup and WAL-archive health verified'
+    else
+      printf '%s\n' "${protection_output}" >&2
+      if [[ "${BACKUP_PROTECTION_CHECK}" == 'require' ]]; then
+        deploy_die 'the environment is not currently protected; the deployment was ABORTED before migrations and the target is unchanged'
+      fi
+      BACKUP_PROTECTION='degraded-accepted'
+      deploy_info 'UNHEALTHY, accepted by ORGISTRY_BACKUP_PROTECTION_CHECK=warn (recorded on the deployment evidence)'
+    fi
+    ;;
+  *)
+    deploy_die "ORGISTRY_BACKUP_PROTECTION_CHECK must be require, warn, or off (got \"${BACKUP_PROTECTION_CHECK}\")"
+    ;;
+esac
 
 deploy_stage 'Backup / recovery-point preflight'
 if (( RUN_MIGRATIONS == 0 )); then
@@ -406,7 +453,7 @@ else
     record_failed_deployment \
       'failed' 'The migration container exited non-zero; no application container was started.' '' '' \
       "${BACKUP_RESULT}" "${BACKUP_REASON}" "${BACKUP_ARTIFACT}" "${BACKUP_RECOVERY_POINT}" \
-      'not-run' '' 'none' 'none'
+      'not-run' '' 'none' 'none' "${BACKUP_PROTECTION}"
     deploy_die 'migrations failed; the deployment was aborted and the previously running release (if any) is untouched'
   fi
   MIGRATION_RESULT='applied'
@@ -481,7 +528,7 @@ if ! smoke_output="$(bash "${REPO_ROOT}/tooling/deploy-smoke.sh" \
   record_failed_deployment \
     "${MIGRATION_RESULT}" "${MIGRATION_REASON}" "${VERIFIED_HEAD}" "${APPLIED_COUNT}" \
     "${BACKUP_RESULT}" "${BACKUP_REASON}" "${BACKUP_ARTIFACT}" "${BACKUP_RECOVERY_POINT}" \
-    'failed' '' "${API_DIGEST}" "${WEB_DIGEST}"
+    'failed' '' "${API_DIGEST}" "${WEB_DIGEST}" "${BACKUP_PROTECTION}"
   deploy_die 'post-deployment smoke failed; the deployment is recorded as failed and must be rolled back or fixed forward'
 fi
 printf '%s\n' "${smoke_output}"
@@ -495,7 +542,7 @@ deploy_stage 'Record deployment evidence'
 RECORD_PATH="$(record_deployment \
   "${MIGRATION_RESULT}" "${MIGRATION_REASON}" "${VERIFIED_HEAD}" "${APPLIED_COUNT}" \
   "${BACKUP_RESULT}" "${BACKUP_REASON}" "${BACKUP_ARTIFACT}" "${BACKUP_RECOVERY_POINT}" \
-  'passed' "${SMOKE_CHECKS}" "${API_DIGEST}" "${WEB_DIGEST}")"
+  'passed' "${SMOKE_CHECKS}" "${API_DIGEST}" "${WEB_DIGEST}" "${BACKUP_PROTECTION}")"
 deploy_info "evidence ${RECORD_PATH}"
 
 # No rollback target is a legitimate state with two causes: this is the first
@@ -516,6 +563,7 @@ DEPLOY OK — ${ORGISTRY_ENVIRONMENT}
   web             ${WEB_IMAGE}
   migrations      ${MIGRATION_RESULT}${VERIFIED_HEAD:+ (verified head ${VERIFIED_HEAD})}
   backup          ${BACKUP_RESULT}${BACKUP_RECOVERY_POINT:+ at ${BACKUP_RECOVERY_POINT}}
+  protection      ${BACKUP_PROTECTION}
   public config   ${ORGISTRY_PUBLIC_API_BASE_URL}
   smoke           passed (${SMOKE_CHECKS:-0} checks)
   evidence        ${RECORD_PATH}

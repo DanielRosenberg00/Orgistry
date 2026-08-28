@@ -292,7 +292,154 @@ check `/health` and `/ready` — the pattern
 
 ---
 
-## 6. What this proves — and what it does not
+## 6. Continuous WAL archiving on the deployed database
+
+Sections 1–5 describe the repository-controlled PITR *capability*. This section
+describes the archiving that actually runs on the Sprint 27 staging-like target,
+and section 7 describes the recovery rehearsal executed against it. They are
+different claims and this document keeps them apart.
+
+### The architecture, and why the spool exists
+
+```text
+orgistry-infra-postgres-1
+  archive_command: test ! -f /wal-archive/%f && cp %p /wal-archive/%f && chmod 640 ...
+        |
+        v
+  /opt/orgistry/data/wal-archive        local spool, bind-mounted into the container
+        |
+        v
+  orgistry-wal-ship.timer (every 2 min) encrypt (AES-256-GCM) -> object store
+```
+
+`archive_command` **never touches the network**. If archiving had to reach
+object storage synchronously, a transient provider outage would stall WAL
+recycling and eventually fill the data volume — a backup feature taking the
+database down. A local copy cannot fail that way, and the shipper retries on its
+own schedule. The cost is that the recovery point lags by one shipping interval,
+which is exactly the RPO stated below.
+
+The spool is a hand-off buffer, not storage. A segment is deleted from it only
+after its stored object has been read back at the expected size, so a failed
+shipment simply retries.
+
+### Applied settings
+
+| Setting | Value | Notes |
+| --- | --- | --- |
+| `archive_mode` | `on` | requires a **restart**, not a reload |
+| `archive_command` | `test ! -f /wal-archive/%f && cp %p /wal-archive/%f && chmod 640 /wal-archive/%f` | PostgreSQL's own documented idiom; refusing to overwrite is what makes a repeated attempt safe. The `chmod` lets the host-side shipper read the segment |
+| `archive_timeout` | `300s` | forces a segment switch on an otherwise quiet database, bounding the RPO. It only fires when WAL was actually written |
+| `wal_compression` | `on` | smaller segments: less to encrypt, ship, and store |
+| `wal_level` | `replica` | unchanged; already sufficient |
+
+`tooling/pg-enable-wal-archiving.sh` applies these with `ALTER SYSTEM`, so they
+live in `postgresql.auto.conf` **inside the data volume** and survive a container
+recreate — unlike flags on a service definition. It is idempotent, refuses to
+proceed unless the archive directory is a real mount (a directory in the
+container's writable layer would vanish on the next `up`, taking the recovery
+window with it), and finishes by forcing a segment switch and confirming
+`pg_stat_archiver.archived_count` actually moved.
+
+### Spool ownership
+
+Two accounts share the spool: PostgreSQL inside the container writes segments,
+and the host account running the shipper must read and **delete** them. The
+script sets the directory to `postgres-uid:operator-gid`, mode `2770` (setgid,
+so segments inherit the shipper's group), and the archive command makes each
+file group-readable. Deletion needs write on the *directory*, which the group
+bit grants. All of it is done through `docker exec -u 0`, so no host root is
+required.
+
+### Archive health
+
+`node tooling/backup-ops.mjs wal-health` checks, and exits non-zero on any
+failure:
+
+| Check | Why it exists |
+| --- | --- |
+| `archive_mode` is on | the setting silently reverts to `off` if a restart loses it |
+| segments have been archived | `archived_count > 0` |
+| `archive_command` is not currently failing | a `failed_count` is only a *current* problem when the newest failure is newer than the newest success; a recovered blip warns rather than fails |
+| a segment was archived recently | PostgreSQL has stopped producing WAL — **applied only when WAL is actually pending**, so an idle database is not reported as broken |
+| the spool is drained | **the dangerous case**: archiving succeeds locally while shipping is broken, which looks perfectly healthy from inside the database |
+| WAL exists off-host, and is current | there is an actual recovery window |
+
+A silently failing `archive_command` is the classic way PITR stops existing
+without anyone noticing. That is what these checks exist for — and they are
+checks, not alerting (**ORG-PR-007**, open).
+
+---
+
+## 7. The real-target PITR rehearsal
+
+`tooling/backup-pitr-rehearsal.sh` proves recovery using WAL the **deployed**
+database produced. The Sprint 25 drill (§3) proves the recovery *strategy* with
+WAL it generated seconds earlier; this proves the *programme*.
+
+```text
+deployed PostgreSQL -> archive_command -> spool -> encrypted upload -> store
+  -> retrieval -> decryption -> isolated recovery target
+  -> archive recovery to a chosen timestamp -> promotion -> verification
+```
+
+### What it does to the live database, and why that is safe
+
+A point-in-time recovery cannot be proven unless the source really changes on
+both sides of the target. The rehearsal therefore writes to the deployed
+database, but only to rows it owns: a marker in `app_meta` before the target,
+then after the target a second marker plus the deletion of one synthetic
+rehearsal project row. **The deleted row is re-inserted on every exit path**,
+including failure, so an aborted rehearsal leaves the environment as it found
+it. No schema change, no table drop, and no non-rehearsal row is ever touched.
+
+**The live database is never a recovery target.** Recovery happens in a
+container the script creates and destroys, on its own network and volume, with
+`archive_mode = off` so a promoted timeline can never write into the source's
+archive.
+
+### What it verifies
+
+1. `archive_mode` is on and the archiver is not failing, **before** starting;
+2. a base backup exists off-host and is retrievable and decryptable;
+3. the pre-target state is present in the recovered database;
+4. the post-target state is **absent**;
+5. the post-target `DELETE` is undone;
+6. the recovery log contains `restored log file` — archived WAL was genuinely
+   consumed, so "PITR" cannot degrade into "started a base backup";
+7. the recovery log records stopping at the target;
+8. the schema and the Drizzle migration ledger are intact;
+9. `archive_command` recorded no new failure during the run.
+
+Checks 3 and 4 are both required. Either alone is satisfied by a copy that never
+recovered at all.
+
+### Recovery objectives
+
+```text
+Every number here is a STAGING-LIKE MEASUREMENT, not a production guarantee.
+```
+
+| Objective | Value | Derivation |
+| --- | --- | --- |
+| **RPO — configured upper bound** | **≈ 7.0 minutes** | `archive_timeout` 300 s + ship interval 120 s + upload ~2 s |
+| **RPO — observed (shipping path only)** | **72 s, 132 s, 130 s** | measured commit → segment present in DigitalOcean Spaces, switch **forced** so only shipping is timed — this does **not** measure the worst-case `archive_timeout` component |
+| **RTO — observed PITR** | **10 s** | 5 s retrieval and decryption of the base backup and 12 WAL segments from DigitalOcean Spaces; 5 s archive recovery and promotion |
+| Recovery window | bounded by WAL retention (8 days) and the oldest surviving base backup | pruning never deletes WAL a surviving base backup still needs |
+
+The staging database is ~8 MB. These figures are dominated by fixed costs and do
+not extrapolate to production volume.
+
+**An idle database's recoverable point does not advance, and that is correct.**
+`archive_timeout` forces a switch only when something was written, so a database
+taking no writes archives nothing — while remaining fully recoverable to its
+current state, because nothing changed. The archive-health check tests for
+*pending* WAL rather than wall-clock age alone, so an idle environment reads
+healthy instead of raising a false alarm that would block deployments.
+
+---
+
+## 8. What this proves — and what it does not
 
 Three statements, kept distinct — conflating them is the specific way PITR
 documentation becomes dishonest:
@@ -300,7 +447,8 @@ documentation becomes dishonest:
 ```
 LOCAL PITR VERIFIED                        — pnpm drill:pitr
 REMOTE REPOSITORY-CONTROLLED PITR VERIFIED — Data durability run 32702918307 on main
-PRODUCTION PITR NOT VERIFIED               — nothing below is in place
+STAGING-LIKE TARGET PITR VERIFIED          — Sprint 28, §6 and §7
+PRODUCTION PITR NOT VERIFIED               — no production database exists
 ```
 
 **Proven, repository-controlled:**
@@ -318,26 +466,32 @@ fixture-sized database inside throwaway containers the workflow creates and
 destroys. No production database, no continuous archive, no provider recovery
 window, and no recovery-time measurement is involved.
 
-**Not proven — deployment- and provider-dependent:**
+**Proven since Sprint 28, on the staging-like target (§6, §7):**
 
-- **No continuous WAL archiving runs anywhere.** The drill enables archiving
-  for its own lifetime. No long-lived Orgistry database archives WAL, because
-  no long-lived Orgistry database exists (**ORG-PR-001**, open).
-- **No durable archive storage.** The drill archives to a throwaway Docker
-  volume it deletes afterwards. Production needs durable, encrypted, retained,
-  ideally off-host WAL storage.
-- **No provider-managed PITR.** A managed PostgreSQL's own continuous backup
-  and PITR window has not been configured or evidenced.
-- **No measured RPO or RTO.** The drill recovers a fixture-sized database in
-  seconds. That number tells you nothing about a production-sized recovery, and
-  no recovery objective has been validated against real infrastructure
+- Continuous WAL archiving runs on a long-lived, deployed Orgistry database.
+- Archived WAL is encrypted and stored through the real upload path, and a
+  recovery genuinely consumed it.
+- Archive health is inspectable and fails non-zero.
+- A recovery-time and a configured recovery-point objective have been measured.
+
+**Still not proven — the honest gaps:**
+
+- **The WAL archive is off-host but single-region.** Segments are stored in
+  DigitalOcean Spaces (`orgistry-staging-backups`, `fra1`) and a real recovery
+  has consumed them from there. The Space and the droplet are both in `fra1`, so
+  this survives host loss but not a regional outage.
+- **No provider-managed PITR.** Archiving is self-managed; no managed
+  PostgreSQL's own continuous backup window has been configured or evidenced.
+- **No production RPO or RTO.** The §7 figures recover an ~8 MB synthetic
+  database. They tell you nothing about production-sized recovery
   ([production-target.md](production-readiness/production-target.md)).
-- **No monitoring of archive health.** In production, a silently failing
-  `archive_command` is the classic way PITR stops existing without anyone
-  noticing. Alerting on `pg_stat_archiver.last_failed_time` is required and is
-  out of scope here (**ORG-PR-016** and monitoring, open).
+- **No alert routing on archive health.** The checks exist and fail loudly; a
+  human still has to look, or a future alerting system has to consume the exit
+  code (**ORG-PR-007**, open).
+- **No second copy of the archive** — one store, no cross-region replication.
 
-**PITR capability is verified. Production PITR is not.**
+**PITR capability is verified. Staging-like PITR from off-host storage is
+verified. Production PITR is not.**
 [ORG-PR-005](production-readiness/findings-register.md#org-pr-005) therefore
 stays **OPEN**: its repository-controlled half is complete and evidenced, and
 it remains a production blocker on the deployment-dependent half above, which

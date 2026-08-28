@@ -1,0 +1,13 @@
+[Unit]
+Description=Check that the Orgistry database is currently protected
+Documentation=file://@ORGISTRY_TOOLING_DIR@/../docs/runbook.md
+
+[Service]
+Type=oneshot
+Environment=ORGISTRY_BACKUP_CONFIG=@ORGISTRY_BACKUP_CONFIG@
+# Both checks run even if the first fails, so one journal entry shows the whole
+# picture; `-` prefixes are deliberately NOT used, so a failure still fails the
+# unit and appears in `systemctl --user list-units --failed`.
+ExecStart=/usr/bin/env node @ORGISTRY_TOOLING_DIR@/backup-ops.mjs health
+ExecStart=/usr/bin/env node @ORGISTRY_TOOLING_DIR@/backup-ops.mjs wal-health
+TimeoutStartSec=300

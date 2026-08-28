@@ -608,6 +608,78 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > gone. Final artifact:
 > [sprint-27-artifact-package.md](sprint-27-artifact-package.md).
 
+> **Sprint 28 COMPLETE (2026-08-27) — BACKUP AND RECOVERY OPERATIONS.
+> ORG-PR-005 CLOSED.** The second P1 production blocker closed in two sprints.
+>
+> The Sprint 25 durability *capability* became a running *programme* on the
+> Sprint 27 target, backed by **real off-host storage**: DigitalOcean Spaces,
+> bucket `orgistry-staging-backups`, region `fra1`, prefix
+> `orgistry/staging-like`.
+>
+> **Delivered:** scheduled encrypted logical backups (systemd **user** timers —
+> no root, boot- and logout-surviving), continuous WAL archiving from the
+> deployed PostgreSQL to a spool a shipper drains every two minutes, client-side
+> **AES-256-GCM before anything leaves the host**, a least-privilege PostgreSQL
+> backup role (writes verified refused), a store-derived recovery-point catalog,
+> backup and archive health checks that exit non-zero, a backup artifact
+> lifecycle distinct from application-table retention, and a deployment
+> **backup protection preflight** that aborts before migrations while the target
+> is untouched.
+>
+> **Both recovery rehearsals passed from DigitalOcean Spaces.** A backup was
+> retrieved back out of the Space, decrypted, digest-verified, restored into an
+> isolated PostgreSQL, and driven through the packaged migration entrypoint and
+> the packaged API to `/ready` — **28 s to a verified database, 33 s through API
+> readiness**. A **point-in-time recovery** to a chosen timestamp replayed a
+> base backup and 12 WAL segments the deployed database produced, archived, and
+> shipped, verified in both directions with archived-WAL consumption asserted
+> from the recovery log — **10 s**. Configured **RPO upper bound ≈ 7.0 min**,
+> with **observed** commit-to-off-host latency of 72–132 s. Every figure is a
+> staging-like measurement against an ~8 MB synthetic database and **is not a
+> production guarantee**.
+>
+> **Real execution found what no local rehearsal could.** An incomplete
+> installed secret (8 characters against DigitalOcean's 43) was isolated to
+> credential configuration — not repository SigV4 — by an independent AWS CLI
+> baseline that failed identically, so **no object-store code was changed for
+> it**. Two genuine defects were found and fixed: a WAL-freshness check that
+> reported an *idle* database as unhealthy, which through the protection
+> preflight would have refused deployments to a protected environment; and the
+> absence of any transport retry against a Spaces endpoint that refuses **52% of
+> raw TCP connects** in bursts of ≤3 s.
+>
+> ```
+> Sprint 28 DoD met                    YES
+> ORG-PR-005                           CLOSED
+> ORG-PR-002 / ORG-PR-006 / ORG-PR-007 OPEN
+> Off-host storage                     PROVEN (single-region)
+> Staging ready                        NO
+> Production ready                     NO
+>
+> C — Ready to continue production implementation
+> ```
+>
+> **Staging readiness remains NO**, unchanged and for reasons ORG-PR-005 never
+> covered: account email does not work on the target, and there is no
+> observability there. **Production readiness remains NO** — ORG-PR-002 and
+> ORG-PR-006 are open P1s and the target holds synthetic data only. Closure
+> means the required operational recovery pattern is proven on the staging-like
+> target; it does not mean production has been exercised.
+>
+> Remaining durability limitation: the Space and the droplet are both in `fra1`,
+> so backups survive host loss but not a regional outage.
+>
+> **Remote validation of the Sprint 28 repository changes is complete.**
+> Published as **PR #41** (branch `sprint-28-backup-recovery-operations`, head
+> `ce2a483c6d6651a113055459fc19deb8c2340e9d`, merge state CLEAN): all seven
+> required checks passed — `Validate (offline)`, `Integration (PostgreSQL +
+> Redis)`, `Artifacts (build + smoke)`, `Dependency audit (pnpm)`, `Secret scan
+> (Gitleaks)`, `Analyze (javascript-typescript)`, and the CodeQL rollup. One
+> non-required workflow is still owed at that head: `Deployment rehearsal`,
+> because Sprint 28 changed the deployment tooling and that workflow has no push
+> trigger — it must be dispatched manually, as in Sprint 27. Evidence:
+> [sprint-28-artifact-package.md](sprint-28-artifact-package.md).
+
 ## Audit context
 
 - **Execution date:** 2026-07-02
@@ -632,6 +704,7 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 | [production-scorecard.md](production-scorecard.md) | Domain maturity, blocker status, largest gap, confidence. |
 | [production-roadmap.md](production-roadmap.md) | Sequenced phases, critical path, decision gates, the one recommended next sprint, launch gate. |
 | [launch-checklist.md](launch-checklist.md) | Five-stage checklist with finding/roadmap traceability. |
+| [sprint-28-artifact-package.md](sprint-28-artifact-package.md) | The Sprint 28 evidence package (backup and recovery operations). |
 | [sprint-14-artifact-package.md](sprint-14-artifact-package.md) | The official Sprint 14 closing artifact. |
 | [sprint-15-decisions.md](sprint-15-decisions.md) | Decision-gate record (DG-1…DG-5) as of Sprint 15. |
 | [sprint-15-artifact-package.md](sprint-15-artifact-package.md) | The Sprint 15 closing artifact (production config guard). |

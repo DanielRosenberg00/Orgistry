@@ -46,9 +46,13 @@ drills that depend on it.
 | Tested logical restore into a fresh database | **Implemented** | `tooling/db-restore-drill.sh` |
 | Restore compatibility with the deployable artifact | **Implemented** | `tooling/db-restore-drill.sh --with-artifact` |
 | Point-in-time recovery | **Implemented and verified** — locally and on GitHub Actions against `main` (PITR VERIFIED) | [pitr.md](pitr.md), `tooling/db-pitr-drill.sh` |
-| Automated backup **scheduling** | **Not provided** | Deployment-dependent — see §8 |
-| Remote, encrypted backup **storage** | **Not provided** | Deployment-dependent — see §8 |
-| Production RPO/RTO evidence | **Not provided** | Deployment-dependent — see §8 |
+| Automated backup **scheduling** | **Implemented and running** on the staging-like target (systemd timers) | §8, §11, `infra/systemd/`, `tooling/backup-install-systemd.sh` |
+| Client-side backup **encryption** | **Implemented and proven** (AES-256-GCM before upload; decryption exercised by both rehearsals) | §9, `tooling/lib/backup-crypto.mjs` |
+| Continuous **WAL archiving** from the deployed database | **Implemented and active** | [pitr.md](pitr.md), `tooling/pg-enable-wal-archiving.sh` |
+| Recovery-point **catalog** and **health checks** | **Implemented** | §12, `tooling/backup-ops.mjs` |
+| Real-target **restore** and **PITR** rehearsals | **Executed and passed** against the deployed database | §13 |
+| **Off-host** backup storage | **PROVIDED AND PROVEN** — DigitalOcean Spaces, bucket `orgistry-staging-backups` (`fra1`). Backups, base backups, and WAL are stored outside the source host's failure boundary and have been retrieved back from it during both rehearsals | §9 |
+| Production RPO/RTO evidence | **Not provided.** Staging-like measurements exist and are labelled as such | §13 |
 
 ---
 
@@ -315,32 +319,460 @@ SHA-256 API-key secret hashes, and invitation token hashes.
 
 ---
 
-## 8. Known limitations
+## 8. The deployed backup programme
 
-These remain open after Sprint 25 and are infrastructure-dependent, not
-oversights:
+Sprint 25 built backup *capability*. Sprint 28 connected that capability to the
+real deployment target from Sprint 27 and turned it into an *operation*. The two
+are different claims and this document keeps them apart everywhere.
 
-- **No backup scheduler.** `tooling/db-backup.sh` is a command. Nothing invokes
-  it on a schedule — there is no background runtime in this repository
-  (**ORG-PR-016**, open). A real deployment uses its platform's scheduled-job
-  facility or a managed database's built-in backup schedule.
-- **No remote or encrypted backup storage.** Backups are written to a local
-  directory the operator chooses. There is no upload, no lifecycle policy, no
-  encryption at rest, and no cross-region copy (**ORG-PR-001**, open).
-- **No provider-managed PITR.** The PITR capability proven in
-  [pitr.md](pitr.md) is a locally-executed drill against locally-run
-  PostgreSQL. A managed database's own continuous backup/PITR has not been
-  configured or evidenced because no managed database exists here.
-- **No production RPO/RTO evidence.** The drills prove recoverability of a
-  fixture-sized database on a laptop and a CI runner. They say nothing about how
-  long a real restore takes at production data volume, and no recovery objective
-  has been measured against real infrastructure.
-- **No restore rehearsal against real data.** By design — this repository has no
-  production data.
+```text
+deployed PostgreSQL (orgistry-infra-postgres-1, staging-like)
+  |
+  |-- pg_dump (least-privilege role) --> encrypt --> object store --> catalog
+  |        orgistry-backup.timer, daily 02:30 UTC
+  |
+  '-- archive_command --> local WAL spool --> encrypt --> object store
+           orgistry-wal-ship.timer, every 2 minutes
+                                    |
+                                    v
+                 orgistry-backup-health.timer, hourly
+                 orgistry-backup-prune.timer, weekly
+```
+
+| Component | Where it lives | What it does |
+| --- | --- | --- |
+| `tooling/db-backup.sh` | unchanged since Sprint 25 | takes the logical backup. The scheduled job invokes the **real** backup script — the tested path and the operated path are the same code |
+| `tooling/lib/backup-crypto.mjs` | new | AES-256-GCM encryption before anything leaves the host |
+| `tooling/lib/object-store.mjs` | new | zero-dependency S3-compatible client (AWS SigV4) |
+| `tooling/lib/backup-config.mjs` | new | one configuration file per environment; secrets stay in their own 0600 files |
+| `tooling/lib/backup-catalog.mjs` | new | recovery-point inventory, derived from the store itself |
+| `tooling/lib/backup-health.mjs` | new | the health rules, as pure functions |
+| `tooling/backup-ops.mjs` | new | the operator CLI: ship, catalog, health, fetch, prune |
+| `tooling/pg-enable-wal-archiving.sh` | new | turns on continuous archiving, idempotently, on a deployed database |
+| `infra/systemd/` | new | the versioned schedule |
+| `tooling/backup-restore-rehearsal.sh` | new | real-target logical restore rehearsal |
+| `tooling/backup-pitr-rehearsal.sh` | new | real-target point-in-time recovery rehearsal |
+
+**Why a Node CLI and not an SDK or a backup platform.** Sprint 27 established
+that the deployment target carries no application source and no npm dependency
+closure — the whole operational toolchain there is a handful of files using only
+Node built-ins. Installing an AWS SDK, `restic`, or `pgBackRest` would give that
+up, add a supply chain the release process does not gate, and introduce a second
+recovery architecture beside the Sprint 25 one. The client here implements
+exactly five S3 operations and signs them with `node:crypto`.
+
+**Three evidence classes, never conflated.**
+
+| Class | What it means | Where it comes from |
+| --- | --- | --- |
+| Repository-controlled recovery capability | the code can back up and restore | `pnpm drill:restore`, `pnpm drill:pitr`, CI |
+| Staging-like operational recovery evidence | the deployed database really was backed up and really was recovered | §13, the evidence records on the target |
+| Production recovery guarantee | **does not exist** | — |
 
 ---
 
-## 9. Runbooks
+## 9. Off-host storage and encryption
+
+### The off-host requirement
+
+"Off-host" means **outside the source host's failure boundary**: storage that
+survives losing the machine the database runs on. A copy on the same disk, the
+same volume, or the same host is a convenience, not protection — losing the host
+loses both. The programme is built for S3-compatible object storage in a
+**different region** from the droplet, so a regional failure does not take the
+backups with it.
+
+> **Current state: off-host storage is live and proven.** Backups, base
+> backups, and WAL are stored in **DigitalOcean Spaces**, bucket
+> `orgistry-staging-backups`, region `fra1`, endpoint
+> `https://fra1.digitaloceanspaces.com`, under the prefix
+> `orgistry/staging-like`. Both recovery rehearsals retrieved their artifacts
+> **back out of that bucket** before restoring
+> ([sprint-28-artifact-package.md](production-readiness/sprint-28-artifact-package.md)).
+>
+> **What that does and does not buy.** The bucket is a separate service with its
+> own storage and lifecycle: destroying, rebuilding, or losing
+> `orgistry-staging-01` does not touch it, which is exactly the host-loss
+> protection a backup exists for. It is **not** multi-region durability — the
+> Space and the droplet are both in `fra1`, so a DigitalOcean regional outage
+> would take both offline together. That is a recorded limitation (§14), not a
+> claim of regional resilience.
+
+The client is provider-neutral (DigitalOcean Spaces, AWS S3, Cloudflare R2,
+Backblaze B2's S3 API, MinIO), and provisioning the bucket changed four
+configuration values and nothing else. It addresses objects **path-style**
+(`https://fra1.digitaloceanspaces.com/<bucket>/<key>`), which DigitalOcean
+Spaces accepts; no provider-specific addressing was needed.
+
+**One provider behaviour is worth knowing before operating this.** On this
+droplet `fra1.digitaloceanspaces.com` resolves — through every resolver — to a
+VPC-internal address, and that endpoint refuses a large share of TCP connects:
+a raw-socket probe outside this codebase measured **47 of 90 connects refused
+(52%)**, in bursts of at most **3 seconds**. The client therefore retries
+transport failures for a bounded window (§9, "Transport retry"). An HTTP status
+is never retried.
+
+### Object layout
+
+```text
+<prefix>/logical/<artifact>.dump.enc        encrypted logical backup
+<prefix>/logical/<artifact>.meta.json       provenance (no secret, plaintext)
+<prefix>/basebackup/<name>.tar.gz.enc       encrypted pg_basebackup (PITR basis)
+<prefix>/basebackup/<name>.meta.json        provenance
+<prefix>/wal/<segment>.enc                  encrypted WAL segment
+```
+
+The prefix defaults to `orgistry/<environment>`, so one bucket can hold several
+environments without them being able to collide.
+
+Metadata documents are stored in plaintext deliberately: they contain no
+credential and no row data, and a recovery is far easier when the inventory is
+readable without first having the encryption key. Their integrity is not taken
+on trust — the digest an artifact is verified against is the one recorded
+**inside the encrypted artifact's authenticated header**, so a tampered metadata
+document cannot make a corrupt restore look correct.
+
+### Transport retry
+
+`tooling/lib/object-store.mjs` retries a request only when **no HTTP response
+was produced** — a connect failure, a reset, a DNS failure. Nothing was
+answered, so re-sending is safe, and each attempt is signed afresh with its own
+timestamp. The window is sized from the measured burst length rather than from
+an attempt count, because the refusals are correlated in time.
+
+An HTTP status is an **answer** and is never retried: a 403, 404, or 409 keeps
+failing closed immediately. When the window expires the error is still raised,
+so a genuine provider outage is never masked into silence — it becomes a failed
+systemd unit and an unhealthy deployment preflight.
+
+### Encryption
+
+| Property | Value |
+| --- | --- |
+| Algorithm | AES-256-GCM (authenticated encryption) |
+| Applied | **client-side, on the source host, before upload** |
+| Key | 32 bytes, mode-0600 file, never committed, never logged, never in evidence |
+| Key identity in evidence | HMAC fingerprint (16 hex), never the key |
+| Header | authenticated as AAD — artifact name, byte count, and plaintext digest cannot be altered |
+| Integrity | GCM tag **and** the plaintext SHA-256 recorded at backup time, both checked on decrypt |
+| Proven by | decryption during both real-target rehearsals (§13) |
+
+**Client-side and storage-side encryption are not equivalent and this
+repository never says they are.** A provider's "encryption at rest" protects
+against someone removing the provider's disks; it does not protect against
+anyone who can read the bucket, because the provider decrypts transparently for
+every authorised reader. An Orgistry logical backup contains every user,
+organization, and audit row plus password, refresh-token, and API-key hashes —
+so it is encrypted before it leaves the host, with a key the provider never sees.
+
+**Key loss is unrecoverable.** There is no escrow, no key hierarchy, and no
+re-wrapping. Losing the key loses every backup encrypted with it. Keep a copy
+somewhere that depends on neither the host nor the bucket.
+
+**Key rotation is not automated.** Rotating means generating a new key and
+re-encrypting or ageing out artifacts written with the old one. The artifact
+header records which key wrote it, so a mixed-key store is *diagnosable* — but
+nothing rotates it for you, and that is an ORG-PR-006 concern, still open.
+
+---
+
+## 10. Credential model
+
+Three operations, and what each one is allowed to do:
+
+| Operation | Identity | Privileges | Where the credential lives |
+| --- | --- | --- | --- |
+| Read the database for backup | `orgistry_backup` (PostgreSQL role) | `LOGIN`, `REPLICATION`, `pg_read_all_data`. **Not** superuser, **not** `CREATEROLE`, **not** `CREATEDB`; writes are refused | `/opt/orgistry/config/backup-database-url`, mode 0600 |
+| Write backups off-host | object-store access key | write + read + delete within the backup bucket | id in `backup.env`; secret in `/opt/orgistry/config/backup-store-secret`, mode 0600 |
+| Read backups for a restore | **the same** object-store key | — | as above |
+
+**Why one object-store identity and not two.** A separate read-only restore
+identity would be better, and providers that support per-key bucket policies can
+supply one. It is a single key today because the same account performs both, and
+splitting it without a policy that actually restricts the write key would be
+theatre. The pruning step needs delete, which is the privilege worth
+constraining first.
+
+**Why `REPLICATION` is on the backup role.** `pg_basebackup` — the basis of
+every point-in-time recovery — requires a replication connection. The role is
+granted a `pg_hba` rule scoped to itself, requiring `scram-sha-256`; no
+wildcard role and no `trust`.
+
+**How scheduled jobs receive credentials.** systemd user units set
+`ORGISTRY_BACKUP_CONFIG` to the configuration file path. The tooling reads each
+secret from its own mode-0600 file and **refuses to start if any of them is
+group- or world-readable**. No secret is ever a command-line argument — process
+arguments are visible to every account on the host through `ps`.
+
+**Rotation.** Changing the database password means one `ALTER ROLE` and one file
+write; changing the object-store key means one file write. Both are manual, both
+require no code change, and neither is automated. **This closes nothing in
+ORG-PR-006** — host-local files with manual rotation are not secrets management.
+
+---
+
+## 11. Schedule and backup artifact lifecycle
+
+### Schedule
+
+| Unit | Cadence | Purpose |
+| --- | --- | --- |
+| `orgistry-backup.timer` | daily 02:30 UTC, ±10 min jitter, `Persistent=true` | full logical backup |
+| `orgistry-wal-ship.timer` | every 2 minutes | move spooled WAL off-host |
+| `orgistry-backup-health.timer` | hourly | fail loudly when protection lapses |
+| `orgistry-backup-prune.timer` | weekly, Sunday 04:10 UTC | artifact lifecycle |
+
+**systemd *user* units, deliberately.** The target's operator account has no
+passwordless sudo, and a backup schedule that can only be installed by
+escalating privileges is one that will not be reinstalled after a host rebuild.
+`loginctl enable-linger` makes user timers start at boot and survive logout.
+The cost is that the schedule belongs to one account: remove the account and the
+schedule goes with it. That is recorded in §14, not hidden.
+
+### Three retentions that are not the same thing
+
+```text
+application/table retention   docs/retention.md, `pnpm db:retention`
+                              deletes expired PRODUCT rows. Nothing to do with recoverability.
+
+logical backup retention      30 days, and never fewer than the newest 7 backups
+                              whatever the age window says.
+
+WAL retention                 8 days, and never past the oldest surviving base
+                              backup — deleting WAL a base backup still needs
+                              destroys the recovery window while every artifact
+                              still appears to be present.
+```
+
+Sprint 25's application-table cleanup is **not** backup artifact retention and
+must never be described as it.
+
+### Local copies
+
+After a successful upload the source host keeps the newest **two** backup sets
+(dump, checksum, metadata) for a fast local restore and deletes older ones. Local
+copies are a convenience; the store is the store. Keeping every one of them
+fills the host's disk, which is a way to take a database down with a backup
+programme.
+
+### Deletion safety
+
+- The newest N recovery points are protected unconditionally, so a misconfigured
+  retention window cannot leave an environment with no backup at all.
+- The newest base backup is never pruned.
+- `prune --dry-run` reports exactly what would be deleted and deletes nothing.
+- Every deletion is logged by artifact name and timestamp.
+
+---
+
+## 12. Recovery-point catalog and health checks
+
+### Catalog
+
+`node tooling/backup-ops.mjs catalog` builds the inventory **from the store
+itself**, not from a ledger that could disagree with it. Per recovery point it
+reports: timestamp, kind, source database, source environment and host, object
+key, plaintext digest, byte counts, encryption state and key fingerprint, upload
+state, retention expiry, and verification state — plus the archived-WAL window.
+
+Metadata with no artifact beside it is reported as `orphaned-metadata` rather
+than dropped: it means an upload failed halfway, and an operator needs to see it.
+
+Everything the catalog prints is safe to paste into a runbook or a pull request.
+
+### Health
+
+`backup-ops.mjs health` answers *is the database protected right now?*
+
+- an uploaded logical backup exists off-host;
+- the newest one is within its freshness window (default 26h);
+- it is encrypted, and has an integrity digest;
+- no upload was left half-finished;
+- the last scheduled run did not fail.
+
+That last check matters: without it, a timer that has been failing for a day
+looks healthy until the freshness threshold finally expires.
+
+`backup-ops.mjs wal-health` answers *is continuous archiving working?* — see
+[pitr.md](pitr.md).
+
+Both exit non-zero when unhealthy, print one actionable line per check, and
+never print a secret.
+
+### The alert boundary — read this before relying on it
+
+| Question | Answer |
+| --- | --- |
+| Where are the logs? | `journalctl --user -u orgistry-backup.service` (and the other three units) |
+| How does an operator notice a failure? | `systemctl --user list-units --failed`, or the hourly health unit going red |
+| How often is protection checked? | hourly |
+| What pages someone? | **Nothing.** |
+
+This is backup failure **visibility**. It is not alerting, not a dashboard, and
+not an observability platform. **ORG-PR-007 remains open** and nothing here
+should be described as production-grade alerting. The integration point for a
+future alerting system is the exit code of the health unit.
+
+---
+
+## 13. Restore safety and recovery rehearsals
+
+### Restore safety invariants
+
+A recovery rehearsal that can touch the live database is a production incident
+waiting for a typo. Both rehearsal scripts enforce:
+
+- the restore target is a container the script **creates**, with a name it
+  generates from the run id; the caller cannot name an existing one;
+- the target's connection details are never read from the environment, so an
+  exported `DATABASE_URL` cannot redirect a restore;
+- the sanitized identity of the source backup **and** the restore target is
+  printed before anything destructive runs;
+- the logical restore target is asserted **empty** (zero public tables) first —
+  restoring into a populated database produces a mixture of two datasets that
+  passes every row-count check by accident;
+- the PITR recovery target runs with `archive_mode = off`, so a promoted
+  timeline can never write back into the source's archive;
+- ambiguous configuration fails closed rather than guessing;
+- every container, volume, network, and decrypted artifact is destroyed on exit,
+  including on failure.
+
+**Live staging is never a restore target.** The PITR rehearsal does *write* to
+the live database — a marker before the recovery target and a deletion after it,
+both on rows it owns — because a point-in-time recovery cannot be proven unless
+the source really changes on both sides of the target. It re-applies the deleted
+row on every exit path, so an aborted rehearsal leaves the environment as it
+found it.
+
+### Real-target logical restore rehearsal
+
+`tooling/backup-restore-rehearsal.sh` runs the whole chain:
+
+```text
+deployed PostgreSQL -> logical backup -> client-side encryption -> upload
+  -> RETRIEVAL from the store -> decryption -> digest verification
+  -> clean isolated PostgreSQL -> pg_restore -> schema + migration ledger
+  -> representative Orgistry data -> packaged migration entrypoint (no-op)
+  -> packaged API /health and /ready against the restored database
+```
+
+Representative data comes from `tooling/seed-durability-rehearsal-data.sh`,
+which reuses the Sprint 25 fixture so the repository has exactly one definition
+of what "representative Orgistry data" means. It refuses to seed a database
+containing users it did not create.
+
+### Real-target PITR rehearsal
+
+`tooling/backup-pitr-rehearsal.sh` proves recovery to a chosen timestamp using
+WAL that the **deployed** database produced, archived, and shipped. It verifies
+in **both** directions — the pre-target state is present *and* the post-target
+state is absent — because either check alone is satisfied by a copy that never
+recovered at all. It also asserts the recovery log contains `restored log file`
+and a recovery-stopping line, so "PITR" cannot silently degrade into "started a
+base backup".
+
+### Measured RPO and RTO
+
+```text
+Every number below is a STAGING-LIKE MEASUREMENT.
+It is NOT a production guarantee and NOT an SLA.
+```
+
+| Objective | Value | How it is derived |
+| --- | --- | --- |
+| **RPO — configured upper bound** | **≈ 7.0 minutes** | `archive_timeout` 300 s (the longest a write can sit in an unsealed segment) + WAL shipping interval 120 s + upload ~2 s |
+| **RPO — observed (shipping path only)** | **72 s, 132 s, 130 s** (three runs) | measured commit → object present in DigitalOcean Spaces, with the segment switch **forced**, so only the shipping stage is timed. Bounded by the 120 s timer, as designed |
+| RPO floor without WAL | 24 hours | daily logical backup cadence |
+| **RTO — logical restore** | **28 s** | off-host retrieval + decrypt 1 s, `pg_restore` 2 s, schema/migration/data verification 12 s |
+| **RTO — service restore** | **33 s** | the same, plus the packaged migration entrypoint (1 s) and the packaged API answering `/ready` against the restored database (3 s) |
+| **RTO — point-in-time recovery** | **10 s** | retrieval + decrypt of the base backup and 12 WAL segments 5 s, archive recovery and promotion 5 s |
+
+**The observed figures are not a measured RPO.** Forcing the segment switch
+removes the `archive_timeout` component entirely, so these runs time the
+**shipping path only** — seal → encrypt → upload → visible off-host. The
+worst case, where a write waits up to 300 s in an unsealed segment before
+shipping begins, has **not** been independently measured. Plan against the
+configured upper bound; read the observed figures as evidence that the shipping
+half behaves as designed.
+
+**Two RTO boundaries, deliberately reported separately.** `logicalRestoreRto`
+ends at a **verified database** — the point a DBA would call the data
+recovered. `serviceRestoreRto` ends at a **packaged API answering `/ready`
+against it** — the point a user would call the service recovered. Quoting one
+when you mean the other is how recovery estimates go wrong, so neither is
+published alone.
+
+**On an idle database the recoverable point stops advancing, and that is
+correct.** `archive_timeout` forces a segment switch only when something was
+written. A database that has taken no writes has nothing to archive and is
+fully recoverable to its current state; the health checks account for this
+explicitly (§12) rather than reporting a healthy environment as stale.
+
+**What these numbers do not tell you.** The staging database is ~8 MB with 13
+migrations and a handful of synthetic rows. Restore time is dominated by fixed
+costs (container start, image load) rather than data volume, so these figures do
+not extrapolate to a production-sized database. The RPO upper bound is
+*configured*, not stress-tested under sustained write load. A production
+RPO/RTO requires measurement against production-scale data on production-shaped
+infrastructure, and none exists.
+
+```
+staging-like operational measurement — not a production guarantee
+```
+
+---
+
+## 14. Known limitations
+
+Reconciled after Sprint 28. Each of these is a real, current gap.
+
+- **No cross-region durability.** The Space and the droplet are both in
+  DigitalOcean `fra1`. Backups survive loss of `orgistry-staging-01` — which is
+  what off-host means and what ORG-PR-005 required — but a `fra1` regional
+  outage would take the database and its backups offline together. There is a
+  single bucket and no second provider, so the backups themselves have no
+  redundancy beyond DigitalOcean's own.
+- **The Spaces endpoint is unreliable from this droplet.** It resolves to a
+  VPC-internal address that refused **52% of raw TCP connects** in a 90-sample
+  probe, in bursts of up to 3 seconds. The client retries transport failures, so
+  operations succeed (20/20 `verify-store` runs after the fix, ~1 s each), but
+  the underlying flakiness is a provider condition this project does not
+  control and cannot fix.
+- **The schedule belongs to one account.** systemd *user* timers need no root,
+  which is why they are used, but they live with the operator account. Removing
+  it removes the schedule. A system-level unit would need privileged install.
+- **A systemd user unit does not inherit your shell's groups.** If the account
+  joins the `docker` group after the user manager starts, backups fail at 02:30
+  with a Docker permission error while `docker` works fine when you type it.
+  `tooling/backup-install-systemd.sh` now detects this at install time and
+  prints the remedy — it was found the only way it can be, by a scheduled run
+  failing.
+- **Backup failure visibility, not alerting.** A failed unit shows in
+  `systemctl --user list-units --failed` and the journal. **Nothing pages
+  anyone** (**ORG-PR-007**, open).
+- **Encryption key rotation is manual, and key loss is unrecoverable.** No
+  escrow, no key hierarchy, no automatic re-encryption (**ORG-PR-006**, open).
+- **Object-store credential setup is unguarded.** A truncated secret installed
+  by hand produced only `SignatureDoesNotMatch` at the first PUT. `verify-store`
+  catches it immediately and is the documented first step after any credential
+  change, but nothing validates the credential's shape at install time.
+- **One object-store identity performs both write and restore reads.** A
+  read-only restore identity would be better and needs provider-side policy
+  support.
+- **No provider-managed PITR.** Continuous archiving is self-managed. No managed
+  database exists here.
+- **Staging-scale RPO/RTO only.** The measurements in §13 are against an ~8 MB
+  synthetic database. They are not production figures and must never be quoted
+  as an SLA.
+- **No restore rehearsal against real data.** By design — no production data
+  exists anywhere in this project.
+- **No cross-region copy and no second storage provider.** A single bucket, once
+  provisioned, is a single point of failure for the backups themselves.
+- **Redis is still not backed up**, deliberately (§1).
+
+---
+
+## 15. Runbooks
 
 All commands below are the actual repository commands and have been executed;
 anything infrastructure-dependent is labelled.
@@ -446,10 +878,95 @@ rollback has been executed against real infrastructure
 Forward-only migrations remain the repository's stated model: there are no
 `down` migrations, and none should be invented during an incident.
 
+### Operate the deployed backup programme
+
+Every command below runs **on the deployment host**, from the tooling directory
+transferred there, with the environment's backup configuration. All of them have
+been executed on `orgistry-staging-01`.
+
+```bash
+cd /opt/orgistry/deploy
+export ORGISTRY_BACKUP_CONFIG=/opt/orgistry/config/backup.env
+
+# Is the database protected right now? (exits non-zero when it is not)
+node tooling/backup-ops.mjs health
+node tooling/backup-ops.mjs wal-health
+
+# What can I recover to?
+node tooling/backup-ops.mjs catalog
+
+# Take a backup now, out of schedule.
+node tooling/backup-ops.mjs ship-backup --label manual
+
+# What would the lifecycle delete? (deletes nothing)
+node tooling/backup-ops.mjs prune --dry-run
+```
+
+### Prove the object store before depending on it
+
+Run this immediately after provisioning a bucket, and after any credential
+change. It writes, reads back, lists, and deletes a probe object.
+
+```bash
+node tooling/backup-ops.mjs verify-store
+```
+
+### Install or reinstall the schedule
+
+```bash
+loginctl enable-linger "$(id -un)"        # once per host: timers survive reboot
+bash tooling/backup-install-systemd.sh \
+  --config /opt/orgistry/config/backup.env \
+  --tooling-dir /opt/orgistry/deploy/tooling
+
+systemctl --user list-timers 'orgistry-*'
+systemctl --user list-units --failed
+```
+
+`--dry-run` renders the units without installing them; `--uninstall` removes the
+schedule and leaves every stored artifact untouched.
+
+### Recover the deployed database from an off-host backup
+
+```bash
+# 1. Choose a recovery point.
+node tooling/backup-ops.mjs catalog
+
+# 2. Retrieve and decrypt it. The digest recorded at backup time is verified.
+node tooling/backup-ops.mjs fetch \
+  --key logical/<artifact>.dump.enc \
+  --output /var/tmp/recovery/<artifact>.dump
+
+# 3. Restore into a database that is EMPTY. Never into the live one.
+#    Follow "Restore a logical backup" above for the pg_restore invocation.
+
+# 4. Destroy the decrypted artifact when finished.
+shred -u /var/tmp/recovery/<artifact>.dump 2>/dev/null || rm -f /var/tmp/recovery/<artifact>.dump
+```
+
+For recovery to a *point in time* rather than to a backup, see
+[pitr.md](pitr.md).
+
+### Rehearse recovery against the real target
+
+```bash
+bash tooling/backup-restore-rehearsal.sh \
+  --config /opt/orgistry/config/backup.env \
+  --api-image <the deployed API image reference> \
+  --evidence-dir /opt/orgistry/evidence/staging-like/durability
+
+bash tooling/backup-pitr-rehearsal.sh \
+  --config /opt/orgistry/config/backup.env \
+  --source-container orgistry-infra-postgres-1 \
+  --evidence-dir /opt/orgistry/evidence/staging-like/durability
+```
+
+Both write a secret-free JSON evidence record and destroy every container,
+volume, and decrypted artifact they created.
+
 ### What remains infrastructure-dependent
 
-Before any real deployment, the following must be arranged outside this
-repository and are **not** evidenced here: a backup schedule, encrypted remote
-storage with a lifecycle policy, least-privilege backup/restore identities,
-provider-managed or self-managed continuous WAL archiving, measured RPO/RTO,
-and a periodic restore rehearsal against production-sized data.
+Still **not** evidenced anywhere in this project: storage outside the source
+host's failure boundary, a cross-region copy, a read-only restore identity,
+automated key rotation, alert routing, and any measurement against
+production-sized data. See §14.

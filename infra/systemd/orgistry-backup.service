@@ -1,0 +1,11 @@
+[Unit]
+Description=Orgistry logical database backup to encrypted off-host storage
+Documentation=file://@ORGISTRY_TOOLING_DIR@/../docs/backup-and-restore.md
+
+[Service]
+Type=oneshot
+Environment=ORGISTRY_BACKUP_CONFIG=@ORGISTRY_BACKUP_CONFIG@
+ExecStart=/usr/bin/env node @ORGISTRY_TOOLING_DIR@/backup-ops.mjs ship-backup --label scheduled
+# A backup that hangs is a backup that never completes and never reports. Bound
+# it so the timer's next firing finds a clean slate rather than a stuck job.
+TimeoutStartSec=1800

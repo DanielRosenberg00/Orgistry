@@ -24,6 +24,7 @@
 //       [--migration-verified-head H] [--migration-applied-count N] \
 //       --backup-result taken|skipped|unavailable|failed [--backup-reason R] \
 //       [--backup-artifact NAME] [--backup-recovery-point ISO] \
+//       [--backup-protection verified|degraded-accepted|not-configured|disabled] \
 //       --smoke-result passed|failed|not-run [--smoke-checks N] \
 //       --runtime-api-digest D --runtime-web-digest D \
 //       --public-api-base-url URL [--public-csrf-header-name N] [--public-mailpit-url URL] \
@@ -193,6 +194,11 @@ function commandRecord(argv) {
       reason: options['backup-reason'],
       artifact: options['backup-artifact'],
       recoveryPoint: options['backup-recovery-point'],
+      // Sprint 28: whether the environment's ongoing backup programme was
+      // verified healthy at deployment time. A pre-deployment backup proves a
+      // recovery point exists for THIS deployment; this proves the environment
+      // was actually protected when the deployment happened. Different claims.
+      protection: options['backup-protection'],
     }),
     smoke: compact({
       result: requireOption(options, 'smoke-result'),

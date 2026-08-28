@@ -376,6 +376,51 @@ runtime/migration/env-contract/image-policy reference).
 > not required on the host and are not installed there. **ORG-PR-001 is
 > CLOSED** on that evidence, and **Sprint 27 is complete** — its repository
 > changes were published as PR #40 and passed every mandatory remote gate.
+>
+> **Update (Sprint 28, 2026-08-27) — the backup programme surface.** A second
+> operational surface now ships to the deployment host, built to the same rule:
+> Node built-ins only, no npm dependency closure, no application source.
+> - `tooling/backup-ops.mjs` — the operator CLI (`verify-store`, `ship-backup`,
+>   `ship-base-backup`, `ship-wal`, `catalog`, `health`, `wal-health`, `fetch`,
+>   `fetch-wal`, `prune`). Exit 0 healthy, exit 1 unhealthy; no third state.
+> - `tooling/lib/backup-crypto.mjs` — AES-256-GCM with an authenticated header;
+>   the only key-derived value that leaves it is an HMAC fingerprint.
+> - `tooling/lib/object-store.mjs` — S3-compatible client signing AWS SigV4 with
+>   `node:crypto`; five operations, header authentication only, never a
+>   presigned URL.
+> - `tooling/lib/backup-config.mjs` — one configuration file per environment;
+>   each secret in its own file, refused if group- or world-readable.
+> - `tooling/lib/backup-catalog.mjs`, `tooling/lib/backup-health.mjs` — the
+>   inventory shape and the health rules, as pure functions.
+> - `tooling/lib/pg-client.mjs` — containerised PostgreSQL client access for
+>   Node, reading the pinned image from `tooling/lib/pg-tools.sh` so the digest
+>   has one definition.
+> - `tooling/pg-enable-wal-archiving.sh` — idempotent continuous-archiving
+>   enablement on a deployed database.
+> - `tooling/backup-install-systemd.sh` + `infra/systemd/` — the versioned
+>   schedule, installed as systemd **user** units (no root).
+> - `tooling/backup-restore-rehearsal.sh`, `tooling/backup-pitr-rehearsal.sh` —
+>   the real-target recovery rehearsals.
+> - `tooling/seed-durability-rehearsal-data.sh` — representative synthetic data
+>   for a deployed environment, reusing the Sprint 25 fixture.
+>
+> Offline test surface: `tooling/backup-crypto.test.ts`,
+> `tooling/object-store.test.ts`, `tooling/backup-config.test.ts`,
+> `tooling/backup-catalog.test.ts`, `tooling/backup-health.test.ts` — **86
+> tests**, including the two published AWS SigV4 vectors, the transport-retry
+> contract (retried on a connect failure with a rebuilt body, bounded
+> exhaustion, never retried on an HTTP status), and the idle-database
+> WAL-freshness regression.
+>
+> **Update (Sprint 28 closure, 2026-08-27):** this surface has been executed
+> against **real off-host storage** — DigitalOcean Spaces,
+> `orgistry-staging-backups` (`fra1`) — taking scheduled encrypted backups,
+> archiving WAL continuously from the deployed PostgreSQL, and recovering from
+> that storage in both a logical restore and a point-in-time recovery. Its
+> host-side dependency closure remains Node built-ins only, with no npm
+> dependencies and no application source. **ORG-PR-005 is CLOSED** on that
+> evidence.
+>
 > - `tooling/deploy-smoke.sh` — nine URL-only post-deployment checks.
 > - `tooling/deploy-rollback.sh` — application rollback to the previous
 >   known-good release.

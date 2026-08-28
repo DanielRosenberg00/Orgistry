@@ -34,8 +34,8 @@ average — do not read a high domain score as launch clearance.
 | CI/CD | 4 | Yes | CI + security + CodeQL workflows: SHA-pinned actions, least-privilege permissions, frozen-lockfile installs (S21); all three green remotely, secret gate proved to FAIL on a seeded finding, `main` ruleset makes the checks required (S22); deployable-artifact build+smoke gate in CI (S23); release workflow that publishes to GHCR only after proving all six required checks succeeded for the exact release SHA, plus environment-scoped deployment-verification and deployment-rehearsal workflows — all executed remotely and green for `91664d0` (S26) | No artifact signing or SLSA provenance; nothing has been deployed to an environment | ORG-PR-001 | High |
 | Supply chain | 3 | Yes | Advisories remediated (`drizzle-orm` 0.45.2, `esbuild` ≥0.25, in-range transitives, S21); audit gates + Gitleaks + Dependabot executing remotely and enforced as required checks, SAST findings fully triaged (S22); every active image reference tag+digest-pinned (S23, ORG-PR-042 closed); build-once/promote-by-digest enforced at four points and a schema-validated release manifest (S26); two documented advisory acceptances | No artifact signing or SLSA provenance attestation; published images are single-architecture amd64 | ORG-PR-001 | High |
 | Infrastructure | 3 | Yes | Production-shaped non-root API/web artifacts + explicit migration entrypoint + production-like compose reference, all CI-smoke-validated (S23); single-host deployment topology, promote-by-digest deployment script with migrate-once + verified head, post-deploy smoke, evidence ledger, and rehearsed application rollback (S26); **a durable staging-like target deployed to and rolled back for real, with public HTTPS smoke and machine-generated evidence (S27) — ORG-PR-001 closed** | **No production environment**; the staging-like target is single-host with no HA/autoscaling, holds synthetic data only, has no observability, and account email does not work there; the `staging-like` GitHub Environment has a deployment-branch policy but no reviewer separation (single maintainer, documented); no IaC; no least-privilege DB roles | ORG-PR-007, 022 | High |
-| Reliability | 2 | Yes | Graceful shutdown; readiness probes; tested recovery tooling (S25) | No scheduled backups; fail-open non-sensitive limiters | ORG-PR-005, 009, 016 | High |
-| Backup & recovery | 2 | Yes | Repeatable logical backup + checksum + provenance; restore drill into a fresh DB reaching the packaged artifact incl. an authenticated read of restored data; **PITR VERIFIED** (base backup + archived WAL + recovery target); CI-gated; command-level runbooks (S25) | Nothing schedules a backup; no remote/encrypted storage; no continuous WAL archiving on a long-lived DB; no provider-managed PITR; no measured RPO/RTO; failed-migration recovery unrehearsed | ORG-PR-005, 028 | High |
+| Reliability | 3 | Yes | Graceful shutdown; readiness probes; tested recovery tooling (S25); scheduled backup/WAL/health jobs on the staging-like target writing to off-host storage, with rehearsed recovery from it (S28) | Nothing schedules the retention cleanup; fail-open non-sensitive limiters; no alert routing; single-region backups | ORG-PR-009, 016 | High |
+| Backup & recovery | 4 | **No — CLOSED (S28)** | S25 capability plus the S28 running programme on the staging-like target with **real off-host storage** (DigitalOcean Spaces, `fra1`): scheduled encrypted backups, continuous WAL archiving from the deployed DB, client-side AES-256-GCM, least-privilege backup role, recovery-point catalog, health checks that exit non-zero, artifact lifecycle, deployment protection preflight, and **both rehearsals passed fetching from the Space** (logical restore 28 s / 33 s to API readiness, PITR 10 s, configured RPO ≈ 7.0 min, observed 72–132 s — staging-scale) | Single region: Space and droplet both in `fra1`, so host loss is covered but a regional outage is not; no provider-managed PITR; no second storage provider; no alert routing; no production-scale RPO/RTO; failed-migration recovery unrehearsed | ORG-PR-028 | High |
 | Observability | 1 | Yes | Structured logs + request IDs | No metrics/tracing/alerts | ORG-PR-007 | High |
 | Operations | 1 | Yes | Local runbook, strong DX | No incident process/prod runbook | ORG-PR-008, 027 | High |
 | Privacy | 1 | Partly | Sanitized metadata, soft-delete, bounded `security_events` history (S25) | No export/delete; retention is global growth control, not per-plan enforcement or erasure | ORG-PR-025, 043 | Medium |
@@ -321,3 +321,57 @@ the P1/P2 work and the launch gate (see
 > including a manually dispatched Deployment Rehearsal (run `33065548416`).
 > ORG-PR-001 closing remains a finding closure, not a readiness declaration —
 > staging readiness and production readiness both remain **NO**.
+
+> **Scorecard update (Sprint 28, 2026-08-27).** **Backup & recovery moves
+> 2 → 3.** The staging-like target now runs a real backup programme: scheduled
+> encrypted logical backups on systemd user timers, continuous WAL archiving
+> from the deployed PostgreSQL with a two-minute off-host shipper, client-side
+> AES-256-GCM applied before anything leaves the host, a least-privilege backup
+> role, a store-derived recovery-point catalog, backup and archive-health checks
+> that exit non-zero, an artifact lifecycle distinct from application-table
+> retention, and a deployment protection preflight that refuses to migrate an
+> unprotected environment. **Both real-target rehearsals passed** — a stored
+> backup restored into an isolated database and driven through the packaged API
+> (**RTO 24 s**), and a point-in-time recovery from WAL the deployed database
+> produced and shipped, verified in both directions (**RTO 14 s**), with a
+> configured **RPO ≈ 7 minutes**. It reaches 3 on the criterion "a real
+> environment is really being backed up and a real recovery has really been
+> performed against it". It does **not** reach 4, on one fact: **nothing is
+> stored outside the source host's failure boundary**. The storage path was
+> exercised end to end against a throwaway S3-compatible server on the source
+> host — mechanism proven, protection not. Losing the droplet today still loses
+> every backup and the whole WAL archive. **Reliability stays at 2** (the
+> retention cleanup is still unscheduled and there is still no alert routing).
+> **Secrets/Ops stays where it was**, and ORG-PR-006 is arguably *larger*: the
+> backup encryption key is a new host file whose loss is unrecoverable, with no
+> escrow. **Observability stays where it was** — the new health checks are
+> failure *visibility*, not alerting. **3 P1 blockers remain open (ORG-PR-002,
+> 005, 006)**, so the overriding rule still yields *not production ready*; the
+> state remains **C — Ready to continue production implementation**. Staging
+> ready: **NO**. Production ready: **NO**. Next: provision off-host storage and
+> re-run both rehearsals against it — that is the entire remaining ORG-PR-005
+> closure list.
+
+> **Scorecard update (Sprint 28 closure, 2026-08-27).** **ORG-PR-005 is CLOSED
+> and Backup & recovery moves 3 → 4.** Real off-host storage now exists and has
+> been proven end to end: DigitalOcean Spaces (`orgistry-staging-backups`,
+> `fra1`) receives scheduled encrypted logical backups, base backups, and
+> continuously archived WAL from the deployed PostgreSQL, and **both recovery
+> rehearsals retrieved their artifacts back out of it** — a logical restore
+> reaching packaged API readiness in 33 s, and a point-in-time recovery to a
+> chosen timestamp in 10 s with archived-WAL consumption asserted from the
+> recovery log. It reaches 4 on the criterion "a real environment is backed up
+> off-host and a real recovery has been performed from that storage". It does
+> **not** reach 5: single region, no provider-managed PITR, no second provider,
+> no alert routing, and no production-scale measurement. **Reliability moves
+> 2 → 3** on the same evidence; the retention cleanup is still unscheduled and
+> there is still no alert routing. **Secrets/Ops is unchanged and ORG-PR-006 is
+> arguably larger**: the backup encryption key is a new host file whose loss is
+> unrecoverable, with no escrow. **Observability is unchanged** — the new health
+> checks are failure *visibility*, not alerting. **2 P1 blockers remain open
+> (ORG-PR-002, ORG-PR-006)**, so the overriding rule still yields *not
+> production ready*; the state remains **C — Ready to continue production
+> implementation**. Staging ready: **NO**, unchanged and for reasons ORG-PR-005
+> never covered (account email does not work on the target; no observability).
+> Production ready: **NO**. Next: **ORG-PR-002**, the last blocker preventing
+> staging from being exercised end to end.

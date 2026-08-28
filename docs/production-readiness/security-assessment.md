@@ -406,11 +406,49 @@ recovery target time, with pre-target rows recovered from archived WAL and
 post-target `DELETE`/`DROP TABLE` damage undone. The data-layer and
 artifact drills are CI-gated; PITR runs manually and weekly.
 
-**ORG-PR-005 nevertheless remains a P1 blocker**, on its deployment-dependent
-half: nothing SCHEDULES a backup, no artifact is stored remotely or encrypted,
-no long-lived database archives WAL, no provider-managed PITR window exists,
-archive health is unmonitored, and no RPO/RTO has been measured. A verified
-drill is a capability; it is not a backup posture. No migration recovery
+**Sprint 28 (2026-08-27) turned that capability into an operating programme on
+the staging-like target**, and it changed the security posture of backups in
+three ways worth stating explicitly. *Confidentiality:* logical backups, base
+backups, and WAL segments are encrypted **client-side with AES-256-GCM before
+they leave the host**, with the key in a mode-0600 file the storage provider
+never sees — the documentation is careful that this is **not** the same as a
+provider's "encryption at rest", which decrypts transparently for every
+authorised bucket reader. *Integrity:* the artifact header is authenticated
+(AES-GCM AAD) and carries the plaintext digest recorded at backup time, so a
+tampered metadata document cannot make a corrupt restore look correct, and both
+rehearsals verify the recovered bytes against it. *Least privilege:* backups are
+taken by a dedicated PostgreSQL role (`LOGIN`, `REPLICATION`,
+`pg_read_all_data`; not superuser, not `CREATEROLE`, not `CREATEDB`; writes
+verified refused), admitted for replication by a `pg_hba` rule scoped to that
+one role requiring `scram-sha-256`.
+
+It also **adds** a security liability: a backup encryption key whose loss is
+unrecoverable, with no escrow and no key hierarchy, rotated by hand. That
+belongs to ORG-PR-006, which Sprint 28 made slightly larger rather than smaller.
+
+**ORG-PR-005 is CLOSED as of Sprint 28.** Off-host storage is live and proven —
+DigitalOcean Spaces (`orgistry-staging-backups`, `fra1`) — and both recovery
+rehearsals retrieved their artifacts back out of it before restoring. From a
+security standpoint the important properties are that the artifacts leave the
+host already encrypted, that their integrity is verified against a digest
+recorded at backup time inside an authenticated header, and that the database
+side runs under a role that cannot write.
+
+One diagnostic episode is worth recording because it exercised the security
+posture correctly: an incomplete object-store secret installed by hand (8
+characters against DigitalOcean's 43) produced only `SignatureDoesNotMatch`. It
+was isolated to **credential configuration rather than repository SigV4** by an
+independent AWS CLI baseline that failed identically with the same pair, run in
+a transient container with a mode-0600 credentials file deleted on exit and no
+value ever printed. **No object-store code was changed on the strength of a
+hypothesis the evidence did not support.**
+
+**Still absent, and still security-relevant:** provider-managed PITR, a
+cross-region or second-provider copy (one bucket in the droplet's own region),
+a read-only restore identity separate from the write identity, automated
+encryption-key rotation with escrow, and alert routing on backup or archive
+health. The encryption key is a new unrecoverable-loss liability that belongs to
+**ORG-PR-006**, which remains open. No migration recovery
 rehearsal (ORG-PR-028 — the mechanism now exists, the rehearsal does not). No
 background runtime (ORG-PR-016). Redis fail-open (ORG-PR-009) and best-effort
 writes that can fail requests (ORG-PR-034) are the main runtime-resilience

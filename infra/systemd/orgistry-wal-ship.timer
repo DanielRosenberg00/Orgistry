@@ -1,0 +1,13 @@
+[Unit]
+Description=Ship Orgistry WAL segments off-host every two minutes
+
+[Timer]
+# The recovery-point objective is bounded by archive_timeout plus this interval
+# plus upload time — see docs/pitr.md, "Recovery objectives".
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=orgistry-wal-ship.service
+
+[Install]
+WantedBy=timers.target

@@ -134,6 +134,14 @@ The drills create and destroy their own PostgreSQL containers; they never touch
 organization, and hash data even locally — see the security rules in
 [backup-and-restore.md](backup-and-restore.md#7-backup-security).
 
+**This is the local runbook.** Operating the scheduled, encrypted, off-host
+backup programme on a deployed environment (DigitalOcean Spaces, since
+Sprint 28) — health checks, the recovery-point
+catalog, retrieval, the artifact lifecycle, and the real-target restore and PITR
+rehearsals — is a different set of commands that runs on the deployment host.
+They live in [backup-and-restore.md](backup-and-restore.md) ("Runbooks") and
+[pitr.md](pitr.md). Nothing in this file schedules or ships anything.
+
 ## Rehearsing a deployment locally
 
 ```bash

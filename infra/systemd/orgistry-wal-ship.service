@@ -1,0 +1,11 @@
+[Unit]
+Description=Ship spooled Orgistry WAL segments to encrypted off-host storage
+Documentation=file://@ORGISTRY_TOOLING_DIR@/../docs/pitr.md
+
+[Service]
+Type=oneshot
+Environment=ORGISTRY_BACKUP_CONFIG=@ORGISTRY_BACKUP_CONFIG@
+ExecStart=/usr/bin/env node @ORGISTRY_TOOLING_DIR@/backup-ops.mjs ship-wal
+# Shorter than the timer interval, so a stuck shipment can never overlap the
+# next one and race for the same spool files.
+TimeoutStartSec=100

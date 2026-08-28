@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily Orgistry logical database backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+# Jitter keeps a fleet of hosts from starting every backup in the same second.
+RandomizedDelaySec=600
+# Run a missed backup at the next opportunity: a host that was down at 02:30
+# still needs today's recovery point.
+Persistent=true
+Unit=orgistry-backup.service
+
+[Install]
+WantedBy=timers.target

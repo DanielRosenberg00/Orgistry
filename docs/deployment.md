@@ -115,7 +115,7 @@ a successful deployment        !=  production readiness
 | Real user data allowed | no | no | no | **no** | yes |
 | Secrets source | `.env` local defaults | fake checked-in/generated values | fake checked-in values | operator runtime env file (0600) or `<NAME>_FILE` mounts | same |
 | Email behavior | Mailpit sink | none delivered | Mailpit stand-in, delivery not exercised | `smtp` driver pointed at an operator-run **isolated sink**; delivery not exercised, **no real provider** ([Staging mail model](#staging-mail-model)) | real provider required, still unvalidated (ORG-PR-002) |
-| Backup behavior | manual `pnpm db:backup` | drills only, throwaway data | none | pre-deployment backup preflight; nothing scheduled | scheduled + off-host storage required, **does not exist** (ORG-PR-005) |
+| Backup behavior | manual `pnpm db:backup` | drills only, throwaway data | none | scheduled encrypted backups to **off-host DigitalOcean Spaces** + continuous WAL archiving + hourly health checks + rehearsed restore and PITR from that storage (Sprint 28); single-region | production programme with cross-region durability and alerting, **does not exist** |
 | Deployment trigger | `pnpm dev` | push / pull request | `pnpm artifact:smoke` | operator runs `tooling/deploy.sh` after the `Deploy` workflow verifies the release | same, plus required reviewers |
 | Required gates | none | the six required checks | artifact smoke | release gated by artifact smoke; deployment gated by migration verification and post-deploy smoke | same |
 | Rollback model | irrelevant | irrelevant | irrelevant | redeploy previous known-good digests | same |
@@ -794,15 +794,16 @@ Stages, in order, each failing the deployment loudly and naming itself:
 | 3 | Pre-deployment validation | the compose topology declares a build section; the release is not deployable and the environment is not a rehearsal; the runtime env file is missing, unreadable, not 0600, missing a required key, or not `NODE_ENV=production` |
 | 4 | Pull both images by digest | a digest is not available from the registry this host can reach |
 | 5 | Verify the images can run on this host | an image's platform is not the Docker host's platform, and emulation was not explicitly opted into (Sprint 27; see [Host baseline and target preflight](#host-baseline-and-target-preflight)) |
-| 6 | Backup / recovery-point preflight | the pre-deployment backup fails, or a skip has no recorded reason |
-| 7 | Migrations, exactly once | the migration container exits non-zero |
-| 8 | Verify the applied migration head | the database's applied migrations do not match the release's declared head |
-| 9 | Deploy the API, wait for health | the API container never becomes healthy |
-| 10 | Deploy the web artifact | the web container does not start |
-| 11 | Wait for readiness | `/ready` does not return 200 |
-| 12 | Verify the running container digests | a running container is not the released image |
-| 13 | Post-deployment smoke | any smoke check fails |
-| 14 | Record deployment evidence | — (evidence is written for failures too, from stage 7 onward) |
+| 6 | Backup protection preflight | the environment's ongoing backup programme is unhealthy and `ORGISTRY_BACKUP_PROTECTION_CHECK=require` (Sprint 28) |
+| 7 | Backup / recovery-point preflight | the pre-deployment backup fails, or a skip has no recorded reason |
+| 8 | Migrations, exactly once | the migration container exits non-zero |
+| 9 | Verify the applied migration head | the database's applied migrations do not match the release's declared head |
+| 10 | Deploy the API, wait for health | the API container never becomes healthy |
+| 11 | Deploy the web artifact | the web container does not start |
+| 12 | Wait for readiness | `/ready` does not return 200 |
+| 13 | Verify the running container digests | a running container is not the released image |
+| 14 | Post-deployment smoke | any smoke check fails |
+| 15 | Record deployment evidence | — (evidence is written for failures too, from stage 8 onward) |
 
 There is no `--skip-smoke`. A deployment that cannot be validated is not a
 deployment that happened successfully.
@@ -1038,15 +1039,47 @@ indistinguishable from an oversight. A rollback (`--no-migrate`) skips the
 preflight automatically with the reason recorded, because it creates no new
 recovery-point requirement.
 
-Verifying WAL archival health before a migration is **not** implemented: no
-long-lived database with continuous archiving exists to verify. When one does,
-the check belongs in this stage, and its result belongs in the same record.
+### Backup protection preflight (Sprint 28)
 
-What cannot be verified until real production backup infrastructure exists:
-that backups are scheduled, that they are stored off-host and encrypted, that a
-restore meets the ratified RTO at production data volume, and that WAL archiving
-gives the ratified RPO. All of that is `ORG-PR-005`, which this integration does
-**not** close: taking a backup at deploy time is not a backup programme.
+A pre-deployment backup proves a recovery point exists for **this** deployment.
+It says nothing about whether the environment was protected at all. Since
+Sprint 28 the deployment also checks that, in a stage of its own, immediately
+before the pre-deployment backup and well before any migration.
+
+When `ORGISTRY_BACKUP_CONFIG` names the environment's backup configuration file,
+the deployment runs both health checks — `backup-ops.mjs health` and
+`backup-ops.mjs wal-health` — and behaves according to
+`ORGISTRY_BACKUP_PROTECTION_CHECK`:
+
+| Value | Behaviour | Recorded as |
+| --- | --- | --- |
+| `require` (default when a backup configuration is present) | **aborts before migrations**, target untouched | — (nothing was deployed) |
+| `warn` | continues, and the degradation travels with the evidence | `protection: degraded-accepted` plus a record limitation |
+| `off` | skips the check | `protection: disabled` |
+| *(no backup configuration)* | skipped | `protection: not-configured` plus a record limitation |
+
+Both checks always run, so one report shows the whole picture: an environment can
+have fresh logical backups **and** broken WAL archival, which is precisely the
+state that looks safe and is not.
+
+The verdict is written to `backupPreflight.protection` on the deployment record.
+Any value other than `verified` adds an explicit limitation to the record, so a
+reader of a single record cannot mistake it for evidence that a recovery window
+existed.
+
+Configuration keys: `ORGISTRY_BACKUP_CONFIG`,
+`ORGISTRY_BACKUP_PROTECTION_CHECK` — see `infra/deploy.env.example` and
+[backup-and-restore.md](backup-and-restore.md).
+
+### What the integration still does not prove
+
+The deployment can now refuse to migrate an unprotected environment. It still
+does not make the environment protected — that is the backup programme's job,
+and that programme is what closed `ORG-PR-005` in Sprint 28
+([backup-and-restore.md](backup-and-restore.md), §9). Taking a backup at deploy
+time is not a backup programme, and verifying one is **not** a production
+recovery guarantee at production data volume: the protection preflight confirms
+a staging-like programme is healthy, nothing more.
 
 ## Health, readiness, and post-deployment smoke
 
@@ -1384,10 +1417,13 @@ Deployment-specific. The project-wide list is
   manifest validator, but nothing automatically reconciles it with the live
   ruleset.
 - **Migration rollback does not exist** and is not claimed anywhere.
-- **The backup preflight is a single pre-migration backup**, not a backup
-  programme: nothing schedules backups, nothing stores them off-host, nothing
-  encrypts them, no WAL archival health check exists, and no RPO/RTO has been
-  measured (ORG-PR-005).
+- **The backup preflight is a single pre-migration backup**, and the protection
+  preflight only *checks* the programme it does not run. Since Sprint 28 the
+  staging-like environment schedules encrypted backups into off-host storage
+  (DigitalOcean Spaces, `fra1`), archives WAL continuously, and has measured
+  staging-scale RPO/RTO from real recovery rehearsals. The remaining durability
+  limitation is that the Space and the droplet share a region
+  ([backup-and-restore.md](backup-and-restore.md), §9, §14).
 - **Secrets are files on a host.** No secret store, no access control, no
   read auditing, no automated rotation (ORG-PR-006).
 - **No TLS, DNS, reverse-proxy, WAF, or CDN configuration** is provided. A real

@@ -120,8 +120,8 @@ established requirement.
 | --- | --- | --- |
 | **Availability** | ~99.5% (single region, rolling deploys) | A public multi-tenant SaaS would demand ≥99.9% + multi-AZ, changing infra materially. |
 | **Latency** | p95 < 300 ms for API reads at A2 scale | Requires the audit-read index (ORG-PR-014) and pool/statement timeouts (ORG-PR-021). |
-| **RPO** | ≤ 1 hour (PITR) before production data; daily snapshot acceptable for controlled evaluation | Larger/regulated targets push RPO toward minutes + cross-region replicas. |
-| **RTO** | ≤ 4 hours, via rehearsed restore | Restore and PITR procedures are rehearsed against SYNTHETIC data (S25) and pass; not yet rehearsed against a real environment or production-sized data, and no recovery time has been measured (ORG-PR-005). Larger target → automated failover. |
+| **RPO** | ≤ 1 hour (PITR) before production data; daily snapshot acceptable for controlled evaluation | **Measured in S28**: configured upper bound **≈ 7.0 minutes** (`archive_timeout` 300 s + WAL shipping interval 120 s + upload), with **observed** commit-to-off-host latency of **72 s / 132 s / 130 s** across three runs. Continuous WAL archiving from the deployed PostgreSQL to DigitalOcean Spaces. Staging-like measurement, not a production guarantee; not stress-tested under sustained write load. |
+| **RTO** | ≤ 4 hours, via rehearsed restore | **Measured in S28 against the real staging-like environment, recovering from off-host DigitalOcean Spaces**: logical restore **28 s** to a verified database and **33 s** through packaged API `/ready`; point-in-time recovery **10 s**. Comfortably inside the 4-hour objective at this scale. All are **staging-like measurements against an ~8 MB synthetic database**, dominated by fixed costs, and are **not** a production guarantee — no recovery has been timed at production data volume. Larger target → automated failover. |
 | **Email delivery** | Authenticated TLS SMTP/API provider with verified domain (SPF/DKIM/DMARC published) | Blocking for invitations/recovery (ORG-PR-002). The adapter and credential plumbing exist; no provider send, inbox receipt, or domain authentication has ever been validated. |
 | **Billing** | **None** (fixed demo plans) | Out of scope; the entitlement/quota seam is designed to accept billing later without reworking authorization. |
 | **Operator model** | Small team, business-hours on-call, runbook-driven | Larger target → dedicated on-call + SLOs/error budgets. |
@@ -203,8 +203,17 @@ decisions via DG-1/DG-5.
   are not met and cannot be until Phase 4: RPO ≤ 1 h needs continuous WAL
   archiving on a long-lived database (none exists), and RTO ≤ 4 h is an
   unmeasured claim — the drills recover fixture-sized databases in seconds,
-  which says nothing about production volume. ORG-PR-005 stays open on exactly
+  which says nothing about production volume. ORG-PR-005 stayed open on exactly
   this gap.
+  *Status (Sprint 28, 2026-08-27):* the **staging-like** half is now met and
+  ORG-PR-005 is **closed**. Continuous WAL archiving runs on the deployed
+  PostgreSQL and ships to off-host DigitalOcean Spaces, giving a configured RPO
+  upper bound of ≈ 7.0 minutes — inside DG-5's ≤ 1 h — and rehearsed recovery
+  from that storage measured 28 s (verified database), 33 s (through packaged
+  API readiness), and 10 s (point-in-time), all far inside DG-5's ≤ 4 h. **The
+  objectives remain unproven at production scale**: every figure is a
+  staging-like baseline against an ~8 MB synthetic database, and DG-5 is a
+  production gate. It is met in mechanism, not in measurement.
 
 ## What this target explicitly is not
 

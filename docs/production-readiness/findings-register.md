@@ -19,6 +19,16 @@ system is pre-production.
 Counts: **6 P1**, **22 P2**, **17 P3**, **9 P4** — 54 total (at Sprint 14 audit
 time; original entries below are preserved as recorded).
 
+> **How to read what follows.** The next section is a **chronological
+> per-sprint reconciliation log**. Each paragraph records the finding state *as
+> it stood at the end of that sprint* and is preserved unedited as history — so
+> statements like "ORG-PR-005 remains Open" are true of their own sprint and are
+> **not** current. For the current state, read the last entry
+> ([Sprint 28 reconciliation](#sprint-28-reconciliation-2026-08-27--current-state))
+> together with the [Summary table](#summary-table) and each finding's own entry
+> under [Detailed findings](#detailed-findings), which carry the authoritative
+> status.
+
 **Status update (Sprint 15, 2026-07-18):** [ORG-PR-003](#org-pr-003) (P1) and
 [ORG-PR-047](#org-pr-047) (P4) are **Closed** with implementation and test
 evidence — see the *Resolution* line appended to each entry. **Open P1
@@ -413,6 +423,37 @@ Recommended next: **Sprint 28 — Backup and Recovery Operations Closure
 artifact: [sprint-27-artifact-package.md](sprint-27-artifact-package.md); see
 also [../deployment.md](../deployment.md).
 
+### Sprint 28 reconciliation (2026-08-27) — current state
+
+[ORG-PR-005](#org-pr-005) (P1) is **CLOSED**. The deployed PostgreSQL archives
+WAL continuously; systemd timers take encrypted logical backups and ship WAL to
+**off-host DigitalOcean Spaces** (`orgistry-staging-backups`, `fra1`); health
+checks, a recovery-point catalog, an artifact lifecycle, and a deployment
+protection preflight are in place; and **both a logical restore and a
+point-in-time recovery were performed by retrieving artifacts back out of that
+storage**, with staging-like RPO and RTO measured. Closure means the required
+operational recovery pattern is proven on the staging-like target — **not** that
+production has been exercised.
+
+[ORG-PR-002](#org-pr-002) (P1) **remains Open** — unchanged; no provider, no
+mail to a real recipient, no SPF/DKIM/DMARC.
+
+[ORG-PR-006](#org-pr-006) (P1) **remains Open** — unchanged in substance, and
+slightly enlarged: the new backup encryption key is another host-local secret
+whose loss is unrecoverable, with no escrow.
+
+[ORG-PR-007](#org-pr-007) and [ORG-PR-009](#org-pr-009) **remain Open** — the
+new backup and archive health checks are failure *visibility*, not alert
+routing. Nothing pages anyone.
+
+**Open P1 production blockers: ORG-PR-002, ORG-PR-006.**
+The repository is **not** staging ready — unchanged, and for reasons ORG-PR-005
+never covered: account email does not work on the target and there is no
+observability there. It is **not** production ready. Recommended next:
+**ORG-PR-002**, the last blocker preventing staging from being exercised end to
+end. Final artifact:
+[sprint-28-artifact-package.md](sprint-28-artifact-package.md).
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
@@ -421,7 +462,7 @@ also [../deployment.md](../deployment.md).
 | [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16 adapter + guard; Sprint 24 runtime credential source, failure-mode redaction proofs, family matrix, operator validation procedure): external delivery, inbox receipt, and sender-domain authentication all still unvalidated** | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
 | [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
-| [ORG-PR-005](#org-pr-005) | No database backup / PITR / tested restore — **Open; materially advanced (Sprint 25): repeatable logical backup, tested restore into a fresh database reaching the packaged artifact, and a VERIFIED PITR drill; no backup schedule, no encrypted remote storage, no continuous WAL archiving, no provider-managed PITR, no measured RPO/RTO** | Backup & DR | Production blocker | P1 | High |
+| [ORG-PR-005](#org-pr-005) | No database backup / PITR / tested restore — **Closed (Sprint 28, 2026-08-27)**: scheduled encrypted logical backups and continuously archived WAL from the deployed PostgreSQL into off-host DigitalOcean Spaces (`orgistry-staging-backups`, `fra1`), backup and archive health checks, a recovery-point catalog and artifact lifecycle, and **both a logical restore and a point-in-time recovery performed by retrieving artifacts back out of that storage**, with measured staging-like RPO and RTO | Backup & DR | Production blocker | P1 | High |
 | [ORG-PR-006](#org-pr-006) | No secrets management or rotation procedure — **Open; materially advanced (Sprint 24): runtime env/file secret sources validated before production guards, graceful JWT key rotation, redaction proofs, manual rotation runbooks; no secrets manager, no automated rotation, no rehearsed rotation** | Secrets/Ops | Production blocker | P1 | High |
 | [ORG-PR-007](#org-pr-007) | No observability (metrics/tracing/dashboards/alerts) | Observability | Operational gap | P2 | High |
 | [ORG-PR-008](#org-pr-008) | No incident response / production runbook / on-call | Operations | Operational gap | P2 | High |
@@ -953,7 +994,8 @@ Standards · Threats.
 
 <a id="org-pr-005"></a>
 ### ORG-PR-005 — No database backup / PITR / tested restore
-- **Class / Sev / Conf:** Production blocker · P1 · High · Verified fact (absence).
+- **STATUS: CLOSED (Sprint 28, 2026-08-27).** See the closure record at the end of this entry.
+- **Class / Sev / Conf:** Production blocker · P1 · High · Verified fact (absence, at time of audit).
 - **Evidence:** No backup config anywhere; `infra/docker-compose.yml` uses a local named volume only. `docs/roadmap.md` lists "No backup/restore story" as a critical gap. `docs/known-limitations.md` confirms no operational tooling.
 - **Current behavior:** No automated backups, no point-in-time recovery, no restore procedure, no restore test.
 - **Expected production behavior:** Automated encrypted backups + PITR meeting the target RPO/RTO ([production-target.md](production-target.md)), with a **restore drill executed before production data** and re-verified periodically.
@@ -1103,6 +1145,155 @@ Standards · Threats.
   PITR drill was performed** — none is claimed. ORG-PR-001 closing removes the
   dependency that previously blocked this finding's environment-dependent half,
   which makes it the strongest candidate for the next sprint.
+- **Progress (Sprint 28 interim, 2026-08-27 — SUPERSEDED by the closure record
+  below): OPEN at that point in the sprint; blocked on exactly one
+  requirement.** *Retained as the mid-sprint record. Everything it describes as
+  missing was delivered later the same day; read the CLOSURE entry that follows
+  for the final state.*
+
+  Sprint 28 built the backup *programme* on top of Sprint 25's capability and
+  ran it against the Sprint 27 staging-like target. What is now real and
+  evidenced on `orgistry-staging-01`:
+
+  - *Scheduled backups.* Four systemd **user** timers (no root required;
+    `loginctl enable-linger` makes them survive logout and reboot): daily
+    encrypted logical backup 02:30 UTC, WAL shipping every 2 minutes, hourly
+    health check, weekly artifact lifecycle. Versioned in `infra/systemd/` and
+    installed by `tooling/backup-install-systemd.sh`. A systemd-driven backup
+    ran and succeeded; the health unit ran and passed.
+  - *Client-side encryption.* AES-256-GCM applied **before upload**, key in a
+    mode-0600 file, identified in evidence only by an HMAC fingerprint. The
+    authenticated header carries the plaintext digest, so a tampered metadata
+    document cannot make a corrupt restore look correct. Decryption is proven by
+    both rehearsals. Storage-side and client-side encryption are documented as
+    **not equivalent**.
+  - *Continuous WAL archiving on the deployed database.* `archive_mode=on`,
+    `archive_timeout=300s`, `wal_compression=on`, archiving to a bind-mounted
+    local spool that a shipper drains every two minutes so `archive_command`
+    never blocks on the network. Settings applied with `ALTER SYSTEM` so they
+    survive a container recreate. `archived_count` moved from 0 to 24+ with
+    `failed_count` 0.
+  - *Health visibility.* `backup-ops.mjs health` and `wal-health` exit non-zero
+    on any failure and cover the quiet-death modes, including the dangerous one:
+    archiving succeeding locally while shipping is broken.
+  - *Recovery-point catalog* derived from the store itself, secret-free.
+  - *Least-privilege backup identity.* PostgreSQL role `orgistry_backup`:
+    `LOGIN`, `REPLICATION`, `pg_read_all_data`; not superuser, not `CREATEROLE`,
+    not `CREATEDB`; writes refused (verified). Replication is admitted by a
+    `pg_hba` rule scoped to that one role requiring `scram-sha-256`.
+  - *Real-target logical restore rehearsal — PASSED.* A backup taken from the
+    deployed database was retrieved from storage, decrypted, digest-verified
+    against the value recorded at backup time, restored into an isolated
+    PostgreSQL asserted empty first, and verified for schema, migration ledger
+    (13), reference data, and tenant rows including byte-identical API-key hash
+    metadata; the packaged migration entrypoint then ran as a no-op and the
+    packaged API reached `/ready` against the restored database.
+    **Logical restore RTO: 24 s.**
+  - *Real-target PITR rehearsal — PASSED.* Recovery to a chosen timestamp using
+    a base backup and 23 WAL segments the **deployed** database produced,
+    archived, and shipped; verified in both directions (pre-target state
+    present, post-target state absent, post-target `DELETE` undone), with the
+    recovery log asserted to contain `restored log file` and a
+    recovery-stopping line. The live database was never a recovery target and
+    was restored to its prior state on exit. **PITR RTO: 14 s.**
+  - *Measured objectives (staging-like, explicitly not a production
+    guarantee).* Configured **RPO ≈ 7 minutes** (`archive_timeout` 300s + ship
+    interval 120s + upload). RTO as above.
+  - *Deployment integration.* `tooling/deploy.sh` gained a **backup protection
+    preflight** that verifies both health checks before migrating and aborts
+    while the target is untouched; the verdict is recorded on the deployment
+    evidence, and any value other than `verified` adds an explicit limitation.
+  - *Artifact lifecycle*, separate from application-table retention: 30 days of
+    logical backups but never fewer than the newest 7; 8 days of WAL but never
+    past the oldest surviving base backup.
+
+  **Why it stood OPEN at that point — one requirement, stated precisely.**
+  *(Resolved later the same day; see the closure record below.)*
+
+  **No off-host storage existed yet.** The upload, retrieval, catalog, and lifecycle
+  paths are implemented and were exercised end to end, but against a throwaway
+  S3-compatible server running **on the source host** for mechanism validation.
+  A same-host copy is not off-host protection: losing `orgistry-staging-01`
+  today still loses every backup and the entire WAL archive. The DigitalOcean
+  Space (or any S3-compatible bucket) in a region other than the droplet's
+  `fra1` was not provisioned during the sprint, and no credential for one exists
+  on the host or anywhere else. Closing requires: a bucket outside the source
+  host's failure boundary, `backup-ops.mjs verify-store` passing against it, a
+  scheduled backup and shipped WAL landing in it, and **both rehearsals re-run
+  fetching from it**. Everything else on the closure list is satisfied.
+
+  Secondary gaps, none of which alone would block closure but all of which
+  remain true: no provider-managed PITR, no cross-region copy of the archive, a
+  single object-store identity for both write and restore reads, manual
+  encryption-key rotation with unrecoverable key loss, no alert routing (health
+  checks exist and fail loudly; nothing pages anyone — **ORG-PR-007**), and
+  staging-scale RPO/RTO only against an ~8 MB synthetic database.
+
+  Evidence: [../backup-and-restore.md](../backup-and-restore.md),
+  [../pitr.md](../pitr.md),
+  [sprint-28-artifact-package.md](sprint-28-artifact-package.md).
+- **CLOSURE (Sprint 28, 2026-08-27): CLOSED on staging-like operational
+  evidence.**
+
+  The finding's expected production behavior was *automated encrypted backups +
+  PITR meeting a target RPO/RTO, with a restore drill executed before production
+  data*, and its stated validation was *a restore drill reconstructs the DB to a
+  target timestamp and passes readiness/integration checks*. Every element is now
+  satisfied against the real staging-like target, with off-host storage that
+  survives loss of that target.
+
+  | Closure condition | Evidence |
+  | --- | --- |
+  | Scheduled backups | four systemd **user** timers on `orgistry-staging-01` (lingering enabled, boot- and logout-surviving), all resolving to `/opt/orgistry/config/backup.env`. A systemd-executed backup ran to success; a **timer-triggered** WAL shipment ran to success |
+  | Real off-host storage | **DigitalOcean Spaces**, bucket `orgistry-staging-backups`, region `fra1`, prefix `orgistry/staging-like`. A separate service with its own storage: destroying the droplet does not touch it |
+  | Protected / encrypted artifacts | client-side **AES-256-GCM before upload**, key `b184c72b6e8f5a24` (fingerprint), authenticated header carrying the plaintext digest |
+  | Off-host retrieval | both rehearsals fetched their artifacts **back out of the Space** before restoring; `verify-store` proves write/read/list/delete, 20/20 consecutive runs |
+  | Real-target logical restore | **PASSED** — 18 tables, ledger 13, reference data, tenant rows, byte-identical API-key hash, packaged migration no-op, packaged API `/ready` 200 |
+  | Continuous real-target WAL archival | `archive_mode=on`, `archive_timeout=300s`, `wal_compression=on`; `archived_count` 39+, `failed_count` **0**; segments shipped to the Space every 2 minutes |
+  | Real-target PITR | **PASSED** — recovery to `2026-08-27 21:09:36.309411+00` from a base backup and 12 WAL segments **retrieved from DigitalOcean Spaces**; pre-target state present, post-target state absent, post-target `DELETE` undone, `restored log file` and a recovery-stopping line asserted from the recovery log |
+  | Health visibility | `backup-ops.mjs health` and `wal-health` both HEALTHY, exit 0; hourly systemd unit; non-zero exit on any failure |
+  | Recovery window | 8 days of WAL, never pruned past the oldest surviving base backup; 30 days of logical backups, never fewer than the newest 7 |
+  | RPO | configured upper bound **≈ 7.0 min** (`archive_timeout` 300 s + ship interval 120 s + upload); **observed 72 s / 132 s / 130 s** commit → present in Spaces |
+  | RTO | **28 s** to a verified restored database, **33 s** through packaged API `/ready`, **10 s** for point-in-time recovery |
+  | Validated runbooks | every command in [../backup-and-restore.md](../backup-and-restore.md) §15 and [../pitr.md](../pitr.md) executed on the target |
+  | Secret-safe operational evidence | four evidence records scanned; zero credential-shaped matches in four hours of backup journals; all four credential files mode 0600 |
+
+  **What this closure means and does not mean.** It means the required
+  operational recovery pattern has been *proven on the staging-like target*: the
+  deployed database is really backed up, really archives WAL, and has really
+  been recovered from off-host storage — both to a backup and to a chosen point
+  in time. It does **not** mean production has been exercised; no production
+  database exists. The measurements are staging-scale against an ~8 MB synthetic
+  database and are not an SLA.
+
+  **Residual limitations, recorded rather than hidden** (none of which the
+  finding required):
+  - *Single region.* The Space and the droplet are both in `fra1`. This survives
+    host loss — which is what off-host means — but not a regional outage. There
+    is one bucket and no second provider.
+  - *No provider-managed PITR*; archiving is self-managed.
+  - *One object-store identity* performs both write and restore reads.
+  - *Manual encryption-key rotation*, with unrecoverable key loss and no escrow
+    (**ORG-PR-006**, open — and enlarged by this key).
+  - *No alert routing.* The health checks exist and fail loudly; nothing pages
+    anyone (**ORG-PR-007**, open).
+  - *Provider endpoint flakiness.* `fra1.digitaloceanspaces.com` resolves to a
+    VPC-internal address that refused **52% of raw TCP connects** in a 90-sample
+    probe, in bursts of ≤3 s. The client retries transport failures (never HTTP
+    statuses), after which 20/20 `verify-store` runs succeeded.
+
+  **Two defects were found by real execution and fixed**, neither reachable by
+  the same-host mechanism validation: a WAL-freshness check that reported an
+  *idle* database as unhealthy (which, through the deployment protection
+  preflight, would have refused deployments to a protected environment), and the
+  absence of any transport retry in the object-store client against an endpoint
+  that refuses half its connects. A third issue — `SignatureDoesNotMatch` — was
+  correctly isolated to an **incomplete installed secret** (8 characters against
+  the 43 DigitalOcean issues) by an independent AWS CLI baseline that failed
+  identically; **no object-store code was changed for it**.
+
+  Evidence: [sprint-28-artifact-package.md](sprint-28-artifact-package.md).
+
 
 <a id="org-pr-006"></a>
 ### ORG-PR-006 — No secrets management or rotation procedure
@@ -1224,6 +1415,19 @@ Standards · Threats.
   access control, read auditing, expiry tracking, and automated rotation.
   Reviewer separation on the environment is unavailable for a single maintainer
   and is documented rather than simulated.
+- **Progress (Sprint 28, 2026-08-27): OPEN — unchanged, and slightly larger.**
+  ORG-PR-005 closing does not touch this finding. The backup programme
+  added three new operational credentials (a least-privilege PostgreSQL backup
+  role, an object-store access key, and a backup encryption key) and handled
+  them the same way this project already handles secrets: separate mode-0600
+  files on the host, refused if group- or world-readable, never a command-line
+  argument, never logged, and identified in evidence by fingerprint rather than
+  value. Rotating any of them is one file write and no code change. **None of
+  that is secrets management.** There is still no secret store, no access
+  control, no read auditing, no expiry tracking, and no automated rotation —
+  and the backup encryption key adds a NEW unrecoverable-loss risk with no
+  escrow and no key hierarchy. Sprint 28 made this finding slightly larger, not
+  smaller.
 
 <a id="org-pr-007"></a>
 ### ORG-PR-007 — No observability (metrics/tracing/dashboards/alerts)
@@ -1235,6 +1439,17 @@ Standards · Threats.
 - **Remediation:** Add metrics + tracing exporters and an alerting layer.
 - **Dependencies:** ORG-PR-001. **Effort:** L. **Validation:** a dashboard shows per-route latency/error rate; a synthetic readiness failure pages.
 - **Roadmap:** Phase 5. **Standards:** ASVS V7 (logging/monitoring); SSDF RV.1. **Threats:** T-OPS, T-DOS.
+- **Progress (Sprint 28, 2026-08-27): Open.** The expected-behaviour list above
+  names "backup health" among the things production alerting must cover.
+  Sprint 28 delivered the *checks* — `backup-ops.mjs health` and `wal-health`
+  exit non-zero on any failure, run hourly under a systemd timer, and cover the
+  quiet-death modes — and that materially advances the backup slice of this
+  finding. **It closes nothing.** There is still no metrics pipeline, no
+  tracing, no dashboard, and above all **no alert routing**: a failed backup
+  shows up in `systemctl --user list-units --failed` and the journal, and
+  nothing pages anyone. The integration point for a future alerting system is
+  the health unit's exit code. This must not be represented as observability
+  closure.
 
 <a id="org-pr-008"></a>
 ### ORG-PR-008 — No incident response / production runbook / on-call

@@ -446,6 +446,14 @@ whose loss is unrecoverable, with no escrow.
 new backup and archive health checks are failure *visibility*, not alert
 routing. Nothing pages anyone.
 
+**Remote validation.** The Sprint 28 changes were published as **PR #41**
+(branch `sprint-28-backup-recovery-operations`, head
+`ce2a483c6d6651a113055459fc19deb8c2340e9d`) and **all seven required checks
+passed** at that head. `Deployment rehearsal` — not a required check, no push
+trigger — is still owed remotely because Sprint 28 changed the deployment
+tooling; it passed locally and its unit tests run inside the required
+`Validate (offline)` check.
+
 **Open P1 production blockers: ORG-PR-002, ORG-PR-006.**
 The repository is **not** staging ready — unchanged, and for reasons ORG-PR-005
 never covered: account email does not work on the target and there is no

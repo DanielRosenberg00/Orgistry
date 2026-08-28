@@ -463,6 +463,47 @@ release was published. **Deploy** needed no new run — it is unchanged, and run
 YES**. Sprint 27 is complete. Staging readiness remains NO and production readiness remains NO — see
 [sprint-27-artifact-package.md](production-readiness/sprint-27-artifact-package.md).
 
+#### Sprint 28 outcome (2026-08-27)
+
+The Sprint 28 changes — the backup programme (`tooling/backup-ops.mjs`,
+`tooling/lib/backup-crypto.mjs`, `object-store.mjs`, `backup-config.mjs`,
+`backup-catalog.mjs`, `backup-health.mjs`, `pg-client.mjs`), the rehearsal and
+enablement scripts, `infra/systemd/`, the stage-6 protection preflight in
+`tooling/deploy.sh` and `tooling/deploy-evidence.mjs`, five new test suites, and
+documentation — were published as **PR #41**
+(branch `sprint-28-backup-recovery-operations`, head
+`ce2a483c6d6651a113055459fc19deb8c2340e9d`) and **all seven required checks
+passed**:
+
+| Workflow | Result |
+| --- | --- |
+| CI — `Validate (offline)`, `Integration (PostgreSQL + Redis)`, `Artifacts (build + smoke)` | **PASS** |
+| Security scans — `Dependency audit (pnpm)`, `Secret scan (Gitleaks)` | **PASS** |
+| CodeQL — `Analyze (javascript-typescript)` and the CodeQL rollup | **PASS** |
+| **Deployment rehearsal** at the published head | **NOT RUN — still owed** |
+
+**Data durability** was correctly not required — its owned surface
+(`tooling/db-backup.sh`, `db-restore-drill.sh`, `db-pitr-drill.sh`,
+`tooling/lib/pg-tools.sh`, the restore fixture, `apps/api/src/maintenance`) is
+untouched on this branch. **Release** and **Deploy** needed no new run.
+
+**`Deployment rehearsal` is outstanding.** Sprint 28 changed the deployment
+tooling, so the rule stated above applies; the workflow has no push trigger and
+must be dispatched manually:
+
+```sh
+gh workflow run deployment-rehearsal.yml --ref sprint-28-backup-recovery-operations
+```
+
+It is not a required check, it passed locally at this change set, and the
+changed tooling's unit tests run inside the required `Validate (offline)` check
+— but the remote run at this head has not happened.
+
+`ORG-PR-005` is **CLOSED** on real off-host recovery evidence and **Sprint 28
+DoD met: YES**. Staging readiness remains NO and production readiness remains
+NO — see
+[sprint-28-artifact-package.md](production-readiness/sprint-28-artifact-package.md).
+
 ### `pnpm deploy:preflight` — qualify a host
 
 `tooling/deploy-target-preflight.sh`. New in Sprint 27. Run it on a candidate

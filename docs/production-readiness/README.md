@@ -667,7 +667,17 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > target; it does not mean production has been exercised.
 >
 > Remaining durability limitation: the Space and the droplet are both in `fra1`,
-> so backups survive host loss but not a regional outage. Evidence:
+> so backups survive host loss but not a regional outage.
+>
+> **Remote validation of the Sprint 28 repository changes is complete.**
+> Published as **PR #41** (branch `sprint-28-backup-recovery-operations`, head
+> `ce2a483c6d6651a113055459fc19deb8c2340e9d`, merge state CLEAN): all seven
+> required checks passed — `Validate (offline)`, `Integration (PostgreSQL +
+> Redis)`, `Artifacts (build + smoke)`, `Dependency audit (pnpm)`, `Secret scan
+> (Gitleaks)`, `Analyze (javascript-typescript)`, and the CodeQL rollup. One
+> non-required workflow is still owed at that head: `Deployment rehearsal`,
+> because Sprint 28 changed the deployment tooling and that workflow has no push
+> trigger — it must be dispatched manually, as in Sprint 27. Evidence:
 > [sprint-28-artifact-package.md](sprint-28-artifact-package.md).
 
 ## Audit context

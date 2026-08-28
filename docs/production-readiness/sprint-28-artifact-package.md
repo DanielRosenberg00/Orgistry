@@ -679,12 +679,57 @@ None of these was required for ORG-PR-005 closure; all are real.
 | Public HTTPS smoke | **PASS** | 9/9 |
 | Mechanism-store retirement | **PASS** | §16 |
 
-### Not run
+### Remote repository validation — published and complete
 
-| Check | Why |
+The Sprint 28 changes were published and validated remotely.
+
+| | |
 | --- | --- |
-| Remote CI / Security scans / CodeQL at a published head | The Sprint 28 changes are **uncommitted**. Publication is the operator's action |
-| Remote Deployment Rehearsal at the published head | Same — required because the deployment tooling changed |
+| Branch | `sprint-28-backup-recovery-operations` |
+| Pull request | **#41** → `main`, state OPEN, merge state **CLEAN** |
+| Verified head | **`ce2a483c6d6651a113055459fc19deb8c2340e9d`** |
+| Local `HEAD` at review time | identical to the PR head (verified, not assumed) |
+
+All **seven required checks passed** at that exact head — 7 successful, 0
+failing, 0 pending, 0 skipped, 0 cancelled:
+
+| Check | Workflow | Result | Duration |
+| --- | --- | --- | --- |
+| `Validate (offline)` | CI | **PASS** | 1m24s |
+| `Integration (PostgreSQL + Redis)` | CI | **PASS** | 1m47s |
+| `Artifacts (build + smoke)` | CI | **PASS** | 2m00s |
+| `Dependency audit (pnpm)` | Security scans | **PASS** | 14s |
+| `Secret scan (Gitleaks)` | Security scans | **PASS** | 7s |
+| `Analyze (javascript-typescript)` | CodeQL | **PASS** | 1m02s |
+| `CodeQL` (rollup) | CodeQL | **PASS** | 3s |
+
+**Remote required-check validation is therefore complete for the published
+head.** Three workflows ran on `pull_request` (CI, Security scans, CodeQL);
+those carry all seven required checks, and branch-protection ruleset `19769611`
+remains active.
+
+### Still owed remotely — Deployment Rehearsal
+
+| Check | Status | Why |
+| --- | --- | --- |
+| `Deployment rehearsal` at the published head | **NOT RUN** | Sprint 28 changed `tooling/deploy.sh` and `tooling/deploy-evidence.mjs` (the stage-6 protection preflight), and [../validation.md](../validation.md) requires a rehearsal when the deployment tooling changes. `deployment-rehearsal.yml` has **no push trigger** — weekly cron and `workflow_dispatch` only — so it does not fire on a pull request and must be dispatched manually, exactly as in Sprint 27 (run `33065548416`) |
+
+It is **not a required check**, so it does not gate the pull request, and the
+deterministic half of the changed tooling *is* covered remotely: the
+release-manifest, evidence, and platform-guard unit tests run inside
+`pnpm test` and therefore inside the required `Validate (offline)` check, which
+passed. The rehearsal also passed **locally** at this change set
+(`pnpm deploy:rehearsal`, exit 0). What is missing is the remote run at this
+exact head. Dispatch:
+
+```bash
+gh workflow run deployment-rehearsal.yml --ref sprint-28-backup-recovery-operations
+```
+
+`Data durability` was correctly **not** required: its owned surface —
+`tooling/db-backup.sh`, `db-restore-drill.sh`, `db-pitr-drill.sh`,
+`tooling/lib/pg-tools.sh`, the restore fixture, and `apps/api/src/maintenance` —
+is untouched on this branch, verified by diffing against `main`.
 
 ## 20. Security and secret-hygiene review
 
@@ -866,7 +911,7 @@ The risk-framed view of §18. Only risks that are actually present.
 | **Rate-limit alerting residual** (**ORG-PR-009**, open) | A fail-closed limiter in production would not surface to an operator | Open finding; folds into ORG-PR-007 |
 | **RPO/RTO measured on a small synthetic dataset** | Real recovery at production volume could be materially slower; a plan built on 28 s could be wrong by orders of magnitude | Explicitly labelled throughout as a staging-like baseline, never as an SLA |
 | **Provider endpoint refuses ~52% of TCP connects** | Without the bounded transport retry, roughly half of all scheduled operations would fail. With it, operations succeed — but the provider condition is outside this project's control and could worsen | Mitigated and measured (20/20 after the fix). Permanent HTTP failures still fail on the first attempt |
-| **Remote GitHub CI has not run** | The Sprint 28 changes have passed local gates only; a CI-only difference would not yet have been caught | Expected: the working tree is unpublished. Publication is the operator's action |
+| **`Deployment rehearsal` has not run remotely at the published head** | A regression in the changed deployment tooling that only manifests in the full rehearsal would not yet have been caught remotely | Reduced, not eliminated: all seven required checks passed at head `ce2a483c6d66`, the changed tooling's unit tests run inside the required `Validate (offline)` check, and the rehearsal passed locally. It is not a required check and must be dispatched manually (§19) |
 | **One object-store identity for write and restore reads** | A compromised backup credential can delete backups as well as read them | Accepted; needs provider-side bucket policy to split |
 | **Schedule belongs to one account** | Removing the operator account removes the backup schedule | Accepted consequence of needing no root |
 | **Rehearsals are operator-run, not CI-gated** | A regression in either rehearsal script is caught only at the next manual run | Accepted; their unit-testable parts are in the offline suite |

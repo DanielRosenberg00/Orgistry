@@ -22,7 +22,7 @@
   "devDependencies": {
     "@types/node": "^22.13.1",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5",
     "zod": "^3.24.1"

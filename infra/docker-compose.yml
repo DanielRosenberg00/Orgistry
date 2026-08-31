@@ -50,7 +50,7 @@ services:
       retries: 5
 
   mailpit:
-    image: axllent/mailpit:v1.30.5@sha256:b868afa176bfd6cce2323ea316cd99ccad77915e51e595748f6d786700ecf109
+    image: axllent/mailpit:v1.31.0@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24
     restart: unless-stopped
     ports:
       - '1025:1025' # SMTP

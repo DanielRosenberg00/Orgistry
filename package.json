@@ -74,7 +74,8 @@
       "esbuild"
     ],
     "overrides": {
-      "@esbuild-kit/core-utils>esbuild": "^0.25.0"
+      "@esbuild-kit/core-utils>esbuild": "^0.25.0",
+      "browserslist@<=4.28.6": ">=4.28.7"
     },
     "auditConfig": {
       "ignoreGhsas": [

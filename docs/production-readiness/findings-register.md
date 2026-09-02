@@ -462,12 +462,199 @@ observability there. It is **not** production ready. Recommended next:
 end. Final artifact:
 [sprint-28-artifact-package.md](sprint-28-artifact-package.md).
 
+### Sprint 29 (2026-08-29 — in progress; superseded by the CLOSING entry below): external email provider closure
+
+> The status lines in this entry record the sprint **while it was running**.
+> ORG-PR-002 was CLOSED on 2026-09-02 — see *Sprint 29 CLOSING* below and the
+> Resolution on the finding.
+
+[ORG-PR-002](#org-pr-002) (P1) **was Open at this point.** Phase A discovery re-read the
+implementation rather than trusting the sprint summary and confirmed that
+Sprints 16/17/18/24 had already delivered the mailer boundary, the production
+SMTP driver, the fail-closed config guard, the runtime credential source, the
+failure-mode redaction proofs, the six-family matrix, and the operator
+validation procedure.
+
+**No application change proved necessary, and none was kept.** The first
+iteration added an optional `MAIL_REPLY_TO` header; the refinement iteration
+**reverted it in full** as scope expansion. No Sprint 29 definition-of-done
+condition requires a Reply-To header, a monitored reply mailbox, or a Reply-To
+production policy, and no such capability existed before. Reply-To remains
+**not emitted**, exactly as Sprint 24 recorded it
+([rotation-runbook.md](../rotation-runbook.md#sender-domain-spf-dkim-dmarc)).
+The mailer is unchanged and remains provider-agnostic; **no provider-specific
+branching was added**.
+
+Sprint 29 did establish a **provider-selection gate** not previously stated as
+an operator decision: the smtp driver uses implicit TLS from the first byte and
+offers no STARTTLS upgrade, so a STARTTLS-only provider endpoint would fail
+closed and deliver nothing. That gate proved real: **Postmark was excluded**
+because its documented SMTP endpoints use STARTTLS and it explicitly does not
+support implicit TLS on port 465, while **Resend was selected** because it
+documents an SMTPS endpoint on port 465. STARTTLS was **not** implemented
+speculatively and no code change was required.
+
+**Transport sufficiency is now externally EVIDENCED (2026-08-29).** A
+credential-free, hostname-verifying TLS check from `orgistry-staging-01`
+completed against `smtp.resend.com:2465` — DNS, TCP, implicit-TLS handshake,
+CA-chain verification, and hostname verification all verified. **Port 465 timed
+out from that host; 2465 is the verified operational endpoint for this
+environment** (cause not established, not asserted). Staging runs
+`SMTP_PORT=2465` as runtime configuration only. This is the transport half
+alone: authentication, sender authorization, acceptance, and delivery remain
+entirely unproven.
+
+Sprint 29 also pinned the **domain-authentication identity model**, correcting
+an over-simplification introduced in the first iteration. Orgistry controls
+only `RFC5322.From` (via `MAIL_FROM_EMAIL`). The SMTP envelope sender
+(`RFC5321.MailFrom`) may be rewritten by the provider to its own bounce domain,
+and the DKIM signing domain (`d=`) is set by provider signing configuration.
+SPF authenticates the envelope identity and DKIM the `d=` domain; DMARC
+evaluates `RFC5322.From` and passes only when one of them is **aligned** under
+the published policy. Alignment therefore **cannot be inferred from
+configuration** — only a received message's `Authentication-Results` and
+`Return-Path` are authoritative.
+
+**What keeps it open is unchanged and external:** no provider account, no
+credential, no verified sending domain, no DNS records, and no readable test
+mailbox exist in this repository or any of its validation environments.
+Therefore there is **no provider-acceptance evidence, no inbox-receipt
+evidence, no received sender-identity evidence, and no SPF/DKIM/DMARC
+evidence**, and none is claimed or inferred from the local fake-server and
+Mailpit evidence. Living artifact:
+[sprint-29-artifact-package.md](sprint-29-artifact-package.md).
+
+[ORG-PR-006](#org-pr-006) (P1) **remains Open — untouched.** Sprint 29 used the
+existing runtime secret boundary (`SMTP_USERNAME`/`SMTP_PASSWORD` via env or
+`<NAME>_FILE`) and added no secrets manager, no automated rotation, and no
+rehearsed rotation. Handling an SMTP credential is not secrets management.
+
+[ORG-PR-007](#org-pr-007) (P2) **remains Open — untouched.** No metrics,
+tracing, dashboards, or alerting were added. Email validation is not
+observability closure.
+
+[ORG-PR-009](#org-pr-009) (P2) **remains Open — untouched.** The rate-limiter
+failure mode is unchanged and its residual alerting dependency still sits with
+ORG-PR-007. Email validation is not rate-limit alerting closure.
+
+[ORG-PR-005](#org-pr-005) — **remains CLOSED; a WAL health-policy false negative
+was observed 2026-09-02 and classified.** During the wrong-credential test's
+restoration the protection preflight failed closed on `local recent WAL` and
+`off-host WAL current`. Derived from `tooling/lib/backup-health.mjs`: both age
+checks are gated on `archiver.walPending` (`currentWalOffset > 512 bytes`), with
+limits `walMaxAgeMinutes` (default **15**) and `2 x 15 = 30` minutes. On a
+low-write database the first write after a long idle period flips `walPending`
+true while the last **sealed** segment is already older than the limit — and
+`archive_timeout` (**300s**, set by `pg-enable-wal-archiving.sh`) has not yet
+sealed the new segment. Nothing was broken: `archive_mode` on, **zero** archiver
+failures, spool drained, off-host segments present; `pg_switch_wal()` merely
+forced early what `archive_timeout` would have done within five minutes.
+**Classification: a false negative from an overly strict policy at the
+first-write-after-idle boundary — not a backup or PITR protection regression.**
+The residual (data in an unsealed segment is not yet off-host, an RPO bounded by
+`archive_timeout`) is inherent to WAL archiving and already the documented
+model. **ORG-PR-005 stays CLOSED.** New operational consequence worth tracking:
+now that `ORGISTRY_BACKUP_CONFIG` is wired and the check defaults to `require`,
+this false negative can **block a deployment** on a low-write environment, as it
+did here — a candidate for a narrow health-policy refinement in a later sprint.
+No fix was implemented.
+
+[ORG-PR-005](#org-pr-005) — **remains CLOSED; reconciled 2026-08-30.** The
+2026-08-30 redeploy recorded `protection: not-configured` where 2026-08-27 had
+`verified`. Read-only checks established the cause precisely, and it is **not a
+backup outage**: `ORGISTRY_BACKUP_CONFIG` is **absent from
+`/opt/orgistry/config/deploy.env`**, so `deploy.sh` defaulted the check to `off`
+and recorded `not-configured` without probing anything
+(`tooling/deploy.sh:142-143,349,365`). The programme configuration exists at
+`/opt/orgistry/config/backup.env` (mode 0600); `deploy.env` merely does not
+point at it. The **actual Sprint 28 programme is independently HEALTHY**: all
+four systemd user timers active, **0** failed units, `backup-ops.mjs health`
+**HEALTHY — 0 warnings** (five off-host recovery points, latest scheduled backup
+fresh, encryption verified, integrity digest recorded, no interrupted uploads,
+last scheduled run succeeded), `wal-health` **HEALTHY — 0 warnings**
+(`archive_mode` on, 44 WAL segments archived, zero archiver failures, none
+pending locally, spool drained, 17 segments off-host and current), and the
+catalog shows 5 encrypted logical backups, 1 encrypted PITR base backup, and 17
+archived WAL segments off-host. Correct characterisation: **the deployment's
+ongoing-protection evidence wiring is incomplete, while the backup/WAL operating
+programme is healthy** — an evidence/preflight integration gap, not failed
+backup operations. **RECONCILED 2026-09-02 — VERIFIED.** `ORGISTRY_BACKUP_CONFIG=/opt/orgistry/config/backup.env`
+was added atomically to `deploy.env` (mode `640 daniel:daniel` preserved, count
+0 → 1) and the **same** manifest redeployed: the protection preflight now runs
+and reported `backup and WAL-archive health verified`; the new record
+(`…/records/20260902T102157727Z-91664d0fd639-deploy.json`) carries
+`backupPreflight.result = taken`, `backupPreflight.protection = verified`,
+`smoke.result = passed`, `smoke.checks = 9`, and **no longer carries the
+"ongoing backup programme was not verified healthy" limitation**. Head
+`0012_shocking_warbound` and both API/web immutable identities unchanged;
+pre-deploy recovery point `orgistry-20260902T102146Z-pre-deploy.dump`. The
+obsolete `.deploy.env.pre-backupwiring.*` and
+`.runtime.env.pre-resend.J2s0rW` rollback copies were then removed and verified
+absent, with no stray copies remaining. Every future redeploy now verifies the
+programme before migrating. Historical note: restoring this pointer was
+**sequenced ahead of the failure tests** so every subsequent Sprint 29 redeploy also exercises the
+restored preflight. The value is repository-correct verbatim —
+`infra/deploy.env.example:140` already ships
+`# ORGISTRY_BACKUP_CONFIG=/opt/orgistry/config/backup.env`, exactly the
+operator's path — and is a filesystem path, not a secret. Setting it also flips
+`ORGISTRY_BACKUP_PROTECTION_CHECK` to its `require` default (`deploy.sh:143`),
+so a genuinely degraded programme would abort a future deployment **before**
+migrations, leaving the target unchanged; that is the intended safety property.
+Procedure and the observations required to call it reconciled are in the Sprint
+29 artifact §§20.4–20.5; nothing was changed in a documentation-only pass.
+**This is a deployment-evidence-integrity item, not an ORG-PR-002 email-proof
+blocker, and it does not reopen ORG-PR-005.** Do not conflate
+any of this with the pre-deploy recovery-point backup, which succeeded
+(`orgistry-20260830T125555Z-pre-deploy.dump`).
+
+### Sprint 29 CLOSING (2026-09-02): external email provider closure — COMPLETE
+
+**[ORG-PR-002](#org-pr-002) is CLOSED.** Both mandatory real-provider failure
+classes were executed on the real path with successful known-good restoration
+after each, completing the evidence chain that began with the verified positive
+delivery. Full evidence in the Resolution on the finding and in
+[sprint-29-artifact-package.md](sprint-29-artifact-package.md).
+
+Two procedural lessons are recorded rather than hidden. **Two operator-procedure
+control-flow defects** were exposed by real execution: a failed deployment masked
+by later successful commands inside a wrapper (producing a false closure banner
+while the live container still held the test credential), and a failed WAL gate
+that did not stop subsequent restoration commands. The adopted rule: **never
+rely on Bash `set -e` as the sole failure-propagation mechanism in
+safety-critical restoration procedures** — every critical gate uses explicit
+`if ! cmd; then return; fi` control flow, and the closure banner is gated on
+disk runtime, protection gate, restoration deploy, immutable identities,
+health/readiness, smoke, and live-container state together. Separately, **the
+distinction between a restored file on disk and a restored running container**
+is now permanently documented: configuration reaches the process only through a
+successful redeploy.
+
+[ORG-PR-005](#org-pr-005) **remains CLOSED.** Sprint 29 surfaced the same
+low-write first-write-after-idle WAL health-policy false negative twice — once
+with both freshness checks failing, once with only `recent WAL archived locally`
+failing while off-host age stayed inside its longer threshold. In the second
+case `archive_timeout` sealed the segment **on its own** with no operator
+rotation, which is the clearest demonstration that the backup/WAL system was
+never broken. Recorded as a health-policy edge case and a candidate for a later
+narrow refinement; no fix implemented.
+
+[ORG-PR-006](#org-pr-006), [ORG-PR-007](#org-pr-007) and
+[ORG-PR-009](#org-pr-009) **remain OPEN and untouched** — handling an SMTP
+credential is not secrets management, and email validation is neither
+observability nor rate-limit alerting closure.
+
+**Open P1 production blocker: ORG-PR-006** (was ORG-PR-002 and ORG-PR-006). The
+repository is **not** production ready: the blocker-semantics rule makes any
+unresolved P1 disqualifying. It is **not** staging ready either, but the reason
+has narrowed to one: account email now works end to end on the target, and
+**ORG-PR-007 (no observability, nothing pages anyone)** is what remains.
+
 ## Summary table
 
 | ID | Title | Domain | Class | Sev | Conf |
 | --- | --- | --- | --- | --- | --- |
 | [ORG-PR-001](#org-pr-001) | No production deployment automation (Dockerfiles/IaC/pipeline) — **Closed (Sprint 27, 2026-08-27)**: a durable staging-like target pulled immutable digests itself, deployed two gate-authorised releases with a backup preflight, one-shot migration and verified head, served real public HTTPS origins, passed public smoke 9/9 three times, and completed a real application rollback with verified running digests — all recorded in machine-generated deployment and rollback evidence | Infrastructure | Production blocker | P1 | High |
-| [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Open; materially advanced (Sprint 16 adapter + guard; Sprint 24 runtime credential source, failure-mode redaction proofs, family matrix, operator validation procedure): external delivery, inbox receipt, and sender-domain authentication all still unvalidated** | Email/Infra | Production blocker | P1 | High |
+| [ORG-PR-002](#org-pr-002) | No production email provider (Mailpit-only) — **Closed (Sprint 29, 2026-09-02)**: Resend with verified sending domain `mail.drsvp.com` (`eu-west-1`), real credential in the runtime secret boundary, deployed staging-like `smtp.resend.com:2465`, provider acceptance and `delivered`, **real external inbox receipt**, and received-message `spf=pass` / `dkim=pass` (`d=mail.drsvp.com`, exact alignment) / `dmarc=pass`; both mandatory real-provider failure classes (wrong credential; connection/provider failure) validated with successful known-good restoration after each | Email/Infra | Production blocker | P1 | High |
 | [ORG-PR-003](#org-pr-003) | Dev-default secrets accepted & `COOKIE_SECURE` unenforced under `NODE_ENV=production` — **Closed (Sprint 15)** | Secrets/Config | Production blocker | P1 | High |
 | [ORG-PR-004](#org-pr-004) | No password recovery flow — **Closed (Sprint 17)** | Account lifecycle | Product completeness gap | P1 | High |
 | [ORG-PR-005](#org-pr-005) | No database backup / PITR / tested restore — **Closed (Sprint 28, 2026-08-27)**: scheduled encrypted logical backups and continuously archived WAL from the deployed PostgreSQL into off-host DigitalOcean Spaces (`orgistry-staging-backups`, `fra1`), backup and archive health checks, a recovery-point catalog and artifact lifecycle, and **both a logical restore and a point-in-time recovery performed by retrieving artifacts back out of that storage**, with measured staging-like RPO and RTO | Backup & DR | Production blocker | P1 | High |
@@ -866,7 +1053,12 @@ Standards · Threats.
 <a id="org-pr-002"></a>
 ### ORG-PR-002 — No production email provider (Mailpit-only)
 
-> **Status: OPEN — materially advanced (Sprint 16, 2026-07-18).** The
+> **Status: CLOSED (Sprint 29, 2026-09-02).** See the **Resolution** at the end
+> of this entry for the closing evidence. The Evidence/Current behavior lines
+> below describe the **Sprint 14 audit baseline**, preserved as recorded; they no
+> longer describe the repository.
+>
+> **Superseded status line (Sprint 16, 2026-07-18): OPEN — materially advanced.** The
 > Evidence/Current behavior lines below describe the **Sprint 14 audit
 > baseline**, preserved as recorded. Sprint 16 delivered the adapter half of
 > the remediation: a shared account-mailer boundary
@@ -969,6 +1161,437 @@ Standards · Threats.
   fail-closed behaviour and a staging limitation, not a deployment defect — and
   it is not delivery evidence in any direction. Closure still requires an
   external provider, real inbox receipt, and SPF/DKIM/DMARC alignment.
+- **Progress (Sprint 29, 2026-08-29 — IN PROGRESS): Open — no application
+  change was necessary or kept, and repository sufficiency remains conditional
+  on provider selection.** Phase A
+  re-derived the implementation state from the code. Of the Sprint 29 required
+  staging-SMTP configuration surface (host, port, TLS mode, username, password,
+  from address, sender display name, reply-to), only **reply-to** was absent.
+
+  **The first iteration implemented optional `MAIL_REPLY_TO`; the refinement
+  iteration reverted it in full.** The sprint specification treats reply-to as
+  runtime configuration *if supported*, and no definition-of-done condition
+  requires a Reply-To header, a monitored reply mailbox, or a Reply-To
+  production policy. Building one where none previously existed was scope
+  expansion. Reverted: the schema variable, `Config.mail.replyTo`,
+  `SenderIdentity.replyTo`, the transport header, the factory wiring, the
+  production reserved-domain rule and the helper extracted only to support it,
+  all Reply-To tests, and the `.env.example` entry. Pre-Sprint-29 behaviour is
+  restored exactly: **Reply-To is not emitted**, as Sprint 24 already recorded
+  ([../rotation-runbook.md](../rotation-runbook.md#sender-domain-spf-dkim-dmarc)).
+
+  **Provider-selection gate recorded (new, retained).** The smtp driver uses
+  implicit TLS from the first byte and offers no STARTTLS upgrade, so an
+  endpoint that only offers STARTTLS on 587/25 will fail closed and deliver
+  nothing. Stated as a pre-provisioning decision in
+  [../email-and-verification.md](../email-and-verification.md#provider-endpoint-compatibility-gate-read-before-selecting-a-provider).
+  The existing implementation **appears sufficient for a transactional provider
+  endpoint that supports authenticated implicit TLS; final repository
+  sufficiency remains conditional on the selected provider's documented SMTP
+  requirements.** No claim is made about which providers qualify. If the
+  selected provider proves STARTTLS-only, extending the driver with an explicit
+  transport-security mode becomes an evidenced requirement — an opportunistic
+  upgrade would be downgrade-attackable and is rejected. STARTTLS was **not**
+  implemented speculatively.
+
+  **Domain-authentication identity model corrected (new, retained).** The first
+  iteration wrote that SPF and DKIM align "against `From`", which is imprecise.
+  The recorded model: Orgistry **directly configures `RFC5322.From`** (the
+  visible header, via `MAIL_FROM_EMAIL`) — the identity DMARC evaluates.
+  **`RFC5321.MailFrom`** (the SMTP envelope sender) is a distinct identity, but
+  Orgistry is not blind to it: `smtp-transport.ts` never sets nodemailer's
+  `envelope`, so under nodemailer's documented default the **initial** envelope
+  sender presented at the Orgistry → provider submission boundary is derived
+  from `MAIL_FROM_EMAIL`. That is *not* proof of the final externally observed
+  envelope identity — the provider may rewrite or substitute a
+  provider-managed or custom bounce/Return-Path domain — and the receiving
+  system's **`Return-Path`** remains the authoritative record of what it
+  actually was. **SPF** authenticates the SMTP identity
+  (normally the envelope-from domain); DMARC SPF alignment then requires that
+  authenticated domain to align with the `RFC5322.From` domain under policy.
+  **DKIM** authenticates the signature's `d=` domain; DMARC DKIM alignment
+  requires `d=` to align with `RFC5322.From` — choosing `MAIL_FROM_EMAIL` does
+  **not** by itself guarantee it, because `d=` follows the provider's signing
+  configuration. **DMARC** evaluates `RFC5322.From` and passes when at least
+  one applicable mechanism passes with an aligned identity. **`Reply-To` is not
+  a DMARC authentication identifier and is irrelevant to alignment.**
+  Consequently alignment cannot be inferred from configuration: only a received
+  message's `Authentication-Results` and `Return-Path` are authoritative.
+
+  **Real-provider failure validation is mandatory, not optional.** Local
+  fake-server evidence (`apps/api/src/modules/mail/smtp-failure-redaction.test.ts`)
+  is accepted as deterministic regression proof only. Through the real
+  staging/provider path the operator must still validate **(1) wrong SMTP
+  credential / authentication failure** and **(2) connection/provider
+  failure**, proving safe error behaviour, no credential leakage, an unaffected
+  healthy runtime, and consistent account-flow behaviour. Sender rejection,
+  recipient rejection, and provider timeout behaviour are **conditional** —
+  performed only where safely feasible, never by manufacturing conditions or
+  tripping provider abuse controls.
+
+  **Provider selected (2026-08-29): Resend — `SELECTED, NOT YET
+  PROVISIONED`.** Recorded from provider documentation only: host
+  `smtp.resend.com`, implicit-TLS/SMTPS port `465` (also `2465`; 465
+  recommended), username `resend`, credential type = Resend API key, open/click
+  tracking **disabled by default**, custom Return-Path supported (default
+  subdomain `send`, used for SPF authentication, DMARC alignment, and bounce
+  handling), Free-plan limits 3,000/month · 100/day · 3 verified domains. The
+  documented endpoint therefore **appears protocol-compatible with the existing
+  implicit-TLS transport without a code change** — resolving the §1 gate in the
+  affirmative *on documentation*, not yet on observation. Selection evidence
+  that the gate was real rather than hypothetical: **Postmark was not selected
+  for the current transport because its current documented SMTP endpoints use
+  STARTTLS and it explicitly does not support implicit TLS on port 465.** **No
+  provider-specific coupling was added** — no SDK, API client, branch, custom
+  header, webhook, or tracking header; the selection lives entirely in runtime
+  configuration and documentation.
+
+  Tracking must remain **disabled** for account-critical mail: verification,
+  recovery, invitation, and lifecycle messages carry live account tokens, and
+  click-tracking link rewriting would route those credentials through a
+  provider redirect. Delivered links must later be verified as unrewritten.
+
+  **FIRST REAL EXTERNAL EVIDENCE (2026-08-29) — transport verified from
+  `orgistry-staging-01`.** A credential-free OpenSSL check was executed from
+  the real DigitalOcean staging-like host. No credential was used, no
+  authentication occurred, and no message was sent. Five properties are now
+  **VERIFIED**: (1) DNS resolution of `smtp.resend.com` (including
+  `54.157.71.137`, `54.205.195.44`); (2) outbound TCP to port **2465**
+  (`tcp2465_exit=0`); (3) implicit-TLS handshake — `TLSv1.3`,
+  `TLS_AES_256_GCM_SHA384`, temporary key `X25519`; (4) trusted CA-chain
+  verification — `Verification: OK` under `-verify_return_error`; (5)
+  certificate **hostname** verification — `-verify_hostname smtp.resend.com`,
+  `Verified peername: *.resend.com`, peer certificate `CN = *.resend.com`,
+  ECDSA/SHA256. Process exit `openssl2465_exit=0`.
+
+  **Port 465 timed out from the DigitalOcean staging target
+  (`tcp465_exit=124`); port 2465 is the verified operational SMTPS endpoint for
+  this environment.** The cause of the 465 timeout is **not** established and is
+  not asserted — only the observed outcome is recorded. Resend documents both
+  465 and 2465 as SSL ports, so 2465 is a documented endpoint rather than a
+  workaround. Staging runtime configuration is therefore `SMTP_HOST=smtp.resend.com`,
+  `SMTP_PORT=2465` — **operational configuration only; no application change,
+  no schema change, no STARTTLS, and no provider coupling.**
+
+  This **resolves the §1 transport conditional**: the driver's implicit-TLS-only
+  posture is confirmed compatible with the selected provider in this
+  environment. It is the *transport* half only.
+
+  **SENDER DOMAIN PROVISIONED AND DNS VERIFIED (2026-08-30).** A Resend account
+  exists and the dedicated transactional subdomain **`mail.drsvp.com`** (root
+  `drsvp.com`, authoritative DNS Cloudflare, Resend region **`eu-west-1`**) is
+  reported **Verified** by the provider. Four records are published, were
+  independently resolved by the operator, and are provider-verified: SPF
+  `TXT send.mail.drsvp.com` = `v=spf1 include:amazonses.com ~all`; Return-Path
+  `MX send.mail.drsvp.com` priority 10 → `feedback-smtp.eu-west-1.amazonses.com.`;
+  DKIM `TXT resend._domainkey.mail.drsvp.com` (RSA, selector `resend`; full
+  public key deliberately not reproduced); DMARC `TXT _dmarc.mail.drsvp.com` =
+  `v=DMARC1; p=none`. The `p=none` policy is a deliberate staging observation
+  policy — no enforcement before real authentication evidence exists.
+
+  Four states are kept separate and only the first three are evidenced:
+  **published**, **publicly resolving**, **provider-verified** — and
+  **received-message authentication, which remains entirely PENDING.** No
+  SPF/DKIM/DMARC verdict is inferred from DNS. The DNS identity implies a DKIM
+  signing domain of `mail.drsvp.com`, but the **observed `d=` on a received
+  message is unverified**; likewise the published Return-Path MX indicates the
+  provider's intended bounce path, not the **final envelope identity as
+  received**.
+
+  Sender is `no-reply@mail.drsvp.com` — the repository's established `no-reply`
+  convention (`.env.example`, rotation-runbook, deployment.md,
+  `compose.production-like.yml`), not a new decision. No production web or API
+  DNS was changed.
+
+  **BLOCKING BOUNDARY FINDING (new, recorded not worked around):** the
+  application supports `SMTP_PASSWORD_FILE` and `deploy_assert_runtime_env_complete`
+  accepts the `_FILE` key form, but **`infra/compose.deploy.yml` declares no
+  `volumes:` or `secrets:` on the `api` service**, so a host secret path would
+  not exist inside the container and the loader would fail closed at boot. This
+  matches what [../deployment.md](../deployment.md) already states — `_FILE`
+  in a deployment requires "adding a read-only volume to the deployment
+  topology" — and `_FILE` is proven end to end only by
+  `tooling/artifact-smoke.sh`, which supplies its own bind mount against the
+  **Operator decision (2026-08-30): Option A** — `SMTP_PASSWORD=` in the
+  existing 0600 `runtime.env`, exactly as `JWT_SECRET` and `DATABASE_URL` are
+  handled on this host today, with **no change to `infra/compose.deploy.yml`**.
+  `_FILE` application support remains fully intact; fixing the generic
+  deployment topology belongs with the broader ORG-PR-006 secrets work unless
+  independently required. **Option A does not close ORG-PR-006** — the env file
+  is a secret *handling* boundary, not secrets management.
+
+  Two procedural corrections were made before any key exists. **(1)** The
+  installation procedure now performs an **atomic upsert** — every managed
+  `MAIL_*`/`SMTP_*` key is stripped and rewritten exactly once into a
+  same-directory temporary whose owner/group/mode are copied with
+  `chown/chmod --reference`, then `mv`-replaced — instead of a blind `tee -a`
+  append that could have produced duplicate keys and made the effective
+  configuration depend on parser semantics. No `chown root:root` assumption is
+  made, no persistent `.bak` of every runtime secret is left behind, and
+  verification computes the password length from everything after the *first*
+  `=` so a key containing `=` is measured correctly. **(2)** The redeploy path
+  is `tooling/deploy.sh` with the currently deployed manifest recovered from the
+  evidence ledger — **not** a hand-run `docker compose up api`, which was
+  incomplete: `compose.deploy.yml` interpolates the whole file and requires
+  `ORGISTRY_API_IMAGE`/`ORGISTRY_WEB_IMAGE`, which `deploy.sh` resolves from the
+  release manifest, not from `deploy.env`.
+
+  A third correction concerns evidence, not procedure: an earlier draft claimed
+  first-send evidence could be read from "API logs (`outcome: sent` /
+  `send_failed`)". **That was wrong and is retracted.** `recordRequestOutcome`
+  → `writeSecurityEvent` → `repo.insertSecurityEvent` persists a
+  **`security_events` database row**; the mail module never logs at all, by
+  design. No logging was added for sprint evidence.
+
+  A final hardening pass (2026-08-30) closed three remaining gaps in the
+  not-yet-executed installation procedure. **(i) Interruption safety:** the
+  atomic upsert now installs a `trap cleanup EXIT INT TERM` *before* the key can
+  reach the staging file, so an exit, `Ctrl-C`, `SIGTERM`, or error cannot leave
+  a secret-bearing temporary behind; the trap is guarded so it can never remove
+  the live `runtime.env` and never removes the deliberate rollback copy, an
+  empty key aborts before the live file is touched, `RESEND_KEY` is always
+  unset, and the block runs in a subshell so `set -euo pipefail` does not leak
+  into the operator's shell. **(ii) Container selection:** the digest lookup no
+  longer uses `docker compose … ps -q api`, which would have depended on the
+  very compose interpolation the redeploy analysis rejected. It now selects the
+  container by the Compose labels `com.docker.compose.project` /
+  `com.docker.compose.service` — **verified empirically against this Docker
+  engine**, reading no compose file and requiring no variables — fails loudly on
+  zero or multiple matches, and records both the image id (the identity
+  `deploy.sh` Stage 7 itself compares) and the registry digest, before and
+  after. **(iii) Failure evidence:** the requirement for a "coarse SMTP/provider
+  error log" in the mandatory failure tests is **withdrawn**, because no such
+  log exists. Failure evidence is now split into positive failure evidence
+  (`security_events` row with `outcome: send_failed`, absent provider
+  acceptance, empty mailbox, and — for the fail-closed invitation flow — the
+  surfaced API error), runtime/account-state evidence (`/health` and `/ready`
+  unaffected, state per the implementation), and a **negative** credential-leak
+  log inspection. Absence of a provider error line is an expected pass.
+
+  **CREDENTIAL INSTALLED AND DEPLOYED (2026-08-30) — VERIFIED.** A
+  least-privilege Resend key (`orgistry-staging-smtp`, *Sending access*,
+  restricted to `mail.drsvp.com`) was created; its value was never disclosed to
+  any assistant and is recorded only as `<set, length 36>`. It was installed by
+  the reviewed atomic Option A upsert into `/opt/orgistry/config/runtime.env`,
+  which already held **one occurrence each** of the mail keys pointed at the
+  local Mailpit sink (`SMTP_HOST=mailpit`, port 1025) — precisely the case a
+  blind append would have corrupted. Post-write: mode `600`, owner/group
+  `daniel:daniel` **preserved**, exactly one of each of `MAIL_DRIVER`,
+  `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `MAIL_FROM_EMAIL`, `MAIL_FROM_NAME`, **zero** `SMTP_PASSWORD_FILE`, and no
+  staging file left behind. Effective configuration:
+  `smtp.resend.com:2465`, `SMTP_USERNAME=resend`,
+  `MAIL_FROM_EMAIL=no-reply@mail.drsvp.com`.
+
+  The **same release** (`91664d0fd639…`, API digest
+  `sha256:9b79d72c045f…`) was redeployed through `tooling/deploy.sh` with
+  `/opt/orgistry/config/deploy.env`: manifest validation, digest-pinned pulls,
+  architecture check, pre-deploy recovery-point backup, migration
+  (`0012_shocking_warbound`, 13 applied), running-digest verification, and
+  **post-deployment smoke 9/9** all passed; public `/health` and `/ready` return
+  ok/ready. **API immutable digest preserved.**
+
+  **Real host layout corrected.** The observed staging paths are
+  `/opt/orgistry/deploy`, `/opt/orgistry/config/{runtime,deploy}.env`, and
+  `/opt/orgistry/evidence`, with infrastructure (PostgreSQL, Redis, Mailpit) in
+  a **separate** `orgistry-infra` Compose project. The `/etc/orgistry/…`,
+  `~/Orgistry`, and `/var/lib/orgistry/deployments` values previously carried in
+  Sprint 29 documentation were repository defaults and earlier assumptions, and
+  no longer appear as observed facts.
+
+  **FIRST REAL EXTERNAL DELIVERY — SUCCESS PATH COMPLETE (2026-08-30).** One
+  registration-completion email was triggered against the deployed application
+  and every link in the chain was observed independently. Application:
+  `POST /v1/auth/register` → HTTP 200 `{"accepted":true}` with correlation id
+  `sprint29-first-send-20260830T131057Z`, and the matching
+  `security_events` row `auth.registration_requested` (actor `anonymous`,
+  `outcome: sent`, `delivered: true`, `2026-08-30 13:11:34.730202+00`) — the
+  database row, not a log, exactly as derived. Provider: the message is present
+  in Resend from `"Orgistry" <no-reply@mail.drsvp.com>`, subject *Complete your
+  Orgistry registration*, created `2026-08-30 13:11:34.784000+00`, final event
+  **`delivered`** — recorded as two separate facts (acceptance, then delivery),
+  and acceptance is the first proof the installed credential actually
+  authenticates. Mailbox: received by a **real external Gmail mailbox** (address
+  not recorded); **placement inbox-vs-spam is NOT evidenced** and is not
+  inferred from receipt.
+
+  Received authentication, cited from `Authentication-Results`, never inferred
+  from delivery (under `p=none` a non-aligned message would still arrive):
+  **`Return-Path` domain `send.mail.drsvp.com`** — the provider *did* substitute
+  its own envelope identity, settling the §3 question empirically; **`spf=pass`**
+  authenticated against `send.mail.drsvp.com`, aligning to
+  `RFC5322.From`=`mail.drsvp.com` under **RELAXED** alignment via the shared
+  organizational domain `drsvp.com` (strict would not pass on SPF);
+  **`dkim=pass`** with **`d=mail.drsvp.com`, `s=resend`** — **EXACT** alignment
+  (a second `d=amazonses.com` provider signature also passes but is **not**
+  Orgistry-aligned and is not relied upon); **`dmarc=pass`** on
+  `header.from=mail.drsvp.com` under `p=NONE`, with both mechanisms aligned.
+  Link integrity: the raw message is `quoted-printable`, so `=3D` and trailing
+  `=` are **MIME transport encoding, not rewriting**; decoded, the URL retains
+  `https://staging.drsvp.com/auth/complete-registration#token=…` with no query,
+  fragment key `token`, and no provider tracking host — **link rewriting NOT
+  OBSERVED**, fragment token transport preserved. Token values are not recorded.
+
+  **Safety item — CLOSED.** The raw evidence message exposed the first
+  registration token outside the recipient mailbox, so that generation was
+  treated as compromised. The operator issued one further registration request
+  for the same address (`HTTP 200`, `{"accepted":true}`), which — per
+  `issuePendingRegistration`'s per-email advisory lock and `invalidatedAt` sweep
+  — retires every prior unused generation. **`first evidence token generation
+  superseded: VERIFIED`.** The replacement token is not requested, reproduced,
+  or recorded, and no second evidence message was collected. **This is no longer
+  an ORG-PR-002 blocker.**
+
+  **WRONG-CREDENTIAL FAILURE CLASS SATISFIED (2026-09-02).** Executed on the real
+  path: an intentionally invalid Resend credential was installed and the same
+  immutable release redeployed (protection `verified`, head
+  `0012_shocking_warbound`, digests unchanged, smoke 9/9). One request
+  (`sprint29-authfail-20260902T110447Z`) returned the generic `200
+  {"accepted":true}` and recorded
+  **`{"outcome":"existing_account_notice_failed","delivered":false}`** — the
+  recipient already had an account, so the flow took the **existing-account
+  guidance** branch rather than the new-registration branch. Resend showed **no
+  matching accepted/delivered message**, so the failure preceded provider
+  acceptance. Inspected API-container logs contained neither the invalid
+  credential marker nor a registration token (scope: that container, `--since
+  15m`). The binding Sprint requirement mandates a wrong-credential
+  authentication failure on the real staging/provider path proving safe error
+  behaviour, no credential leakage, healthy unrelated runtime, and consistent
+  account-flow behaviour — it does **not** name a branch or the literal verdict
+  `send_failed|false`; both branches deliver through the same account-mailer
+  seam and SMTP transport, so the authentication path exercised is identical.
+  Every mandated invariant is evidenced.
+
+  **Restoration incident recorded, not smoothed over.** The first restoration
+  redeploy **failed closed** at the backup-protection preflight (WAL health:
+  local recent WAL FAIL, off-host WAL current FAIL), aborting before migrations.
+  This exposed a split state that is now documented explicitly:
+  `runtime_env_state=NON_TEST_VALUE` on disk while
+  `live_api_smtp_state=INVALID_TEST_CREDENTIAL` in the running container —
+  **restoring the file does not update a running container; only a successful
+  redeploy does.** After `pg_switch_wal()` plus a WAL-shipper run returned
+  wal-health to HEALTHY (0 warnings, 22 off-host segments, newest
+  `00000001000000000000002B`), the same release redeployed successfully and the
+  live container was verified on the non-test credential. Known-good staging
+  restoration: **VERIFIED**.
+
+  **WRONG-CREDENTIAL CLASS CLOSED (2026-09-02).** The post-restoration proof ran
+  on the same existing-account branch: request
+  `sprint29-authfail-restored-20260902T113401Z` recorded
+  `{"outcome":"existing_account_notice_sent","delivered":false}` — the
+  repository-derived success verdict for this branch, since
+  `recordRequestOutcome` computes `delivered` as `outcome === 'sent'` (strict
+  literal equality), so `delivered=false` here is a **semantic property, not a
+  delivery failure**. External delivery was proven independently: **Resend
+  `delivered`** and **real mailbox receipt**. Cleanup then ran: `PHASE H: PASS`,
+  `authfail rollback copies remaining: 0` (consumed by restoration), all seven
+  state/evidence files removed, `SMTP_PASSWORD count=1`,
+  `SMTP_PASSWORD_FILE count=0`, `invalid credential retained: no`. No
+  wrong-credential rollback or invalid credential remains.
+
+  **Exact closure blocker — singular: the connection/provider-failure class**
+  (port-465 timeout condition) has not been performed. It is now fully prepared
+  as an eight-phase procedure that mutates **only `SMTP_PORT`** (2465 → 465),
+  keeps the real credential byte-identical (verified by `cmp` without display),
+  runs a **backup/WAL preflight with conditional low-write remediation before
+  any mutation** so the already-understood false negative cannot block either
+  deployment, uses fail-fast deploy wrappers, and asserts the live container's
+  `SMTP_PORT` separately from the file on disk.
+  All other former blockers are closed: token containment, backup-preflight
+  wiring reconciliation, obsolete rollback-copy cleanup, and now the
+  wrong-credential class are each VERIFIED. The success half is
+  done; local fake-server proofs do not satisfy the failure half. Everything
+  below about the deployment remains true but is not SMTP evidence. The transport
+  is lazy — nothing connects to Resend at boot or during readiness — so a green
+  deployment is fully consistent with a wrong credential. There is still **no
+  SMTP authentication, no provider acceptance, no inbox receipt, no observed
+  `Return-Path` or DKIM `d=`, and no SPF/DKIM/DMARC verdicts or alignment**, and
+  none is inferred from DNS, from the verified TLS transport, from the
+  deployment, or from the local fake-server and Mailpit evidence. Separately, an
+  **unreconciled backup-protection regression signal** was recorded (see the
+  Sprint 29 section). Living artifact:
+  [sprint-29-artifact-package.md](sprint-29-artifact-package.md).
+
+- **Resolution (Sprint 29, 2026-09-02): CLOSED.** Every binding closure
+  requirement is evidenced.
+
+  **Positive path.** Provider **Resend**; sending domain **`mail.drsvp.com`**
+  (region `eu-west-1`, Cloudflare DNS) verified at the provider with SPF, DKIM
+  (selector `resend`), Return-Path MX and DMARC (`v=DMARC1; p=none`) published
+  and publicly resolving. Staging-like runtime deployed with
+  `MAIL_DRIVER=smtp`, `smtp.resend.com:2465`, `SMTP_USERNAME=resend`,
+  `MAIL_FROM_EMAIL=no-reply@mail.drsvp.com`, the credential resolved through the
+  existing 0600 runtime secret boundary. Request
+  `sprint29-first-send-20260830T131057Z` → HTTP 200, `security_events`
+  `sent|true`; Resend message `be88bafc-6cd7-4370-b248-e6854848766a`,
+  final event **`delivered`**; **real external Gmail receipt VERIFIED**. Received
+  authentication, cited from `Authentication-Results`: `Return-Path` domain
+  `send.mail.drsvp.com`; **`spf=pass`** aligning to `RFC5322.From` under
+  **relaxed** alignment via the shared organizational domain `drsvp.com`;
+  **`dkim=pass`** with **`d=mail.drsvp.com`** — **exact** alignment;
+  **`dmarc=pass`**. The delivered registration URL retained its application
+  structure after quoted-printable decoding — **no provider link rewriting**.
+  The original evidence token generation was superseded by a later registration
+  request and is not a residual.
+
+  **Failure class 1 — wrong SMTP credential: SATISFIED.** Request
+  `sprint29-authfail-20260902T110447Z` on the same immutable release (commit
+  `91664d0fd639…`, digests unchanged, head `0012_shocking_warbound`, protection
+  `verified`, smoke 9/9): HTTP 200 generic acceptance,
+  **`existing_account_notice_failed|false`** — the real existing-account
+  guidance branch, **not** the new-registration branch, recorded as observed.
+  Resend: `matching accepted/delivered message: NO`. Inspected logs: no invalid
+  credential marker, no registration token (scoped to that window). Restoration
+  then proved a distinction now permanently documented: the known-good
+  `runtime.env` was on disk while the **live API still held the invalid
+  credential** — restoring a file is not restoring a runtime. After the WAL issue
+  cleared, the same release redeployed and the live container was verified on the
+  known-good credential. Post-restoration request
+  `sprint29-authfail-restored-20260902T113401Z` →
+  **`existing_account_notice_sent|false`** with **Resend `delivered`** and **real
+  mailbox receipt**; `delivered=false` is this branch's semantic
+  (`outcome === 'sent'` strict equality), not a delivery failure. Cleanup
+  `PHASE H: PASS`.
+
+  **Failure class 2 — connection/provider failure: SATISFIED.** Only `SMTP_PORT`
+  was changed, 2465 → **465**, using the previously observed real staging
+  transport condition (2465 reachable and verified-TLS; 465 times out from this
+  host — **no cause claimed**). Failure deployment
+  `…/records/20260902T120127278Z-91664d0fd639-deploy.json`: same commit, API
+  `sha256:9b79d72c045f…` and web `sha256:20dc434b7b62…` unchanged, head
+  unchanged, backup `orgistry-20260902T120104Z-pre-deploy.dump`, protection
+  `verified`, smoke 9/9, live API `SMTP_PORT=465`. Request
+  `sprint29-connfail-20260902T120300Z`: HTTP 200,
+  **`time_total 20.250115` seconds** (recorded as measured — roughly double the
+  ~10 s predicted from `MAIL_TIMEOUT_MS`; **no explanation asserted**),
+  **`existing_account_notice_failed|false`**. Resend: `matching
+  accepted/delivered message: NO`. Logs: no token, no SMTP password. Emergency
+  restoration succeeded (`…/records/20260902T120751519Z-91664d0fd639-deploy.json`,
+  protection `verified`, smoke 9/9, live API `SMTP_PORT=2465`,
+  `DANGER INTERVAL CLOSED — KNOWN-GOOD STAGING RESTORED`). Post-restoration
+  request `sprint29-connfail-restored-20260902T121031Z` →
+  **`existing_account_notice_sent|false`**, HTTP 200 in `1.456895` s, **Resend
+  `delivered`**, **mailbox received**. Cleanup `PHASE H: PASS`.
+
+  **Closure reasoning.** The specification requires *"at least one real external
+  mailbox must receive a message"* — two families cleared it (registration
+  completion; existing-account guidance). The family-matrix requirement is
+  phrased as preparing a repeatable validation path and being *capable of
+  recording* per-family evidence, both met for all six families. Requiring all
+  six to be externally delivered would expand the requirement beyond its binding
+  wording.
+
+  **Residual, recorded and NOT a blocker:** four families — password recovery,
+  email verification, email-change verification, organization invitation — have
+  no per-family external delivery evidence. All six share the one
+  `AccountMailer.deliver` seam, transport, sender identity and header-safety
+  guard that were externally proven, so the *transport* is validated for all six;
+  what is unvalidated per family is the rendered message and link as a recipient
+  sees it. Also unevidenced: inbox-vs-spam **placement** (receipt ≠ placement).
+  Both are carried into
+  [../known-limitations.md](../known-limitations.md). Bounce, complaint and
+  suppression handling remain deliberately out of scope. Living evidence:
+  [sprint-29-artifact-package.md](sprint-29-artifact-package.md).
 
 <a id="org-pr-003"></a>
 ### ORG-PR-003 — Dev-default secrets accepted & `COOKIE_SECURE` unenforced in production

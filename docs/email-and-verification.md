@@ -80,9 +80,12 @@ an append-only extra-CA seam, and a no-logging rule.
   handshake and authentication, 5xx refusals, credential-redacted failures,
   untrusted-certificate rejection, plaintext-server refusal, non-ASCII
   encoded-word subjects; plus live delivery to the local Mailpit container.
-- **No live external-provider evidence** — real-provider compatibility is
-  asserted from the above, not proven; ORG-PR-002 stays open until a real
-  external send is performed.
+- **Live external-provider evidence EXISTS (Sprint 29).** Real-provider
+  compatibility is proven, not asserted: authenticated implicit TLS to
+  `smtp.resend.com:2465`, provider acceptance and delivery, real external inbox
+  receipt, and received-message SPF/DKIM/DMARC passes with DKIM aligned exactly.
+  Both mandatory failure classes (wrong credential; connection failure) were
+  validated on the real path. **ORG-PR-002 is CLOSED.**
 
 Still rejected: provider SDKs (vendor lock-in), a plugin architecture, and
 multiple providers (all out of scope).
@@ -430,7 +433,91 @@ problem: [rotation-runbook.md](rotation-runbook.md#email-provider-incident-handl
 
 ## External provider validation
 
-**Status: NOT performed. ORG-PR-002 remains open (materially advanced).**
+**Status: PERFORMED AND VERIFIED (Sprint 29, 2026-09-02). ORG-PR-002 is
+CLOSED.**
+
+Provider **Resend**; sending domain **`mail.drsvp.com`** (`eu-west-1`);
+`smtp.resend.com:2465`. A deployed account-flow request reached **provider
+acceptance** and **`delivered`**, was **received in a real external mailbox**,
+and the received message carried **`spf=pass`** (relaxed alignment via the
+organizational domain `drsvp.com`), **`dkim=pass`** with **`d=mail.drsvp.com`**
+(**exact** alignment) and **`dmarc=pass`** — cited from `Authentication-Results`,
+never inferred from delivery. The delivered link kept its application structure
+(the raw `=3D` is quoted-printable transport encoding, **not** rewriting). Both
+mandatory failure classes — wrong credential and connection/provider failure —
+were validated on the real path, each with successful known-good restoration.
+Full evidence:
+[production-readiness/sprint-29-artifact-package.md](production-readiness/sprint-29-artifact-package.md).
+
+**Residual:** four of six families (password recovery, email verification,
+email-change verification, organization invitation) have no per-family external
+delivery evidence — the shared transport is proven for all six; the rendered
+message per family is not. Inbox-vs-spam placement was never evidenced.
+
+### Provider endpoint compatibility gate (read before selecting a provider)
+
+The `smtp` driver connects with **implicit TLS from the first byte (SMTPS,
+conventionally port 465)** and offers **no STARTTLS upgrade** — see
+`smtp-transport.ts` (`secureTransport: true`) and the driver test
+*"refuses a plaintext server (implicit TLS is unconditional for this driver)"*.
+
+This is a hard constraint on provider selection, not a preference:
+
+- A provider endpoint that offers SMTPS on 465 works as shipped.
+- A provider endpoint that **only** offers STARTTLS on 587 (or 25) **will not
+  work** with the current driver. Orgistry will fail closed — correctly, and
+  without leaking the credential — but no mail will be delivered.
+
+**Whether any particular provider satisfies this is unverified and must be read
+from that provider's own documentation** — no assumption is made here about
+what the market offers. This gate is stated up front because discovering it
+*after* provisioning a domain and credential is an expensive way to learn it.
+
+Consequently, **repository sufficiency is conditional, not settled**: the
+existing implementation appears sufficient for a transactional provider
+endpoint that supports authenticated implicit TLS, and final sufficiency
+remains conditional on the selected provider's documented SMTP requirements.
+
+If the selected provider turns out to be STARTTLS-only, that is a concrete,
+evidenced requirement to extend the driver — and the smallest correct change is
+an explicit transport-security mode in configuration, **not** an opportunistic
+upgrade (opportunistic STARTTLS is downgrade-attackable and would weaken the
+current unconditional-TLS guarantee). No such change is made speculatively.
+
+### Message identities and domain authentication
+
+Stated precisely, because collapsing these is the usual source of false
+confidence. Orgistry directly configures the first; it *influences* the second
+at the submission boundary but does not determine what the world finally sees.
+
+| Identity | What it is | Who determines it |
+|---|---|---|
+| `RFC5322.From` | The visible `From:` header — the identity **DMARC evaluates** | **Orgistry, directly**, via `MAIL_FROM_EMAIL` |
+| **Initial** `RFC5321.MailFrom` | The SMTP envelope sender (`MAIL FROM`) Orgistry presents at submission. `smtp-transport.ts` never sets nodemailer's `envelope`, so under nodemailer's documented default the envelope sender is **derived from the message `from`** — i.e. from `MAIL_FROM_EMAIL`. This is the *initial* value only, **not proof of the final envelope identity** | Orgistry indirectly (derived) |
+| **Final** `RFC5321.MailFrom` | What the provider actually transmits onward. A provider may rewrite or substitute a provider-managed or custom bounce/Return-Path domain | Provider — observed, never assumed |
+| `Return-Path` | The envelope sender as recorded by the receiving system — the authoritative record of what the final `RFC5321.MailFrom` actually was | Receiving system |
+| `Reply-To` | Not emitted by Orgistry. **Not a DMARC authentication identifier** and irrelevant to alignment | — |
+
+- **SPF** authenticates the SMTP identity — normally the
+  `RFC5321.MailFrom`/envelope-from domain. DMARC **SPF alignment** then
+  requires that SPF-authenticated domain to align with the `RFC5322.From`
+  domain under the DMARC alignment policy. SPF does **not** authenticate
+  `From` directly.
+- **DKIM** authenticates the domain in the signature's `d=` tag. DMARC **DKIM
+  alignment** requires `d=` to align with the `RFC5322.From` domain. Choosing
+  `MAIL_FROM_EMAIL` does **not** by itself guarantee DKIM alignment — the
+  provider's signing configuration determines `d=`.
+- **DMARC** evaluates the `RFC5322.From` domain and passes when at least one
+  applicable mechanism passes **with an aligned identity** under the published
+  policy.
+
+Because the **final** envelope sender and the DKIM signing domain are both
+provider behaviour, **only a received message's `Authentication-Results` and
+`Return-Path` are authoritative evidence** for any of this. Knowing that
+nodemailer derives the *initial* envelope sender from `MAIL_FROM_EMAIL` is
+useful for reasoning about the submission boundary; it is **not** evidence of
+the externally observed identity, and nothing about alignment may be inferred
+from configuration alone.
 
 No email-provider credentials, no verified sending domain, and no test inbox
 exist in this repository or any of its validation environments — confirmed for

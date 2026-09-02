@@ -680,6 +680,54 @@ no production fixes were implemented during the Sprint 14 audit itself (see
 > trigger — it must be dispatched manually, as in Sprint 27. Evidence:
 > [sprint-28-artifact-package.md](sprint-28-artifact-package.md).
 
+> **Sprint 29 COMPLETE (2026-09-02) — EXTERNAL EMAIL PROVIDER CLOSURE.
+> [ORG-PR-002](findings-register.md#org-pr-002) CLOSED.** The second P1
+> production blocker closed since Sprint 17.
+>
+> **Positive path.** Provider **Resend**; sending domain **`mail.drsvp.com`**
+> (`eu-west-1`, Cloudflare DNS) verified with SPF, DKIM (selector `resend`),
+> Return-Path MX and DMARC (`p=none`) published and resolving. Staging-like
+> runtime deployed with `MAIL_DRIVER=smtp`, `smtp.resend.com:2465`, credential in
+> the existing 0600 runtime secret boundary. One deployed account-flow request →
+> `sent|true`, Resend message `be88bafc-…` **`delivered`**, **real external Gmail
+> receipt**, and received-message **`spf=pass`** (relaxed alignment via org
+> domain `drsvp.com`), **`dkim=pass`** with **`d=mail.drsvp.com`** (**exact**
+> alignment), **`dmarc=pass`** — cited from `Authentication-Results`, never
+> inferred from delivery. The delivered link kept its application structure; the
+> raw `=3D` is quoted-printable transport encoding, **not** rewriting.
+>
+> **Both mandatory failure classes validated on the real path, each with
+> successful known-good restoration and a proven delivery afterwards.** Wrong
+> credential: `existing_account_notice_failed|false`, no provider acceptance.
+> Connection/provider failure: only `SMTP_PORT` changed 2465 → 465 (the
+> previously observed real timeout condition — **no cause claimed**), HTTP 200 in
+> **20.25 s**, `existing_account_notice_failed|false`, no provider acceptance.
+> Both restorations ended with the live container verified on the known-good
+> configuration and cleanup `PHASE H: PASS`.
+>
+> **Recorded honestly, not smoothed over.** Two restoration incidents and **two
+> operator-procedure control-flow defects** (a masked deploy failure producing a
+> false closure banner; a failed WAL gate that did not stop later restoration
+> commands). Adopted rule: **never rely on Bash `set -e` alone in
+> safety-critical restoration procedures.** The distinction between a restored
+> file on disk and a restored running container is now permanently documented.
+> **ORG-PR-005 stays CLOSED** — the WAL failures were a low-write
+> first-write-after-idle health-policy false negative in two variants, and in the
+> second `archive_timeout` sealed the segment unaided.
+>
+> **Residual, not a blocker:** four of six account-email families (password
+> recovery, email verification, email-change verification, organization
+> invitation) have no per-family external delivery evidence — all six share the
+> one externally proven `AccountMailer.deliver` seam and transport; what is
+> unvalidated per family is the rendered message as a recipient sees it.
+> Inbox-vs-spam **placement** was never evidenced.
+>
+> **Open P1 production blocker: ORG-PR-006** — the repository is **not**
+> production ready. It is **not** staging ready either, but the reason has
+> narrowed to **ORG-PR-007** (no observability; nothing pages anyone) now that
+> account email works end to end. Final artifact:
+> [sprint-29-artifact-package.md](sprint-29-artifact-package.md).
+
 ## Audit context
 
 - **Execution date:** 2026-07-02

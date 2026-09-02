@@ -44,29 +44,60 @@ These are intentional non-goals, not bugs:
   request security events are anonymous and not account-linked (the event
   schema has no subject field, and actor attribution is never overloaded) —
   see [credential-management.md](credential-management.md).
-- **Production email delivery is unproven.** Sprint 16 added a production
-  SMTP adapter (nodemailer transport; fail-closed config; see
-  [email-and-verification.md](email-and-verification.md)), and production can
-  no longer silently fall back to Mailpit. Stated capabilities: SMTP over
-  implicit TLS (SMTPS) with certificate/hostname verification and the
-  authentication mechanism negotiated by nodemailer from the server's
-  advertised capabilities (AUTH PLAIN has direct automated test evidence;
-  other mechanisms rely on nodemailer, untested here) — verified by automated
-  tests against an in-process server, plus live delivery to the local Mailpit
-  container. **No delivery through a real external provider to a real inbox
-  has been performed** (no provider credentials, no verified sending domain,
-  and no test mailbox exist in this repository or its validation environments
-  — re-confirmed in Sprint 24), so real-provider compatibility is asserted,
-  not evidenced, and **no SPF/DKIM/DMARC posture has been validated**;
-  ORG-PR-002 stays open until it is. Provider *acceptance* and real *inbox
-  receipt* are tracked as separate evidence and neither is inferred from the
-  other. The exact procedure to obtain both is in
-  [rotation-runbook.md](rotation-runbook.md#validate-external-email-delivery).
-  The driver offers no
-  STARTTLS upgrade — a provider endpoint must accept implicit-TLS
-  connections (conventionally port 465). Also intentionally absent: bounce
-  processing, complaint processing, suppression lists, marketing/bulk email,
-  templates/CMS, and notification preferences.
+- **Production email delivery is PROVEN end to end (Sprint 29), with four
+  families still externally unvalidated.** Sprint 16 added the production SMTP
+  adapter; Sprint 29 validated it against a real provider. **Resend**, sending
+  domain `mail.drsvp.com` (`eu-west-1`), `smtp.resend.com:2465`: a deployed
+  account-flow request reached provider acceptance and `delivered`, was
+  **received in a real external mailbox**, and the received message carried
+  `spf=pass` (relaxed alignment via the organizational domain `drsvp.com`),
+  `dkim=pass` with `d=mail.drsvp.com` (**exact** alignment) and `dmarc=pass`,
+  with no provider link rewriting. Both mandatory real-provider failure classes
+  — wrong credential and connection/provider failure — were validated with
+  successful known-good restoration after each. **ORG-PR-002 is CLOSED.**
+
+  **What remains unvalidated:** four of the six account-email families —
+  password recovery, email verification, email-change verification, and
+  organization invitation — have **no per-family external delivery evidence**.
+  Only registration completion and existing-account guidance were delivered to a
+  real inbox. All six share the one `AccountMailer.deliver` seam, transport,
+  sender identity and header-safety guard that were externally proven, so the
+  *transport* is validated for all six; what is unproven per family is the
+  rendered message and its link as a recipient sees it. **Inbox-vs-spam
+  placement was never evidenced** — receipt is not placement. The DMARC policy
+  is deliberately `p=none` (observation), now backed by real alignment evidence
+  should tightening be wanted. Bounce processing, complaint processing,
+  suppression lists, marketing/bulk email, templates/CMS and notification
+  preferences remain intentionally absent.
+
+- **The staging backup/WAL health policy has a low-write false negative.**
+  Sprint 29 hit it twice during restorations. On a database that has been idle,
+  the first write flips `walPending` true while the last *sealed* segment is
+  already older than `ORGISTRY_BACKUP_WAL_MAX_AGE_MINUTES` (default 15) and
+  before `archive_timeout` (300 s) seals the new one — so `recent WAL archived
+  locally`, and sometimes `off-host WAL is current`, report FAIL while archiving
+  is working normally (archive_mode on, no archiver failures, spool drained, WAL
+  present off-host). Because the deployment protection preflight now defaults to
+  `require`, **this can block a deployment**. Workaround when the signature
+  matches exactly: `SELECT pg_switch_wal();` then run the WAL shipper. Not a
+  backup or PITR regression — **ORG-PR-005 stays CLOSED** — and a candidate for
+  a narrow health-policy refinement, not fixed in Sprint 29.
+
+- **Domain authentication cannot be inferred from configuration.** Orgistry
+  directly configures `RFC5322.From` (via `MAIL_FROM_EMAIL`), and because
+  `smtp-transport.ts` never sets nodemailer's `envelope`, the *initial* SMTP
+  envelope sender presented at submission is derived from that same value. That
+  is the submission boundary only: the provider may rewrite or substitute a
+  provider-managed or custom bounce/Return-Path domain, and the DKIM signing
+  domain (`d=`) follows the provider's signing configuration. SPF authenticates
+  the envelope identity and DKIM the `d=` domain; DMARC then requires one of
+  them to **align** with the `RFC5322.From` domain. Only a received message's
+  `Authentication-Results` and `Return-Path` settle any of this. **Sprint 29
+  observed it:** the provider substituted its own envelope identity
+  (`Return-Path` domain `send.mail.drsvp.com`), SPF authenticated that domain and
+  aligned to `From` only under *relaxed* alignment via the shared organizational
+  domain `drsvp.com`, while DKIM signed with `d=mail.drsvp.com` and aligned
+  **exactly**. The model held: configuration alone would have predicted neither.
 - **No background processing.** No workers, queues, schedulers, or cron.
   Anything that would need a background job runs as an explicit one-shot
   command or is derived on read. Since Sprint 25 the retention cleanup is real,
@@ -197,7 +228,11 @@ These are intentional non-goals, not bugs:
   (all smoke is unauthenticated by design), and it is a **staging-readiness**
   limitation rather than a deployment defect. Fixing it means giving the sink a
   publicly-trusted certificate on an SMTPS port — **not** adding a provider.
-  **ORG-PR-002 remains open** and is unaffected either way
+  This paragraph describes the **Sprint 27 Mailpit-sink** configuration, which
+  Sprint 29 replaced: staging now runs `MAIL_DRIVER=smtp` against
+  `smtp.resend.com:2465` and account email works end to end there
+  (**ORG-PR-002 CLOSED**). Retained because the sink limitation still applies to
+  any environment configured that way
   ([deployment.md](deployment.md#staging-mail-model)).
 - **The public `mailpitUrl` is not a remote inbox link (staging/demo only).**
   `ORGISTRY_PUBLIC_MAILPIT_URL` defaults to `http://localhost:8025` and is

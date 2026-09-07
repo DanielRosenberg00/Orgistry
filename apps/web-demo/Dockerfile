@@ -31,7 +31,7 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @orgistry/web-demo run build
 
 # ---- Runtime stage: non-root static nginx (uid 101, listens on 8080) ----
-FROM nginxinc/nginx-unprivileged:1.31.4-alpine@sha256:c3fed6436b61d2bf2201ec032c35c000871f7ed062dea5d586bc6bf4d0fdd140
+FROM nginxinc/nginx-unprivileged:1.31.5-alpine@sha256:2ddec616f1cb58bcac057aa388f28cb81e35137641ef4226d321714499329bd1
 
 # The base image's entrypoint renders /etc/nginx/templates/*.template into
 # /etc/nginx/conf.d/ before nginx starts. The filter restricts substitution to

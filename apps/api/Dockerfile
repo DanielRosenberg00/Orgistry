@@ -15,7 +15,7 @@
 # Update procedure: docs/validation.md ("Image pinning policy").
 
 # ---- Build stage: workspace install + esbuild bundle + pruned prod deps ----
-FROM node:22.23.2-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS build
+FROM node:26.12.0-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS build
 
 # corepack activates the exact pnpm version from the root `packageManager`
 # field, keeping the container build on the same package manager as CI.
@@ -41,7 +41,7 @@ RUN pnpm --filter @orgistry/api deploy --prod --legacy --config.node-linker=hois
   && rm -rf /opt/api/node_modules/@orgistry
 
 # ---- Runtime stage: node + bundles + migrations + prod node_modules ----
-FROM node:22.23.2-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
+FROM node:26.12.0-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913
 
 ENV NODE_ENV=production
 # Map bundled stack traces back to TypeScript locations via the shipped
